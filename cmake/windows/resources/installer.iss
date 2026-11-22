@@ -3,11 +3,14 @@
 ; Installs the plugin where OBS Studio 33 and later look for third-party plugins:
 ;   C:\ProgramData\obs-studio\plugins\obs-director\obs-director.dll
 ;   C:\ProgramData\obs-studio\plugins\obs-director\data\...
-; and removes any copy left in the legacy locations, which OBS stops loading in 34.
+; removes any copy left in the legacy locations, which OBS stops loading in 34, and opens
+; TCP 4466/4468 and UDP 4467 in Windows Firewall for the local subnet only.
 ;
 ; Built by .github/scripts/Package-Windows.ps1, which passes:
 ;   /DAppVersion=<version>  /DSourceDir=<folder holding obs-director.dll and data\>
 ;   /DOutputDir=<folder>    /DOutputName=<file name without .exe>
+; and, when a code-signing certificate is set up, /DSign plus /Sdirector=<sign command $f>,
+; which signs the installer and its uninstaller.
 
 #ifndef AppVersion
   #error AppVersion is required
@@ -27,11 +30,18 @@ AppName={#DisplayName}
 AppVersion={#AppVersion}
 AppVerName={#DisplayName} {#AppVersion}
 AppPublisher=SharpTalons
+AppCopyright=Copyright (C) 2026 SharpTalons. Licensed under the GNU GPL v2 or later.
 AppPublisherURL=https://github.com/SharpTalons/OBS-Director
 AppSupportURL=https://github.com/SharpTalons/OBS-Director/issues
 AppUpdatesURL=https://github.com/SharpTalons/OBS-Director/releases
 VersionInfoVersion={#AppVersion}
-VersionInfoDescription={#DisplayName} plugin for OBS Studio
+VersionInfoTextVersion={#AppVersion}
+VersionInfoProductName={#DisplayName}
+VersionInfoProductVersion={#AppVersion}
+VersionInfoProductTextVersion={#AppVersion}
+VersionInfoCompany=SharpTalons
+VersionInfoCopyright=Copyright (C) 2026 SharpTalons
+VersionInfoDescription={#DisplayName} plugin for OBS Studio setup
 ; OBS decides the location, so the person isn't asked for one.
 DefaultDirName={commonappdata}\obs-studio\plugins\{#PluginName}
 DisableDirPage=yes
@@ -51,13 +61,21 @@ OutputBaseFilename={#OutputName}
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
+SetupIconFile=obs-director.ico
 UninstallDisplayName={#DisplayName}
+UninstallDisplayIcon={uninstallexe}
+#ifdef Sign
+; Signs this installer and the uninstaller it writes. The plugin DLL is signed before this runs.
+SignTool=director
+SignedUninstaller=yes
+#endif
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Messages]
-WelcomeLabel2=This installs the [name/ver] plugin for OBS Studio {#MinObsMajor} or later.%n%nPlease close OBS before you continue.
+WelcomeLabel2=This installs the [name/ver] plugin for OBS Studio {#MinObsMajor} or later.%n%nIt lets the OBS Director app on your phone listen to OBS, start and stop the recording and mark clips.%n%nPlease close OBS before you continue.
+FinishedLabel=[name] is installed.%n%nOpen OBS, then tap this PC in the OBS Director app on your phone. The first time, OBS asks you to allow the phone.
 
 [InstallDelete]
 ; Legacy Program Files location (not loaded from OBS 34 onwards).
@@ -72,6 +90,21 @@ Type: filesandordirs; Name: "{app}\data"
 Source: "{#SourceDir}\{#PluginName}.dll"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceDir}\data\*"; DestDir: "{app}\data"; Flags: ignoreversion recursesubdirs createallsubdirs
 
+[Run]
+; Let phones on the local network reach the plugin, whatever Windows calls this network
+; (Private or Public). Only the local subnet, only these ports. Old rules are replaced first.
+Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""OBS Director (control and video)"""; Flags: runhidden; StatusMsg: "Allowing phones on this network to connect..."
+Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""OBS Director (discovery)"""; Flags: runhidden
+Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall add rule name=""OBS Director (control and video)"" dir=in action=allow protocol=TCP localport=4466,4468 remoteip=localsubnet profile=any description=""Lets OBS Director phones on this network connect to OBS."""; Flags: runhidden
+Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall add rule name=""OBS Director (discovery)"" dir=in action=allow protocol=UDP localport=4467 remoteip=localsubnet profile=any description=""Lets OBS Director phones on this network find this PC."""; Flags: runhidden
+
+; Open OBS at the end if the person wants, as themselves rather than as administrator.
+Filename: "{code:ObsExe}"; WorkingDir: "{code:ObsBinDir}"; Description: "Start OBS Studio"; Flags: postinstall nowait skipifsilent runasoriginaluser; Check: ObsInstalled
+
+[UninstallRun]
+Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""OBS Director (control and video)"""; Flags: runhidden; RunOnceId: "FirewallControl"
+Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""OBS Director (discovery)"""; Flags: runhidden; RunOnceId: "FirewallDiscovery"
+
 [UninstallDelete]
 Type: dirifempty; Name: "{app}"
 
@@ -84,6 +117,29 @@ begin
     'DisplayVersion', Result) then
     RegQueryStringValue(HKLM32, 'SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\OBS Studio',
       'DisplayVersion', Result);
+end;
+
+{ Where OBS is installed, e.g. 'C:\Program Files\obs-studio'; '' if not found. }
+function ObsDir(): String;
+begin
+  Result := '';
+  if not RegQueryStringValue(HKLM64, 'SOFTWARE\OBS Studio', '', Result) then
+    RegQueryStringValue(HKLM32, 'SOFTWARE\OBS Studio', '', Result);
+end;
+
+function ObsBinDir(Param: String): String;
+begin
+  Result := AddBackslash(ObsDir()) + 'bin\64bit';
+end;
+
+function ObsExe(Param: String): String;
+begin
+  Result := ObsBinDir('') + '\obs64.exe';
+end;
+
+function ObsInstalled(): Boolean;
+begin
+  Result := (ObsDir() <> '') and FileExists(ObsExe(''));
 end;
 
 function MajorOf(Version: String): Integer;

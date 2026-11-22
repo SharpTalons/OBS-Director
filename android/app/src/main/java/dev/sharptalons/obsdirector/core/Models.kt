@@ -65,6 +65,8 @@ data class FoundPc(
     val obs: String = "",
     val plugin: String = "",
     val lastSeen: Long = System.currentTimeMillis(),
+    /** The PC's own ID from its beacon, so one PC heard on two of its adapters is listed once. */
+    val id: String = "",
 )
 
 /** What the plugin reports a few times a second. */

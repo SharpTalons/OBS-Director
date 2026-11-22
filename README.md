@@ -35,15 +35,19 @@ The plugin is for Windows only.
 3. Follow the steps. The installer puts the plugin where OBS 33 and later look for plugins, `C:\ProgramData\obs-studio\plugins\obs-director`, and removes any older copy from the legacy locations.
 4. Open OBS. You should now see **Tools, OBS Director** in the menu and an **OBS Director** dock (turn it on under **Docks** if it's hidden).
 
-To update, run the newer installer the same way. To remove the plugin, use **Settings, Apps, Installed apps, OBS Director, Uninstall**. Your PIN is kept, so phones you've paired still connect after an update.
+To update, run the newer installer the same way. To remove the plugin, use **Settings, Apps, Installed apps, OBS Director, Uninstall**. Phones you've allowed are remembered, so they still connect after an update.
 
-Windows may show "Windows protected your PC" because the installer isn't code-signed yet. Choose **More info**, then **Run anyway**.
+The installer also opens Windows Firewall for the plugin, for your local network only, so you don't have to. On the last page you can tick **Start OBS Studio**.
+
+If the release notes say the installer isn't code-signed, Windows may show "Windows protected your PC". Choose **More info**, then **Run anyway**.
 
 ### 2. Let the phone reach the PC
 
 The plugin uses TCP 4466 (control), UDP 4467 (finding the PC) and TCP 4468 (live picture).
 
-The first time OBS starts with the plugin, Windows asks whether to allow OBS on networks. Allow it on **private** networks. If you missed the prompt, allow OBS in **Windows Security, Firewall & network protection, Allow an app through firewall**, and make sure your Wi-Fi is set to a private network (**Settings, Network & internet, Wi-Fi**, your network, **Private network**).
+The installer allows these through Windows Firewall from your local network, whether Windows calls the network Private or Public. There's nothing to set up.
+
+If Windows ever asked about OBS and someone pressed **Cancel**, Windows may have added a rule that **blocks** OBS, and a block rule wins over the installer's. To fix it, open **Windows Security, Firewall & network protection, Advanced settings, Inbound Rules**, and delete any rule for **OBS Studio** or **obs64** with a red block sign.
 
 Keep these ports on your local network. Don't forward them to the internet.
 
@@ -57,22 +61,27 @@ For clips to be written into the recording as chapters, set OBS to record in **H
 2. Open it. The first time, Android asks you to allow installs from your browser or file manager; allow it, then install.
 3. After that, the app updates itself.
 
-### 5. Pair the phone
+### 5. Connect the phone
 
-1. In OBS, open **Tools, OBS Director**. It shows the PIN, the PC's name and its address.
-2. In the app, tap the **connect icon** at the top right. (The first time you open the app, this pop-up opens by itself.)
-3. Pick the PC from the list. If it isn't there, press **Search**, or tap **Enter the IP address yourself** and type the address OBS shows.
-4. Enter the PIN and press **Connect**. The pop-up closes once you're connected.
+1. Open OBS on the PC.
+2. In the app, tap the **connect icon** at the top right. (The first time you open the app, this pop-up opens by itself.) It lists the PCs on your network by name, with each one's IP address.
+3. **Tap your PC.** That's all on the phone. If your PC isn't listed, press **Search**, or tap **Enter the IP address yourself** and type the address from **Tools, OBS Director** in OBS.
+4. The first time, OBS on the PC asks **Allow "your phone" to connect?** Press **Allow**. The app says "Waiting for Allow in OBS" until someone does.
 
-Volunteers see your phone's name in the OBS dock while you're connected. To change that name, open **Settings, Connection** in the app. Next time, the app remembers the PC and the PIN, so connecting is one tap on **Connect**.
+After that, the phone connects with one tap, and OBS doesn't ask again. When the app opens and isn't connected, **Connect to <your PC>** on the Monitor screen reconnects in one tap.
 
-To stop a device from connecting again, press **New PIN** under **Tools, OBS Director**.
+Volunteers see your phone's name in the OBS dock while you're connected. To change that name, open **Settings, Connection** in the app.
+
+**Tools, OBS Director** in OBS shows the PC's address and lists the phones you've allowed. Select one and press **Remove** to stop it connecting; it would have to be allowed again.
 
 ### Troubleshooting
 
 - **The PC doesn't appear in the app**: check that both are on the same network and press **Search** in the connect pop-up. If it still isn't listed, tap **Enter the IP address yourself** and type the address from **Tools, OBS Director**. Some guest or office networks block devices from seeing each other; use a different network if so.
-- **"That PIN doesn't match"**: check the PIN in **Tools, OBS Director**. After too many wrong PINs the plugin makes you wait before trying again, and may make a new PIN.
-- **Connects, but no sound or picture**: the firewall is letting the control channel through but not UDP 4467 or TCP 4468. Check step 2.
+- **"Couldn't reach the PC"**: run the latest installer on the PC (it opens the firewall), check for an OBS block rule (step 2), and make sure the phone and PC are on the same network. Some guest or venue Wi-Fi keeps devices apart; use another network or a phone hotspot if so.
+- **"OBS on this PC said no"**: someone pressed **Deny**. Wait a minute, tap the PC again, and press **Allow** in OBS this time.
+- **Nothing appears in OBS when you tap the PC**: the Allow question may be behind the OBS window; check the taskbar.
+- **The IP in the app differs from OBS**: your PC is on more than one network (for example Wi-Fi and Ethernet). The app shows the address your phone can actually reach; once the phone has searched or connected, OBS shows that same address.
+- **Connects, but no sound or picture**: the firewall is letting the control channel through but not TCP 4468 or the audio. Check step 2.
 - **No chapters in the recording**: the recording format isn't Hybrid MP4 (step 3).
 - **The plugin doesn't appear in OBS**: check that OBS is version 33 or later (**Help, About**), then run the installer again.
 

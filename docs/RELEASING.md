@@ -51,4 +51,28 @@ The plugin is built for Windows only. [`cmake/windows/resources/installer.iss`](
 
 Keep the installer's `AppId` unchanged: Windows uses it to match upgrades and the uninstaller.
 
-The installer is not code-signed yet, so Windows SmartScreen warns on first run. To sign it, add a code-signing certificate as Actions secrets and a `signtool` step after `Package-Windows.ps1`.
+The installer also adds two Windows Firewall rules (TCP 4466 and 4468, UDP 4467; local subnet only) and removes them on uninstall, and offers to start OBS when it finishes.
+
+## Windows code signing
+
+Releases built from `main` sign the plugin DLL, the installer and its uninstaller with [Azure Artifact Signing](https://learn.microsoft.com/en-us/azure/artifact-signing/) (formerly Trusted Signing; about US$10 a month), as soon as these six repository secrets exist. Until then the installer is built unsigned, the build shows a warning, and the release notes tell people how to get past SmartScreen. Pull requests are never signed.
+
+| Secret | Value |
+| --- | --- |
+| `ARTIFACT_SIGNING_ENDPOINT` | the account's regional endpoint, for example `https://eus.codesigning.azure.net` (it must match the account's region) |
+| `ARTIFACT_SIGNING_ACCOUNT` | the Artifact Signing account name |
+| `ARTIFACT_SIGNING_PROFILE` | the certificate profile name |
+| `AZURE_TENANT_ID` | the Microsoft Entra tenant ID |
+| `AZURE_CLIENT_ID` | an app registration (service principal) allowed to sign |
+| `AZURE_CLIENT_SECRET` | that app registration's client secret |
+
+To set it up once:
+
+1. In the Azure portal, create an **Artifact Signing** account and finish **identity validation** (for yourself, or for an organisation). Microsoft checks who you are; this can take a few days.
+2. In that account, create a **Public Trust** certificate profile.
+3. In Microsoft Entra ID, create an app registration with a client secret, and give it the **Artifact Signing Certificate Profile Signer** role on the account.
+4. Add the six secrets above under **Settings, Secrets and variables, Actions**, then push to `main`.
+
+`Package-Windows.ps1` fetches the signing client (`Microsoft.ArtifactSigning.Client`) and SignTool (`Microsoft.Windows.SDK.BuildTools`) from NuGet, signs with SHA-256 and a Microsoft timestamp, and checks the signatures with `signtool verify` before anything is published.
+
+Other certificate sources (a certificate on a cloud HSM, or [SignPath's free signing for open-source projects](https://signpath.org/)) can replace the signing step in `Package-Windows.ps1`; Inno Setup only needs a sign command passed as `/Sdirector=…`.

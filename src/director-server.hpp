@@ -14,9 +14,12 @@ the Free Software Foundation; either version 2 of the License, or
 #include <util/platform.h>
 
 #include <QElapsedTimer>
+#include <QHostAddress>
 #include <QHash>
 #include <QJsonObject>
+#include <QList>
 #include <QObject>
+#include <QPointer>
 #include <QStringList>
 #include <QTimer>
 
@@ -26,13 +29,14 @@ class QTcpServer;
 class QTcpSocket;
 class QUdpSocket;
 class DeskDock;
+class QMessageBox;
 class UdpAudio;
 class VideoPreview;
 
 /*
  * The plugin's side of OBS Director (see docs/PROTOCOL.md):
- *   - TCP 4466: newline-delimited JSON control channel, PIN-paired
- *   - UDP 4467: discovery beacon, broadcast every 2 s
+ *   - TCP 4466: newline-delimited JSON control channel; a phone is approved once in OBS
+ *   - UDP 4467: discovery beacon, broadcast every 2 s, and answers to probes
  *   - UDP to the device: program mix as PCM (UdpAudio)
  *   - TCP 4468: H.264 live output frames, opened with a token from video.start
  */
@@ -43,21 +47,35 @@ public:
 	static constexpr quint16 kControlPort = 4466;
 	static constexpr quint16 kBeaconPort = 4467;
 	static constexpr quint16 kVideoPort = 4468;
-	static constexpr int kProtocol = 1;
+	static constexpr int kProtocol = 2; /* 2: approve-once pairing (deviceId), no PIN */
 
 	explicit DirectorServer(DeskDock *dock, QObject *parent = nullptr);
 	~DirectorServer() override;
 
 	void handleFrontendEvent(enum obs_frontend_event event);
 
-	QString pin() const { return currentPin; }
-	void newPin();
-	/* the one address phones should use: the PC's main LAN address */
+	/* a phone someone pressed Allow for; it connects without asking again */
+	struct TrustedDevice {
+		QString id;
+		QString name;
+		qint64 approvedAt = 0;
+	};
+	QList<TrustedDevice> trustedDevices() const { return trusted; }
+	void forgetDevice(const QString &id);
+	void forgetAllDevices();
+	/* the one address to show and advertise: the one phones have reached this PC on,
+	 * or before any phone has, the PC's main LAN address */
+	QString advertisedAddress() const;
 	QString primaryAddress() const;
 	QString pcName() const;
 
+signals:
+	void devicesChanged();
+	void addressChanged();
+
 private slots:
 	void onNewConnection();
+	void onBeaconReadyRead();
 	void onVideoConnection();
 	void sendStatus();
 	void sendBeacon();
@@ -66,7 +84,10 @@ private:
 	struct Client {
 		QTcpSocket *sock = nullptr;
 		bool authed = false;
+		bool pending = false; /* waiting for Allow or Deny in OBS */
+		QPointer<QMessageBox> prompt;
 		QString device;
+		QString deviceId;
 		QString ip;
 		quint16 audioPort = 0;
 		bool listening = false;
@@ -100,18 +121,25 @@ private:
 	QHash<QTcpSocket *, Client> clients;
 	std::unique_ptr<UdpAudio> audio;
 	std::unique_ptr<VideoPreview> preview;
-	QString currentPin;
-	int badPinCount = 0;
+	QList<TrustedDevice> trusted;
+	QString pcId;         /* stable, so a phone can tell one PC heard on two adapters is one PC */
+	QString phoneAddress; /* this PC's address on the network phones are on */
+	void notePhoneSeen(const QHostAddress &phone, const QHostAddress &local = QHostAddress());
 
-	/* wrong-PIN backoff per address, so the 4-digit PIN can't be guessed by brute force */
-	struct Lockout {
-		int failures = 0;
-		qint64 until = 0;
-	};
-	QHash<QString, Lockout> lockouts;
+	/* after Deny (or no answer), an address waits before it may ask again */
+	QHash<QString, qint64> lockouts;
 	bool lockedOut(const QString &ip);
-	void recordBadPin(const QString &ip);
+	void lockOut(const QString &ip, qint64 ms);
 	int unpairedCount() const;
+	int openPrompts() const;
+	bool isTrusted(const QString &id) const;
+	void askApproval(Client &c);
+	void trust(const Client &c);
+	void admit(Client &c);
+	void refuse(Client &c, const char *code, const QString &message, qint64 lockMs);
+	QByteArray beaconPayload() const;
+	qint64 probeWindowStart = 0;
+	int probeReplies = 0;
 
 	/* who last asked to start or stop the recording, so the app can tell "it wasn't you" */
 	QString pendingRecordBy;

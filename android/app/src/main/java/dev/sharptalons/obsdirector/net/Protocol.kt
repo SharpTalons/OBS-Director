@@ -9,7 +9,7 @@ import kotlinx.serialization.json.jsonPrimitive
 
 /** Constants and parsing for the OBS Director protocol (docs/PROTOCOL.md). */
 object Protocol {
-    const val VERSION = 1
+    const val VERSION = 2
     const val CONTROL_PORT = 4466
     const val BEACON_PORT = 4467
     const val VIDEO_PORT = 4468

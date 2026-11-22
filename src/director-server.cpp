@@ -24,8 +24,15 @@ the Free Software Foundation; either version 2 of the License, or
 #include <QFileInfo>
 #include <QHostAddress>
 #include <QHostInfo>
+#include <QApplication>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QMainWindow>
+#include <QMessageBox>
+#include <QPushButton>
+#include <QRegularExpression>
+#include <QUuid>
+#include <QNetworkDatagram>
 #include <QNetworkInterface>
 #include <QRandomGenerator>
 #include <QTcpServer>
@@ -64,7 +71,7 @@ void put64(QByteArray &b, qint64 v)
 		b.append(char((quint64(v) >> (8 * i)) & 0xff));
 }
 
-/* Compares without stopping at the first difference, so timing says nothing about the PIN. */
+/* Compares without stopping at the first difference, so timing says nothing about a phone ID. */
 bool sameSecret(const QString &a, const QString &b)
 {
 	const QByteArray x = a.toUtf8(), y = b.toUtf8();
@@ -77,8 +84,12 @@ bool sameSecret(const QString &a, const QString &b)
 }
 
 constexpr int kMaxUnpaired = 8;
-constexpr int kFreeTries = 3;
-constexpr qint64 kMaxLockoutMs = 5 * 60 * 1000;
+constexpr int kMaxPrompts = 3;              /* Allow/Deny prompts open at once */
+constexpr int kMaxTrusted = 50;             /* approved phones remembered */
+constexpr qint64 kApprovalWaitMs = 120000;  /* how long a phone waits for an answer */
+constexpr qint64 kDeniedWaitMs = 60000;     /* after Deny, before that address may ask again */
+constexpr qint64 kUnansweredWaitMs = 30000; /* after no answer */
+constexpr int kMaxProbeRepliesPerSec = 20;
 
 } // namespace
 
@@ -118,6 +129,12 @@ DirectorServer::DirectorServer(DeskDock *d, QObject *parent)
 
 	connect(&statusTimer, &QTimer::timeout, this, &DirectorServer::sendStatus);
 	statusTimer.start(250);
+	/* Phones can also ask "who's there?" on the beacon port, to name a PC typed in by
+	 * address and to answer a Search at once. */
+	if (beacon->bind(QHostAddress::AnyIPv4, kBeaconPort, QUdpSocket::ShareAddress | QUdpSocket::ReuseAddressHint))
+		connect(beacon, &QUdpSocket::readyRead, this, &DirectorServer::onBeaconReadyRead);
+	else
+		obs_log(LOG_WARNING, "could not listen on UDP %d for probes; the beacon still works", kBeaconPort);
 	connect(&beaconTimer, &QTimer::timeout, this, &DirectorServer::sendBeacon);
 	beaconTimer.start(2000);
 	sendBeacon();
@@ -156,19 +173,34 @@ DirectorServer::~DirectorServer()
 		os_cpu_usage_info_destroy(cpu);
 }
 
-/* ---------------- config: the pairing PIN ---------------- */
+/* ---------------- config: approved phones ---------------- */
 
 void DirectorServer::loadConfig()
 {
 	char *path = obs_module_config_path("config.json");
 	obs_data_t *data = path ? obs_data_create_from_json_file_safe(path, "bak") : nullptr;
-	if (data) {
-		currentPin = QString::fromUtf8(obs_data_get_string(data, "pin"));
-		obs_data_release(data);
-	}
 	bfree(path);
-	if (currentPin.size() != 4)
-		newPin();
+	if (data)
+		pcId = QString::fromUtf8(obs_data_get_string(data, "pcId"));
+	if (pcId.isEmpty()) {
+		pcId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+		saveConfig();
+	}
+	if (!data)
+		return;
+	obs_data_array_t *arr = obs_data_get_array(data, "devices");
+	for (size_t i = 0, n = arr ? obs_data_array_count(arr) : 0; i < n; i++) {
+		obs_data_t *d = obs_data_array_item(arr, i);
+		TrustedDevice t;
+		t.id = QString::fromUtf8(obs_data_get_string(d, "id"));
+		t.name = QString::fromUtf8(obs_data_get_string(d, "name"));
+		t.approvedAt = obs_data_get_int(d, "approvedAt");
+		if (!t.id.isEmpty())
+			trusted << t;
+		obs_data_release(d);
+	}
+	obs_data_array_release(arr);
+	obs_data_release(data);
 }
 
 void DirectorServer::saveConfig()
@@ -182,16 +214,44 @@ void DirectorServer::saveConfig()
 	if (!path)
 		return;
 	obs_data_t *data = obs_data_create();
-	obs_data_set_string(data, "pin", currentPin.toUtf8().constData());
+	obs_data_set_string(data, "pcId", pcId.toUtf8().constData());
+	obs_data_array_t *arr = obs_data_array_create();
+	for (const TrustedDevice &t : trusted) {
+		obs_data_t *d = obs_data_create();
+		obs_data_set_string(d, "id", t.id.toUtf8().constData());
+		obs_data_set_string(d, "name", t.name.toUtf8().constData());
+		obs_data_set_int(d, "approvedAt", t.approvedAt);
+		obs_data_array_push_back(arr, d);
+		obs_data_release(d);
+	}
+	obs_data_set_array(data, "devices", arr);
+	obs_data_array_release(arr);
 	obs_data_save_json_safe(data, path, "tmp", "bak");
 	obs_data_release(data);
 	bfree(path);
 }
 
-void DirectorServer::newPin()
+void DirectorServer::forgetDevice(const QString &id)
 {
-	currentPin = QString("%1").arg(QRandomGenerator::global()->bounded(10000), 4, 10, QChar('0'));
+	for (int i = trusted.size() - 1; i >= 0; i--)
+		if (trusted[i].id == id)
+			trusted.removeAt(i);
 	saveConfig();
+	/* a forgotten phone that's connected now is let go at once */
+	for (auto it = clients.begin(); it != clients.end(); ++it)
+		if (it->authed && it->deviceId == id)
+			it->sock->disconnectFromHost();
+	emit devicesChanged();
+}
+
+void DirectorServer::forgetAllDevices()
+{
+	trusted.clear();
+	saveConfig();
+	for (auto it = clients.begin(); it != clients.end(); ++it)
+		if (it->authed)
+			it->sock->disconnectFromHost();
+	emit devicesChanged();
 }
 
 namespace {
@@ -255,35 +315,199 @@ QString DirectorServer::primaryAddress() const
 	return fallback;
 }
 
+QString DirectorServer::advertisedAddress() const
+{
+	/* Keep showing the address phones reached us on while this PC still has it. */
+	if (!phoneAddress.isEmpty())
+		for (const QHostAddress &a : QNetworkInterface::allAddresses())
+			if (ipv4Of(a) == phoneAddress)
+				return phoneAddress;
+	return primaryAddress();
+}
+
+void DirectorServer::notePhoneSeen(const QHostAddress &phone, const QHostAddress &local)
+{
+	/* Which of this PC's addresses is on the phone's network? */
+	QString mine = local.isNull() ? QString() : ipv4Of(local);
+	if (mine.isEmpty() || mine == QLatin1String("0.0.0.0")) {
+		QHostAddress p(ipv4Of(phone));
+		for (const QNetworkInterface &iface : QNetworkInterface::allInterfaces())
+			for (const QNetworkAddressEntry &e : iface.addressEntries())
+				if (e.ip().protocol() == QAbstractSocket::IPv4Protocol && e.prefixLength() > 0 &&
+				    p.isInSubnet(e.ip(), e.prefixLength()))
+					mine = e.ip().toString();
+	}
+	if (mine.isEmpty() || mine == phoneAddress)
+		return;
+	phoneAddress = mine;
+	emit addressChanged();
+}
+
 QString DirectorServer::pcName() const
 {
 	QString n = QHostInfo::localHostName();
 	return n.isEmpty() ? QStringLiteral("OBS PC") : n;
 }
 
-/* ---------------- pairing protection ---------------- */
+/* ---------------- pairing: approve once in OBS ---------------- */
 
 bool DirectorServer::lockedOut(const QString &ip)
 {
 	auto it = lockouts.find(ip);
-	return it != lockouts.end() && QDateTime::currentMSecsSinceEpoch() < it->until;
+	return it != lockouts.end() && QDateTime::currentMSecsSinceEpoch() < it.value();
 }
 
-void DirectorServer::recordBadPin(const QString &ip)
+void DirectorServer::lockOut(const QString &ip, qint64 ms)
 {
-	Lockout &l = lockouts[ip];
-	l.failures++;
-	if (l.failures > kFreeTries) {
-		/* 2 s, 4 s, 8 s ... up to 5 minutes between guesses from this address */
-		qint64 wait = qMin<qint64>(kMaxLockoutMs, 1000LL << qMin(l.failures - kFreeTries, 20));
-		l.until = QDateTime::currentMSecsSinceEpoch() + wait;
-	}
+	qint64 now = QDateTime::currentMSecsSinceEpoch();
+	lockouts[ip] = now + ms;
 	if (lockouts.size() > 256) {
-		/* forget addresses whose lockout has passed, so the table can't grow without end */
-		qint64 now = QDateTime::currentMSecsSinceEpoch();
+		/* forget addresses whose wait has passed, so the table can't grow without end */
 		for (auto it = lockouts.begin(); it != lockouts.end();)
-			it = (it->until < now) ? lockouts.erase(it) : std::next(it);
+			it = (it.value() < now) ? lockouts.erase(it) : std::next(it);
 	}
+}
+
+int DirectorServer::openPrompts() const
+{
+	int n = 0;
+	for (auto it = clients.constBegin(); it != clients.constEnd(); ++it)
+		if (it->pending)
+			n++;
+	return n;
+}
+
+bool DirectorServer::isTrusted(const QString &id) const
+{
+	bool found = false;
+	for (const TrustedDevice &t : trusted)
+		found |= sameSecret(t.id, id); /* no early exit: timing says nothing about the list */
+	return found;
+}
+
+void DirectorServer::trust(const Client &c)
+{
+	if (isTrusted(c.deviceId))
+		return;
+	TrustedDevice t;
+	t.id = c.deviceId;
+	t.name = c.device;
+	t.approvedAt = QDateTime::currentMSecsSinceEpoch();
+	trusted << t;
+	while (trusted.size() > kMaxTrusted)
+		trusted.removeFirst();
+	saveConfig();
+	emit devicesChanged();
+}
+
+void DirectorServer::refuse(Client &c, const char *code, const QString &message, qint64 lockMs)
+{
+	QJsonObject e;
+	e["type"] = "error";
+	e["code"] = code;
+	e["message"] = message;
+	send(c.sock, e);
+	if (lockMs > 0)
+		lockOut(c.ip, lockMs);
+	c.pending = false;
+	if (c.prompt) {
+		QMessageBox *box = c.prompt;
+		c.prompt = nullptr;
+		box->close();
+	}
+	c.sock->disconnectFromHost();
+}
+
+void DirectorServer::askApproval(Client &c)
+{
+	for (auto it = clients.constBegin(); it != clients.constEnd(); ++it)
+		if (it->pending && (it->ip == c.ip || it->deviceId == c.deviceId))
+			return refuse(c, "busy", tr("This phone is already waiting for someone to press Allow in OBS."),
+				      0);
+	if (openPrompts() >= kMaxPrompts)
+		return refuse(c, "busy", tr("OBS is already asking about other phones. Try again in a moment."), 0);
+
+	c.pending = true;
+	QJsonObject p;
+	p["type"] = "pending";
+	p["message"] = tr("Waiting for someone to press Allow in OBS on %1.").arg(pcName());
+	send(c.sock, p);
+
+	auto *main = static_cast<QWidget *>(obs_frontend_get_main_window());
+	auto *box = new QMessageBox(main);
+	box->setWindowTitle(QStringLiteral("OBS Director"));
+	box->setIcon(QMessageBox::Question);
+	box->setTextFormat(Qt::PlainText); /* the name comes from the phone */
+	box->setText(tr("Allow \"%1\" to connect?").arg(c.device));
+	box->setInformativeText(
+		tr("A phone at %1 wants to connect. It will be able to start and stop the recording, "
+		   "listen to the mix and send messages to this dock. Once allowed, it connects by itself "
+		   "next time; you can remove it under Tools, OBS Director.")
+			.arg(c.ip));
+	QPushButton *allow = box->addButton(tr("Allow"), QMessageBox::AcceptRole);
+	QPushButton *deny = box->addButton(tr("Deny"), QMessageBox::RejectRole);
+	box->setDefaultButton(deny);
+	box->setEscapeButton(deny);
+	box->setAttribute(Qt::WA_DeleteOnClose);
+	box->setWindowModality(Qt::NonModal);
+	c.prompt = box;
+
+	QTcpSocket *sock = c.sock;
+	connect(box, &QMessageBox::buttonClicked, this, [this, sock, allow](QAbstractButton *b) {
+		auto it = clients.find(sock);
+		if (it == clients.end() || !it->pending)
+			return;
+		it->prompt = nullptr;
+		if (b == allow) {
+			trust(*it);
+			admit(*it);
+		} else {
+			dock->addFeed(tr("%1 was not allowed to connect").arg(it->device));
+			refuse(*it, "denied",
+			       tr("OBS on this PC said no. Ask the person at the PC to allow this phone."),
+			       kDeniedWaitMs);
+		}
+	});
+	QTimer::singleShot(kApprovalWaitMs, this, [this, sock]() {
+		auto it = clients.find(sock);
+		if (it != clients.end() && it->pending)
+			refuse(*it, "approval_timeout",
+			       tr("Nobody pressed Allow in OBS. Try again when someone is at the PC."),
+			       kUnansweredWaitMs);
+	});
+
+	box->show();
+	box->raise();
+	box->activateWindow();
+	QApplication::alert(main);
+	dock->addFeed(tr("%1 asks to connect").arg(c.device));
+	obs_log(LOG_INFO, "a phone at %s asks to connect", c.ip.toUtf8().constData());
+}
+
+void DirectorServer::admit(Client &c)
+{
+	c.pending = false;
+	c.authed = true;
+	lockouts.remove(c.ip);
+	for (TrustedDevice &t : trusted)
+		if (t.id == c.deviceId && t.name != c.device) {
+			t.name = c.device; /* the phone was renamed */
+			saveConfig();
+			emit devicesChanged();
+		}
+
+	QJsonObject w;
+	w["type"] = "welcome";
+	w["proto"] = kProtocol;
+	w["pc"] = pcName();
+	w["obs"] = QString::fromUtf8(obs_get_version_string());
+	w["plugin"] = QString::fromUtf8(PLUGIN_VERSION);
+	w["audioRate"] = int(UdpAudio::kSampleRate);
+	w["videoPort"] = kVideoPort;
+	send(c.sock, w);
+	send(c.sock, buildStatus());
+	updatePresence();
+	dock->addFeed(tr("%1 connected").arg(c.device));
 }
 
 int DirectorServer::unpairedCount() const
@@ -310,14 +534,15 @@ void DirectorServer::onNewConnection()
 		Client c;
 		c.sock = sock;
 		c.ip = ipv4Of(sock->peerAddress());
+		notePhoneSeen(sock->peerAddress(), sock->localAddress());
 		c.connectedAt = QDateTime::currentMSecsSinceEpoch();
 		clients.insert(sock, c);
 		connect(sock, &QTcpSocket::readyRead, this, [this, sock]() { onReadyRead(sock); });
 		connect(sock, &QTcpSocket::disconnected, this, [this, sock]() { onDisconnected(sock); });
-		/* unpaired sockets get 10 s to say hello */
+		/* unpaired sockets get 10 s to say hello (a phone waiting for Allow has its own timer) */
 		QTimer::singleShot(10000, this, [this, sock]() {
 			auto it = clients.find(sock);
-			if (it != clients.end() && !it->authed)
+			if (it != clients.end() && !it->authed && !it->pending)
 				sock->disconnectFromHost();
 		});
 	}
@@ -332,6 +557,13 @@ void DirectorServer::onDisconnected(QTcpSocket *sock)
 		audio->removeDestination(it->ip.toStdString(), it->audioPort);
 	if (it->videoSock)
 		it->videoSock->close();
+	if (it->prompt) {
+		/* the phone gave up waiting: take the question away (not counted as Deny) */
+		it->pending = false;
+		QMessageBox *box = it->prompt;
+		it->prompt = nullptr;
+		box->close();
+	}
 	QString device = it->device;
 	bool authed = it->authed;
 	clients.erase(it);
@@ -407,52 +639,23 @@ void DirectorServer::handleMessage(Client &c, const QJsonObject &msg)
 	const QString type = msg.value("type").toString();
 
 	if (!c.authed) {
-		if (type != "hello")
+		if (type != "hello" || c.pending)
 			return;
-		if (lockedOut(c.ip)) {
-			QJsonObject e;
-			e["type"] = "error";
-			e["code"] = "locked_out";
-			e["message"] = "Too many wrong PINs. Wait a moment, then try again.";
-			send(c.sock, e);
-			c.sock->disconnectFromHost();
-			return;
-		}
-		if (!sameSecret(msg.value("pin").toString(), currentPin)) {
-			badPinCount++;
-			recordBadPin(c.ip);
-			QJsonObject e;
-			e["type"] = "error";
-			e["code"] = "bad_pin";
-			e["message"] = "That PIN doesn't match. Check Tools, OBS Director in OBS.";
-			send(c.sock, e);
-			if (badPinCount > 5) {
-				newPin(); /* too many guesses: rotate the PIN */
-				badPinCount = 0;
-				obs_log(LOG_WARNING, "too many wrong PINs; a new PIN was generated");
-			}
-			c.sock->disconnectFromHost();
-			return;
-		}
-		badPinCount = 0;
-		lockouts.remove(c.ip);
-		c.authed = true;
-		c.device = msg.value("device").toString().left(40);
+		if (lockedOut(c.ip))
+			return refuse(c, "locked_out",
+				      tr("OBS said no to this phone a moment ago. Wait a minute, then try again."), 0);
+		c.device = msg.value("device").toString().trimmed().left(40);
 		if (c.device.isEmpty())
-			c.device = tr("A remote");
-
-		QJsonObject w;
-		w["type"] = "welcome";
-		w["proto"] = kProtocol;
-		w["pc"] = pcName();
-		w["obs"] = QString::fromUtf8(obs_get_version_string());
-		w["plugin"] = QString::fromUtf8(PLUGIN_VERSION);
-		w["audioRate"] = int(UdpAudio::kSampleRate);
-		w["videoPort"] = kVideoPort;
-		send(c.sock, w);
-		send(c.sock, buildStatus());
-		updatePresence();
-		dock->addFeed(tr("%1 connected").arg(c.device));
+			c.device = tr("A phone");
+		c.deviceId = msg.value("deviceId").toString();
+		static const QRegularExpression idPattern(QStringLiteral("^[A-Za-z0-9-]{16,64}$"));
+		if (!idPattern.match(c.deviceId).hasMatch())
+			return refuse(c, "update_app",
+				      tr("Update the OBS Director app on this phone to connect to this PC."), 0);
+		if (isTrusted(c.deviceId))
+			admit(c);
+		else
+			askApproval(c);
 		return;
 	}
 
@@ -695,15 +898,45 @@ void DirectorServer::sendStatus()
 		broadcast(buildStatus());
 }
 
-void DirectorServer::sendBeacon()
+QByteArray DirectorServer::beaconPayload() const
 {
 	QJsonObject b;
 	b["obsdirector"] = kProtocol;
+	b["id"] = pcId;
 	b["name"] = pcName();
+	b["address"] = advertisedAddress();
 	b["port"] = kControlPort;
 	b["obs"] = QString::fromUtf8(obs_get_version_string());
 	b["plugin"] = QString::fromUtf8(PLUGIN_VERSION);
-	QByteArray payload = QJsonDocument(b).toJson(QJsonDocument::Compact);
+	return QJsonDocument(b).toJson(QJsonDocument::Compact);
+}
+
+void DirectorServer::onBeaconReadyRead()
+{
+	while (beacon->hasPendingDatagrams()) {
+		QNetworkDatagram d = beacon->receiveDatagram(512);
+		/* only {"obsdirector":"probe"}; our own beacons (and other PCs') arrive here too */
+		QJsonObject o = QJsonDocument::fromJson(d.data()).object();
+		if (o.value("obsdirector").toString() != QLatin1String("probe"))
+			continue;
+		QHostAddress from(ipv4Of(d.senderAddress()));
+		if (!isUsableLan(from) || !isPrivate(from))
+			continue; /* answer the local network only */
+		qint64 now = QDateTime::currentMSecsSinceEpoch();
+		if (now - probeWindowStart > 1000) {
+			probeWindowStart = now;
+			probeReplies = 0;
+		}
+		if (++probeReplies > kMaxProbeRepliesPerSec)
+			continue;
+		notePhoneSeen(from);
+		beacon->writeDatagram(beaconPayload(), from, quint16(d.senderPort()));
+	}
+}
+
+void DirectorServer::sendBeacon()
+{
+	QByteArray payload = beaconPayload();
 
 	bool sent = false;
 	for (const QNetworkInterface &iface : QNetworkInterface::allInterfaces()) {

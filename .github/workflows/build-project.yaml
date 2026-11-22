@@ -2,6 +2,21 @@ name: Build Project
 # Builds the OBS plugin for Windows and its installer, OBS-Director-<version>-Windows-Setup.exe.
 on:
   workflow_call:
+    # Code signing (Azure Artifact Signing). All optional: without them the installer is
+    # built unsigned. Only the release build passes them; pull requests never do.
+    secrets:
+      AZURE_TENANT_ID:
+        required: false
+      AZURE_CLIENT_ID:
+        required: false
+      AZURE_CLIENT_SECRET:
+        required: false
+      ARTIFACT_SIGNING_ENDPOINT:
+        required: false
+      ARTIFACT_SIGNING_ACCOUNT:
+        required: false
+      ARTIFACT_SIGNING_PROFILE:
+        required: false
 permissions:
   contents: read
 jobs:
@@ -39,6 +54,13 @@ jobs:
 
       - name: Build Installer 📀
         uses: ./.github/actions/package-plugin
+        env:
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          ARTIFACT_SIGNING_ENDPOINT: ${{ secrets.ARTIFACT_SIGNING_ENDPOINT }}
+          ARTIFACT_SIGNING_ACCOUNT: ${{ secrets.ARTIFACT_SIGNING_ACCOUNT }}
+          ARTIFACT_SIGNING_PROFILE: ${{ secrets.ARTIFACT_SIGNING_PROFILE }}
         with:
           target: x64
           config: ${{ env.CONFIG }}

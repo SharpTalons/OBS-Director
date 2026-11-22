@@ -11,7 +11,8 @@ data class Settings(
     val deviceName: String = defaultDeviceName(),
     val lastIp: String = "",
     val lastPort: Int = 4466,
-    val lastPin: String = "",
+    /** A random ID for this phone, made once: OBS remembers it after someone presses Allow. */
+    val deviceId: String = "",
     val lastPcName: String = "",
     // audio
     val bufferMs: Int = 0, // 0 = auto
@@ -60,7 +61,7 @@ object Prefs {
             deviceName = sp.getString("deviceName", d.deviceName) ?: d.deviceName,
             lastIp = sp.getString("lastIp", "") ?: "",
             lastPort = sp.getInt("lastPort", d.lastPort),
-            lastPin = sp.getString("lastPin", "") ?: "",
+            deviceId = sp.getString("deviceId", null) ?: java.util.UUID.randomUUID().toString().also { sp.edit().putString("deviceId", it).remove("lastPin").apply() },
             lastPcName = sp.getString("lastPcName", "") ?: "",
             bufferMs = sp.getInt("bufferMs", d.bufferMs),
             autoListen = sp.getBoolean("autoListen", d.autoListen),
@@ -94,7 +95,7 @@ object Prefs {
             putString("deviceName", s.deviceName)
             putString("lastIp", s.lastIp)
             putInt("lastPort", s.lastPort)
-            putString("lastPin", s.lastPin)
+            putString("deviceId", s.deviceId)
             putString("lastPcName", s.lastPcName)
             putInt("bufferMs", s.bufferMs)
             putBoolean("autoListen", s.autoListen)

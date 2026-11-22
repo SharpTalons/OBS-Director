@@ -5,6 +5,24 @@ All notable changes to OBS Director (plugin and Android app). The project follow
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-22
+
+No more PIN: tap your PC to connect, and allow the phone once in OBS. The installer now opens the firewall and is ready for code signing.
+
+### Connecting
+- Tap a PC in the list to connect. There's no PIN. The first time, OBS asks **Allow "phone" to connect?**; once allowed, the phone connects with a tap and OBS doesn't ask again. Tools, OBS Director lists the allowed phones and can remove them.
+- After **Deny** or no answer, that address waits before it can ask again, and only three questions can be open at once.
+- The app shows each PC's name with its IP. A PC typed in by address is asked for its name, and **Search** gets answers at once instead of waiting for the next beacon.
+- A PC on two networks (for example Wi-Fi and Ethernet) is listed once. The app and OBS now show the same address: the one the phone can reach.
+- Monitor offers **Connect to <your PC>** in one tap when the app isn't connected.
+- "Couldn't reach the PC" now says what to check.
+- Protocol version 2. An app and a plugin from different releases can't pair: install both from the same release.
+
+### Windows installer
+- Opens TCP 4466 and 4468 and UDP 4467 in Windows Firewall for the local network only, so phones aren't blocked; removes the rules on uninstall.
+- An icon, full version and publisher details, and **Start OBS Studio** on the last page.
+- Code signing with Azure Artifact Signing for the plugin, the installer and its uninstaller, switched on by six repository secrets (docs/RELEASING.md). The release notes say whether a release is signed.
+
 ## [0.3.0] - 2026-11-22
 
 Connecting is now one tap, Settings is split into pages, and the plugin shows one address.
@@ -72,7 +90,8 @@ First release of the plugin and the Android app.
 - The browser version (WebRTC and WebSocket modes) is not built yet; the app uses Direct UDP.
 - Audio missing from the phone's copy during a Wi-Fi drop is not yet refilled from the PC.
 
-[Unreleased]: https://github.com/SharpTalons/OBS-Director/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/SharpTalons/OBS-Director/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/SharpTalons/OBS-Director/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/SharpTalons/OBS-Director/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/SharpTalons/OBS-Director/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/SharpTalons/OBS-Director/releases/tag/v0.1.0

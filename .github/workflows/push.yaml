@@ -26,6 +26,13 @@ jobs:
   build-project:
     name: Build Project 🧱
     uses: ./.github/workflows/build-project.yaml
+    secrets:
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+      ARTIFACT_SIGNING_ENDPOINT: ${{ secrets.ARTIFACT_SIGNING_ENDPOINT }}
+      ARTIFACT_SIGNING_ACCOUNT: ${{ secrets.ARTIFACT_SIGNING_ACCOUNT }}
+      ARTIFACT_SIGNING_PROFILE: ${{ secrets.ARTIFACT_SIGNING_PROFILE }}
     permissions:
       contents: read
 
@@ -49,6 +56,7 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       VER: ${{ needs.android.outputs.version }}
+      SIGNED: ${{ secrets.ARTIFACT_SIGNING_ACCOUNT != '' }}
       CODE: ${{ needs.android.outputs.versionCode }}
     steps:
       - name: Download Build Artifacts 📥
@@ -98,6 +106,12 @@ jobs:
             echo "### Install"
             echo "- **Phone:** download \`OBS-Director-${VER}.apk\` on your Android phone and open it. It updates an earlier OBS Director in place and keeps your clips and settings. The app also offers this update by itself."
             echo "- **OBS (Windows):** close OBS, run \`OBS-Director-${VER}-Windows-Setup.exe\` and follow the steps. Needs OBS Studio 33 or later. It installs to \`C:\\ProgramData\\obs-studio\\plugins\\obs-director\` as OBS expects, and removes any older copy."
+            if [[ "${SIGNED}" == "true" ]]; then
+              echo "  The installer and plugin are code-signed by SharpTalons."
+            else
+              echo "  The installer isn't code-signed yet, so Windows may say \"Windows protected your PC\": choose **More info**, then **Run anyway**."
+            fi
+            echo "- **Connect:** open OBS, then tap the PC in the app. The first time, OBS asks you to allow the phone."
             echo ""
             echo "Android build ${CODE}, from commit ${GITHUB_SHA::7}."
             echo ""

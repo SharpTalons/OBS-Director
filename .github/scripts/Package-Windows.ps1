@@ -67,16 +67,69 @@ function Package {
     }
     Log-Group
 
-    Log-Group "Building ${OutputName}.exe..."
     $IsccArgs = @(
         "/DAppVersion=${ProductVersion}"
         "/DSourceDir=$((Resolve-Path -Path $SourceDir).Path)"
         "/DOutputDir=$((Resolve-Path -Path "${ProjectRoot}/release").Path)"
         "/DOutputName=${OutputName}"
-        "${ProjectRoot}/cmake/windows/resources/installer.iss"
     )
-    Invoke-External $Iscc @IsccArgs
+
+    # Code signing with Azure Artifact Signing, when its six secrets are set (docs/RELEASING.md).
+    # Signs the plugin DLL here, then Inno Setup signs the installer and its uninstaller.
+    $SignVars = @('AZURE_TENANT_ID', 'AZURE_CLIENT_ID', 'AZURE_CLIENT_SECRET',
+        'ARTIFACT_SIGNING_ENDPOINT', 'ARTIFACT_SIGNING_ACCOUNT', 'ARTIFACT_SIGNING_PROFILE')
+    $Missing = @($SignVars | Where-Object { -not [System.Environment]::GetEnvironmentVariable($_) })
+    $Signing = $Missing.Count -eq 0
+    if ( $Signing ) {
+        Log-Group "Setting up code signing..."
+        $Tools = "${env:RUNNER_TEMP}/signing-tools"
+        Invoke-External nuget install Microsoft.ArtifactSigning.Client -x -OutputDirectory $Tools -NonInteractive
+        Invoke-External nuget install Microsoft.Windows.SDK.BuildTools -x -OutputDirectory $Tools -NonInteractive
+        $Dlib = Get-ChildItem -Path $Tools -Recurse -Filter 'Azure.CodeSigning.Dlib.dll' |
+            Where-Object { $_.FullName -match '[\\/]x64[\\/]' } | Select-Object -First 1
+        $SignTool = Get-ChildItem -Path $Tools -Recurse -Filter 'signtool.exe' |
+            Where-Object { $_.FullName -match '[\\/]x64[\\/]' } | Sort-Object FullName -Descending | Select-Object -First 1
+        if ( ! $Dlib -or ! $SignTool ) {
+            throw "Code signing is set up but its tools weren't found (dlib: $($Dlib.FullName), signtool: $($SignTool.FullName))."
+        }
+        # Only the service principal in the AZURE_* variables may sign: no other way of logging in.
+        $Metadata = "${env:RUNNER_TEMP}/signing-metadata.json"
+        @{
+            Endpoint = $env:ARTIFACT_SIGNING_ENDPOINT
+            CodeSigningAccountName = $env:ARTIFACT_SIGNING_ACCOUNT
+            CertificateProfileName = $env:ARTIFACT_SIGNING_PROFILE
+            ExcludeCredentials = @('ManagedIdentityCredential', 'WorkloadIdentityCredential',
+                'SharedTokenCacheCredential', 'VisualStudioCredential', 'VisualStudioCodeCredential',
+                'AzureCliCredential', 'AzurePowerShellCredential', 'AzureDeveloperCliCredential',
+                'InteractiveBrowserCredential')
+        } | ConvertTo-Json | Set-Content -Path $Metadata -Encoding utf8
+        $SignArgs = @('sign', '/fd', 'SHA256', '/tr', 'http://timestamp.acs.microsoft.com', '/td', 'SHA256',
+            '/d', 'OBS Director', '/du', 'https://github.com/SharpTalons/OBS-Director',
+            '/dlib', $Dlib.FullName, '/dmdf', $Metadata)
+        Log-Group
+
+        Log-Group "Signing ${ProductName}.dll..."
+        Invoke-External $SignTool.FullName @SignArgs "${SourceDir}/${ProductName}.dll"
+        Log-Group
+
+        # Inno Setup runs this for the installer and the uninstaller; $f is the quoted file.
+        $Quoted = ($SignArgs | ForEach-Object { if ( $_ -match '\s' ) { "`"$_`"" } else { $_ } }) -join ' '
+        $IsccArgs += "/DSign=1"
+        $IsccArgs += "/Sdirector=`"$($SignTool.FullName)`" ${Quoted} `$f"
+    } elseif ( $env:GITHUB_EVENT_NAME -eq 'push' ) {
+        Write-Output "::warning::The Windows installer is NOT code-signed: set the $($Missing -join ', ') secret(s) (docs/RELEASING.md). Windows SmartScreen will warn people who run it."
+    }
+
+    Log-Group "Building ${OutputName}.exe..."
+    Invoke-External $Iscc @IsccArgs "${ProjectRoot}/cmake/windows/resources/installer.iss"
     Log-Group
+
+    if ( $Signing ) {
+        Log-Group "Checking the signatures..."
+        Invoke-External $SignTool.FullName verify /pa /v "${SourceDir}/${ProductName}.dll"
+        Invoke-External $SignTool.FullName verify /pa /v "${ProjectRoot}/release/${OutputName}.exe"
+        Log-Group
+    }
 }
 
 Package

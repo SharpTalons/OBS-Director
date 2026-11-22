@@ -1,40 +1,56 @@
-# OBS Director protocol, version 1
+# OBS Director protocol, version 2
 
 How the OBS plugin and the OBS Director app talk on a local network. Everything is little endian.
 
 | Port | Transport | Direction | What |
 | --- | --- | --- | --- |
-| 4466 | TCP | app → plugin | Control: newline-delimited JSON, paired with a PIN |
-| 4467 | UDP broadcast | plugin → network | Discovery beacon, every 2 s |
+| 4466 | TCP | app → plugin | Control: newline-delimited JSON; each phone is approved once in OBS |
+| 4467 | UDP | plugin → network, and both ways for probes | Discovery beacon every 2 s; answers to probes |
 | (app's choice) | UDP | plugin → app | The program mix as PCM |
 | 4468 | TCP | app → plugin | Live output as H.264, opened with a token |
 
-The plugin listens on IPv4 only. Allow OBS through the PC's firewall on a private network the first time Windows asks.
+The plugin listens on IPv4 only. Its Windows installer allows TCP 4466 and 4468 and UDP 4467 through Windows Firewall, from the local subnet only.
+
+Version 2 replaced the PIN with approve-once pairing. An app or plugin on version 1 can't pair with one on version 2: install both from the same release.
 
 ## Discovery
 
 The plugin broadcasts a JSON datagram to UDP 4467 on every IPv4 interface:
 
 ```json
-{"obsdirector":1,"name":"STREAM-PC","port":4466,"obs":"31.1.1","plugin":"0.1.0"}
+{"obsdirector":2,"id":"0b9e…","name":"STREAM-PC","address":"192.168.1.24","port":4466,"obs":"33.0.2","plugin":"0.4.0"}
 ```
 
-The app lists every PC heard in the last 10 seconds. A PC can also be added by address; Tools, OBS Director in OBS shows it.
+- `id` is the PC's own random ID, kept in the plugin's config. A PC with two network adapters beacons from both; the app lists it once.
+- `address` is the address Tools, OBS Director shows: the one phones last reached this PC on, or before any phone has, the PC's main network address. The app shows this address whenever it can hear the PC on it, so the app and OBS agree; otherwise it shows the address the beacon came from.
+
+A phone can also ask. It sends `{"obsdirector":"probe"}` to UDP 4467 at one PC's address, or to 255.255.255.255 for all of them, from its own UDP 4467, and each plugin answers at once with its beacon, sent straight back. That names a PC typed in by address and lets Search answer without waiting for the next beacon. The plugin answers private (local network) addresses only, at most 20 times a second.
 
 ## Control channel (TCP 4466)
 
-One JSON object per line, UTF-8. The app speaks first and must pair within 10 seconds.
+One JSON object per line, UTF-8. The app speaks first and must say hello within 10 seconds.
 
-### Pairing
+### Pairing: approve once in OBS
 
 ```json
-→ {"type":"hello","pin":"4826","device":"Stage phone","proto":1}
-← {"type":"welcome","proto":1,"pc":"STREAM-PC","obs":"31.1.1","plugin":"0.1.0","audioRate":48000,"videoPort":4468}
+→ {"type":"hello","deviceId":"5f0c2d6e-…","device":"Stage phone","proto":2}
+← {"type":"welcome","proto":2,"pc":"STREAM-PC","obs":"33.0.2","plugin":"0.4.0","audioRate":48000,"videoPort":4468}
 ```
 
-A wrong PIN gets `{"type":"error","code":"bad_pin","message":"…"}` and the connection is closed. After more than five wrong PINs in a row the plugin makes a new PIN. The PIN is shown, and can be changed, under Tools, OBS Director.
+`deviceId` is a random ID the app makes once and keeps (16 to 64 letters, digits and dashes). If OBS already knows it, the plugin welcomes the phone at once.
 
-To stop the PIN being guessed, each address gets three free tries; after that it must wait 2 s, then 4 s, 8 s and so on, up to 5 minutes, between tries. While it waits, a `hello` gets `{"type":"error","code":"locked_out","message":"…"}` and is closed. A correct PIN clears the wait. At most eight unpaired connections are held at once; more are refused.
+If it doesn't, the plugin asks in OBS: a non-modal "Allow "Stage phone" to connect?" with **Allow** and **Deny**. Meanwhile the phone gets:
+
+```json
+← {"type":"pending","message":"Waiting for someone to press Allow in OBS on STREAM-PC."}
+```
+
+- **Allow:** the plugin remembers the ID (up to 50 phones; Tools, OBS Director lists them and can remove them) and sends `welcome`.
+- **Deny:** `{"type":"error","code":"denied","message":"…"}` and the connection is closed. That address must wait 60 s before it can ask again (`locked_out`).
+- **No answer within 2 minutes:** `{"type":"error","code":"approval_timeout",…}`; that address waits 30 s.
+- If the phone gives up first, the question in OBS goes away and doesn't count as Deny.
+
+Other refusals: `update_app` (a hello without a valid `deviceId`, from a version 1 app), `busy` (this phone is already waiting, or three phones already are), `locked_out`. At most eight connections that haven't been welcomed are held at once; more are refused. Removing a phone in OBS disconnects it at once.
 
 The status carries the recording's file name only, never its full path.
 

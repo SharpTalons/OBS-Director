@@ -5,6 +5,15 @@ All notable changes to OBS Director (plugin and Android app). The project follow
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-11-22
+
+### Windows installer
+- A ticked **Allow phones on this network through Windows Firewall** option. It adds the plugin's rules for local networks only, and removes any rule Windows made that blocks OBS: those beat every allow rule and stopped phones connecting.
+
+### Android app
+- The PC list is fresh every time: only PCs that answer the scan, each with a yellow dot meaning ready to connect. No more "last used" entry.
+- When a PC can't be reached, the app says why: the PC didn't answer (Windows Firewall), OBS isn't accepting phones (plugin not running), OBS didn't reply, or the phone is on another network.
+
 ## [0.4.0] - 2026-11-22
 
 No more PIN: tap your PC to connect, and allow the phone once in OBS. The installer now opens the firewall and is ready for code signing.
@@ -90,7 +99,8 @@ First release of the plugin and the Android app.
 - The browser version (WebRTC and WebSocket modes) is not built yet; the app uses Direct UDP.
 - Audio missing from the phone's copy during a Wi-Fi drop is not yet refilled from the PC.
 
-[Unreleased]: https://github.com/SharpTalons/OBS-Director/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/SharpTalons/OBS-Director/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/SharpTalons/OBS-Director/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/SharpTalons/OBS-Director/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/SharpTalons/OBS-Director/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/SharpTalons/OBS-Director/compare/v0.1.0...v0.2.0

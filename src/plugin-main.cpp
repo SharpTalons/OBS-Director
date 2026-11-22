@@ -61,9 +61,10 @@ static void showConnectInfo(void *)
 	pin->setTextInteractionFlags(Qt::TextSelectableByMouse);
 	form->addRow(QStringLiteral("PIN"), pin);
 	form->addRow(QStringLiteral("PC name"), new QLabel(server->pcName(), &dlg));
-	auto *addrs = new QLabel(server->addresses().join(QStringLiteral("\n")), &dlg);
-	addrs->setTextInteractionFlags(Qt::TextSelectableByMouse);
-	form->addRow(QStringLiteral("Address"), addrs);
+	const QString address = server->primaryAddress();
+	auto *addr = new QLabel(address.isEmpty() ? QStringLiteral("Not connected to a network") : address, &dlg);
+	addr->setTextInteractionFlags(Qt::TextSelectableByMouse);
+	form->addRow(QStringLiteral("Address"), addr);
 	form->addRow(QStringLiteral("Port"), new QLabel(QString::number(DirectorServer::kControlPort), &dlg));
 	form->addRow(QStringLiteral("Plugin"), new QLabel(QString::fromUtf8(PLUGIN_VERSION), &dlg));
 	root->addLayout(form);

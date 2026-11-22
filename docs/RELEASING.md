@@ -4,7 +4,7 @@
 
 One version for the whole project, following [Semantic Versioning](https://semver.org): `MAJOR.MINOR.PATCH`.
 
-- The single source of truth is `"version"` in [`buildspec.json`](../buildspec.json). The plugin's CMake build and the Android build both read it, and CI derives everything else from it.
+- The single source of truth is `"version"` in [`buildspec.json`](../buildspec.json), so the app and the plugin always carry the same version. Never set either one anywhere else. The plugin's CMake build and the Android build both read it, and CI derives everything else from it.
 - Android `versionName` is that version; `versionCode` is `MAJOR × 10000 + MINOR × 100 + PATCH` (so `1.4.2` is `10402`).
 - Bump MAJOR when the [protocol](PROTOCOL.md) changes in a way older apps or plugins can't follow, MINOR for new features, PATCH for fixes. List changes in [CHANGELOG.md](../CHANGELOG.md).
 

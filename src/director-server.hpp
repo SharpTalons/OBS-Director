@@ -52,7 +52,8 @@ public:
 
 	QString pin() const { return currentPin; }
 	void newPin();
-	QStringList addresses() const;
+	/* the one address phones should use: the PC's main LAN address */
+	QString primaryAddress() const;
 	QString pcName() const;
 
 private slots:

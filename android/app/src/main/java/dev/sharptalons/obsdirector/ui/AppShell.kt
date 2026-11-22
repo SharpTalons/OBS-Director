@@ -23,9 +23,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Send
+import androidx.compose.material.icons.outlined.Cast
+import androidx.compose.material.icons.outlined.CastConnected
 import androidx.compose.material.icons.outlined.ContentCut
 import androidx.compose.material.icons.outlined.FiberManualRecord
 import androidx.compose.material.icons.outlined.Headphones
+import androidx.compose.material.icons.outlined.Power
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Warning
 import androidx.compose.material.icons.outlined.Wifi
@@ -73,11 +76,18 @@ fun AppShell() {
     val latency by Director.latencyMs.collectAsState()
 
     val settings by Prefs.settings.collectAsState()
-    val showConnect = screen == "connect" || (screen == "monitor" && link == LinkState.DISCONNECTED)
-    // First run: no PC paired yet and the connect screen is up. The update prompt waits for it.
-    val firstRun = showConnect && settings.lastIp.isBlank()
+    // The connect pop-up, from the connect icon in the top bar. On first run (no PC paired
+    // yet) it opens by itself, once.
+    var connectOpen by rememberSaveable { mutableStateOf(false) }
+    var firstRunShown by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        if (!firstRunShown && settings.lastIp.isBlank() && link == LinkState.DISCONNECTED) { connectOpen = true; firstRunShown = true }
+    }
+    if (connectOpen) ConnectDialog(onDismiss = { connectOpen = false })
+    val disconnectedMonitor = screen == "monitor" && link == LinkState.DISCONNECTED
+    // The update prompt waits while the connect pop-up is up.
     val pendingUpdate = UpdateController.update
-    if (UpdateController.updatePrompt && pendingUpdate != null && !firstRun) UpdateDialog(pendingUpdate)
+    if (UpdateController.updatePrompt && pendingUpdate != null && !connectOpen) UpdateDialog(pendingUpdate)
     var now by remember { mutableLongStateOf(android.os.SystemClock.elapsedRealtime()) }
     LaunchedEffect(Unit) { while (true) { delay(1000); now = android.os.SystemClock.elapsedRealtime() } }
     LaunchedEffect(toast) { if (toast != null) { delay(3000); Director.clearToast() } }
@@ -101,7 +111,7 @@ fun AppShell() {
                     }
                 }
 
-                // scope line, title and the screen's one-line summary
+                // scope line, title and the screen's one-line summary; the connect icon on the right
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(Modifier.size(6.dp).clip(CircleShape).background(if (link == LinkState.CONNECTED) T.positive else T.muted))
                     Spacer(Modifier.width(8.dp))
@@ -113,11 +123,12 @@ fun AppShell() {
                             LinkState.DISCONNECTED -> "Not connected"
                         },
                         style = Type.small,
+                        modifier = Modifier.weight(1f),
                     )
+                    ConnectIcon(link) { connectOpen = true }
                 }
                 Spacer(Modifier.height(6.dp))
                 Text(when {
-                    showConnect -> "Connect to OBS"
                     screen == "clips" -> "Clips"
                     screen == "config" -> "Settings"
                     else -> "Monitor"
@@ -125,9 +136,9 @@ fun AppShell() {
                 Spacer(Modifier.height(16.dp))
 
                 when {
-                    showConnect -> ConnectScreen(onConnected = { screen = "monitor" })
+                    disconnectedMonitor -> NotConnected { connectOpen = true }
                     screen == "clips" -> ClipsScreen(recordings)
-                    screen == "config" -> SettingsScreen(onConnect = { screen = "connect" })
+                    screen == "config" -> SettingsScreen(onConnect = { connectOpen = true })
                     else -> MonitorScreen(onOpenClips = { screen = "clips" })
                 }
                 Spacer(Modifier.height(if (screen == "monitor" && link != LinkState.DISCONNECTED) 140.dp else 24.dp))
@@ -148,7 +159,7 @@ fun AppShell() {
         HorizontalDivider(color = T.border)
         Row(Modifier.fillMaxWidth().background(T.ground).windowInsetsPadding(WindowInsets.navigationBars).padding(vertical = 6.dp)) {
             val clipCount = recordings.sumOf { it.clips.size }
-            NavItem("Monitor", Icons.Outlined.Headphones, screen == "monitor" || screen == "connect", badge = if (alerts.any { it.id != "net" }) "!" else null, Modifier.weight(1f)) { screen = "monitor" }
+            NavItem("Monitor", Icons.Outlined.Headphones, screen == "monitor", badge = if (alerts.any { it.id != "net" }) "!" else null, Modifier.weight(1f)) { screen = "monitor" }
             NavItem("Clips", Icons.Outlined.ContentCut, screen == "clips", badge = if (clipCount > 0) "$clipCount" else null, Modifier.weight(1f)) { screen = "clips" }
             NavItem("Settings", Icons.Outlined.Settings, screen == "config", null, Modifier.weight(1f)) { screen = "config" }
         }
@@ -171,5 +182,39 @@ private fun NavItem(label: String, icon: ImageVector, selected: Boolean, badge: 
                 modifier = Modifier.align(Alignment.TopEnd).padding(start = 22.dp))
         }
         Text(label, style = Type.small.copy(fontSize = 11.sp, color = if (selected) T.text else T.muted))
+    }
+}
+
+/** The top bar's connect icon: opens the connect pop-up. Its colour says how the link is. */
+@Composable
+private fun ConnectIcon(link: LinkState, onClick: () -> Unit) {
+    val (icon, tint, label) = when (link) {
+        LinkState.CONNECTED -> Triple(Icons.Outlined.CastConnected, T.positive, "Connected. Change or disconnect")
+        LinkState.CONNECTING, LinkState.LOST -> Triple(Icons.Outlined.Cast, T.warning, "Connecting")
+        LinkState.DISCONNECTED -> Triple(Icons.Outlined.Cast, T.accent, "Connect to OBS")
+    }
+    Box(
+        Modifier.size(44.dp).clip(CircleShape).background(if (link == LinkState.DISCONNECTED) T.raised else T.ground).clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(icon, label, tint = tint, modifier = Modifier.size(24.dp))
+    }
+}
+
+/** Monitor while no PC is connected: one card and one button, which opens the connect pop-up. */
+@Composable
+private fun NotConnected(onConnect: () -> Unit) {
+    val settings by Prefs.settings.collectAsState()
+    Text("Connect this phone to the OBS PC to listen, watch and mark clips.", style = Type.finding)
+    Spacer(Modifier.height(16.dp))
+    DCard {
+        CardHeader("Not connected", Icons.Outlined.Cast)
+        Text(
+            if (settings.lastPcName.isNotBlank()) "Last used: ${settings.lastPcName} (${settings.lastIp})."
+            else "Make sure OBS is open on the PC with the OBS Director plugin, on the same Wi-Fi as this phone.",
+            style = Type.small,
+        )
+        Spacer(Modifier.height(14.dp))
+        PrimaryButton("Connect", Icons.Outlined.Power, Modifier.fillMaxWidth()) { onConnect() }
     }
 }

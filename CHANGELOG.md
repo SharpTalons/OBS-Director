@@ -5,11 +5,23 @@ All notable changes to OBS Director (plugin and Android app). The project follow
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-22
+
+Connecting is now one tap, Settings is split into pages, and the plugin shows one address.
+
 ### Android app
-- The update check now lives under Settings, **Updates and about**, so it's easier to find.
+- Connect from the new connect icon in the top bar. A pop-up lists the PCs found on the network, with **Search** to look again, a way to type the IP address, and the PIN. It closes once connected, and opens by itself the first time.
+- When not connected, Monitor shows a short card with a Connect button instead of a long form.
+- Settings is a short menu of pages: Connection, Listening, Saved audio, Clips and export, Alerts, Live picture, Controls and display, and Updates and about. Each shows what's set at a glance; the Back button returns to the menu.
+- This phone's name in OBS can now be changed in Settings, Connection.
+- Settings shows the plugin's version next to the app's, and says if they don't match.
+
+### Plugin
+- Tools, OBS Director shows one address: the PC's main network address. Virtual adapters (Hyper-V, WSL, VPNs, virtual machines) are no longer listed.
 
 ### Releases
 - The release workflow waits up to 2 minutes for GitHub to report the new release as latest, instead of failing after 5 seconds.
+- The app and the plugin always share one version number, set once in `buildspec.json`.
 
 ## [0.2.0] - 2026-11-22
 
@@ -60,6 +72,7 @@ First release of the plugin and the Android app.
 - The browser version (WebRTC and WebSocket modes) is not built yet; the app uses Direct UDP.
 - Audio missing from the phone's copy during a Wi-Fi drop is not yet refilled from the PC.
 
-[Unreleased]: https://github.com/SharpTalons/OBS-Director/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/SharpTalons/OBS-Director/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/SharpTalons/OBS-Director/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/SharpTalons/OBS-Director/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/SharpTalons/OBS-Director/releases/tag/v0.1.0

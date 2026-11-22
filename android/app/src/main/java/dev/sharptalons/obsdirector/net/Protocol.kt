@@ -28,7 +28,6 @@ object Protocol {
             recPaused = rec.bool("paused"),
             fileTimeMs = rec.num("fileTimeMs").toLong(),
             file = rec.str("file"),
-            path = rec.str("path"),
             container = rec.str("container"),
             recBytes = rec.num("bytes").toLong(),
             diskFreeMb = rec.num("diskFreeMB").toLong(),

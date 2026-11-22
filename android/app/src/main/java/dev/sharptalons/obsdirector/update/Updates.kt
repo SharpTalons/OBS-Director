@@ -6,7 +6,7 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 /**
- * Checking for a newer version of the app (Design-Constants update-check, Updates.kt).
+ * Checking for a newer version of the app.
  * The app asks GitHub for the newest public release of [RELEASES_REPO]; nothing about the
  * person or the phone is sent, and no token is used (anything shipped in an APK can be read
  * by anyone who has it). The code repository is public, so it holds the releases itself.

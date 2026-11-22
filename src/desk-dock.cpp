@@ -25,6 +25,7 @@ DeskDock::DeskDock(QWidget *parent) : QWidget(parent)
 
 	presence = new QLabel(tr("No remote connected"), this);
 	presence->setWordWrap(true);
+	presence->setTextFormat(Qt::PlainText);
 	presence->setStyleSheet("font-weight: 600;");
 	root->addWidget(presence);
 
@@ -45,6 +46,7 @@ DeskDock::DeskDock(QWidget *parent) : QWidget(parent)
 
 	feed = new QLabel(this);
 	feed->setWordWrap(true);
+	feed->setTextFormat(Qt::PlainText);
 	feed->setStyleSheet("color: palette(mid); font-size: 11px;");
 	root->addWidget(feed);
 }
@@ -62,9 +64,11 @@ void DeskDock::addMessage(const QString &id, const QString &from, const QString 
 	box->setStyleSheet("QFrame { border: 1px solid #d9a441; border-radius: 4px; }");
 	auto *v = new QVBoxLayout(box);
 	auto *head = new QLabel(QTime::currentTime().toString("HH:mm") + " · " + from, box);
+	head->setTextFormat(Qt::PlainText);
 	head->setStyleSheet("border: none; color: palette(mid); font-size: 11px;");
 	auto *body = new QLabel(text, box);
 	body->setWordWrap(true);
+	body->setTextFormat(Qt::PlainText); /* text from the phone: never rendered as HTML */
 	body->setStyleSheet("border: none; font-size: 14px;");
 	v->addWidget(head);
 	v->addWidget(body);

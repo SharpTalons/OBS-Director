@@ -5,6 +5,14 @@ All notable changes to OBS Director (plugin and Android app). The project follow
 
 ## [Unreleased]
 
+### Security
+- Plugin: wrong PINs are slowed down per device (three free tries, then 2 s doubling up to 5 minutes), unpaired connections are capped at eight, and the PIN is compared in constant time.
+- Plugin: the status sends the recording's file name only, never its full path, and never falls back to an output URL.
+- Plugin: messages and device names from phones are shown in the dock as plain text.
+
+### Docs
+- Step-by-step setup in the README, including firewall and troubleshooting; release and signing notes moved to docs/RELEASING.md; SECURITY.md added.
+
 ## [0.1.0] - 2026-11-22
 
 First release of the plugin and the Android app.

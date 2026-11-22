@@ -16,6 +16,7 @@
 !LICENSE
 !README.md
 !CHANGELOG.md
+!SECURITY.md
 !/android
 !/docs
 
@@ -36,3 +37,14 @@
 /android/.idea/
 *.jks
 *.keystore
+
+# Never commit signing material or local secrets
+*.p12
+*.pfx
+*.pem
+*.key
+*.mobileprovision
+*.provisionprofile
+keystore.properties
+.env
+.env.*

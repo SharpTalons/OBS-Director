@@ -71,6 +71,12 @@ class Discovery(private val context: Context) {
         }
     }
 
+    /** Search again: forget the PCs heard so far (each running one beacons every 2 s, so it comes back). */
+    fun search() {
+        found.value = emptyList()
+        start()
+    }
+
     fun stop() {
         job?.cancel()
         job = null

@@ -16,7 +16,7 @@ OBS Director is two parts:
 - **Desk**: quick and typed messages to the volunteers' dock in OBS; they answer with one tap.
 - **Background**: with the screen off the mix keeps playing and clips can be started and ended from the notification. Video always stops.
 - **Drops**: if Wi-Fi drops, a running clip is saved at the drop, listening pauses, and the app reconnects by itself. OBS keeps recording on the PC throughout.
-- **Updates**: each time the app opens it checks this repository's releases. When a newer version is out it asks once, with **Update** and **Ignore**; Update downloads it and hands it to Android's installer, keeping your clips and settings. To check yourself at any time, open **Settings, Updates and about** and press **Check for updates**; if there's a newer version the button becomes **Update to <version>**.
+- **Updates**: each time the app opens it checks this repository's releases. When a newer version is out it asks once, with **Update** and **Ignore**; Update downloads it and hands it to Android's installer, keeping your clips and settings. To check yourself at any time, open **Settings**, then **Updates and about**, and press **Check for updates**; if there's a newer version the button becomes **Update to <version>**.
 
 ## Setup
 
@@ -59,15 +59,18 @@ For clips to be written into the recording as chapters, set OBS to record in **H
 
 ### 5. Pair the phone
 
-1. In OBS, open **Tools, OBS Director**. It shows the PIN, the PC's name and its addresses.
-2. In the app, pick the PC from the list (or type one of the addresses), enter the PIN and a name for your phone, and connect.
-3. Volunteers see your phone's name in the OBS dock while you're connected.
+1. In OBS, open **Tools, OBS Director**. It shows the PIN, the PC's name and its address.
+2. In the app, tap the **connect icon** at the top right. (The first time you open the app, this pop-up opens by itself.)
+3. Pick the PC from the list. If it isn't there, press **Search**, or tap **Enter the IP address yourself** and type the address OBS shows.
+4. Enter the PIN and press **Connect**. The pop-up closes once you're connected.
+
+Volunteers see your phone's name in the OBS dock while you're connected. To change that name, open **Settings, Connection** in the app. Next time, the app remembers the PC and the PIN, so connecting is one tap on **Connect**.
 
 To stop a device from connecting again, press **New PIN** under **Tools, OBS Director**.
 
 ### Troubleshooting
 
-- **The PC doesn't appear in the app**: check that both are on the same network, then type the address from **Tools, OBS Director**. Some guest or office networks block devices from seeing each other; use a different network if so.
+- **The PC doesn't appear in the app**: check that both are on the same network and press **Search** in the connect pop-up. If it still isn't listed, tap **Enter the IP address yourself** and type the address from **Tools, OBS Director**. Some guest or office networks block devices from seeing each other; use a different network if so.
 - **"That PIN doesn't match"**: check the PIN in **Tools, OBS Director**. After too many wrong PINs the plugin makes you wait before trying again, and may make a new PIN.
 - **Connects, but no sound or picture**: the firewall is letting the control channel through but not UDP 4467 or TCP 4468. Check step 2.
 - **No chapters in the recording**: the recording format isn't Hybrid MP4 (step 3).

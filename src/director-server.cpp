@@ -194,13 +194,65 @@ void DirectorServer::newPin()
 	saveConfig();
 }
 
-QStringList DirectorServer::addresses() const
+namespace {
+
+bool isUsableLan(const QHostAddress &a)
 {
-	QStringList out;
-	for (const QHostAddress &a : QNetworkInterface::allAddresses())
-		if (a.protocol() == QAbstractSocket::IPv4Protocol && !a.isLoopback())
-			out << a.toString();
-	return out;
+	if (a.protocol() != QAbstractSocket::IPv4Protocol || a.isLoopback() || a.isNull())
+		return false;
+	/* 169.254.x.x is what Windows gives an adapter with no network: never useful */
+	return !a.isInSubnet(QHostAddress(QStringLiteral("169.254.0.0")), 16);
+}
+
+bool isPrivate(const QHostAddress &a)
+{
+	return a.isInSubnet(QHostAddress(QStringLiteral("192.168.0.0")), 16) ||
+	       a.isInSubnet(QHostAddress(QStringLiteral("10.0.0.0")), 8) ||
+	       a.isInSubnet(QHostAddress(QStringLiteral("172.16.0.0")), 12);
+}
+
+/* Hyper-V, WSL, VPN and VM adapters: a phone on the Wi-Fi can't reach these. */
+bool isVirtual(const QNetworkInterface &iface)
+{
+	if (iface.type() == QNetworkInterface::Virtual || iface.type() == QNetworkInterface::Loopback)
+		return true;
+	const QString n = (iface.humanReadableName() + QLatin1Char(' ') + iface.name()).toLower();
+	static const char *const kVirtual[] = {"vethernet", "hyper-v",   "wsl",      "virtualbox", "vmware",
+					       "vpn",       "tailscale", "zerotier", "hamachi",    "bluetooth",
+					       "tap-",      "tun",       "docker"};
+	for (const char *k : kVirtual)
+		if (n.contains(QLatin1String(k)))
+			return true;
+	return false;
+}
+
+} // namespace
+
+QString DirectorServer::primaryAddress() const
+{
+	/* The address Windows would send through to reach the network: connecting a UDP
+	 * socket only picks a route, it sends nothing. */
+	QUdpSocket probe;
+	probe.connectToHost(QHostAddress(QStringLiteral("8.8.8.8")), 53);
+	if (probe.waitForConnected(300) && isUsableLan(probe.localAddress()) && isPrivate(probe.localAddress()))
+		return ipv4Of(probe.localAddress());
+
+	/* No route out (a LAN without internet): the first real, private adapter address. */
+	QString fallback;
+	for (const QNetworkInterface &iface : QNetworkInterface::allInterfaces()) {
+		if (!(iface.flags() & QNetworkInterface::IsUp) || !(iface.flags() & QNetworkInterface::IsRunning) ||
+		    isVirtual(iface))
+			continue;
+		for (const QNetworkAddressEntry &e : iface.addressEntries()) {
+			if (!isUsableLan(e.ip()))
+				continue;
+			if (isPrivate(e.ip()))
+				return e.ip().toString();
+			if (fallback.isEmpty())
+				fallback = e.ip().toString();
+		}
+	}
+	return fallback;
 }
 
 QString DirectorServer::pcName() const

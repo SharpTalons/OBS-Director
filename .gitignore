@@ -48,3 +48,4 @@
 keystore.properties
 .env
 .env.*
+/android/.kotlin/

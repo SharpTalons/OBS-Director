@@ -46,9 +46,8 @@ QString outputPath(obs_output_t *out)
 	if (!out)
 		return QString();
 	obs_data_t *s = obs_output_get_settings(out);
+	/* Only a file path: a custom FFmpeg "url" output can hold a stream key. */
 	QString p = QString::fromUtf8(obs_data_get_string(s, "path"));
-	if (p.isEmpty())
-		p = QString::fromUtf8(obs_data_get_string(s, "url"));
 	obs_data_release(s);
 	return p;
 }
@@ -64,6 +63,22 @@ void put64(QByteArray &b, qint64 v)
 	for (int i = 0; i < 8; i++)
 		b.append(char((quint64(v) >> (8 * i)) & 0xff));
 }
+
+/* Compares without stopping at the first difference, so timing says nothing about the PIN. */
+bool sameSecret(const QString &a, const QString &b)
+{
+	const QByteArray x = a.toUtf8(), y = b.toUtf8();
+	if (x.size() != y.size())
+		return false;
+	unsigned char diff = 0;
+	for (int i = 0; i < x.size(); i++)
+		diff |= static_cast<unsigned char>(x[i] ^ y[i]);
+	return diff == 0;
+}
+
+constexpr int kMaxUnpaired = 8;
+constexpr int kFreeTries = 3;
+constexpr qint64 kMaxLockoutMs = 5 * 60 * 1000;
 
 } // namespace
 
@@ -194,11 +209,51 @@ QString DirectorServer::pcName() const
 	return n.isEmpty() ? QStringLiteral("OBS PC") : n;
 }
 
+/* ---------------- pairing protection ---------------- */
+
+bool DirectorServer::lockedOut(const QString &ip)
+{
+	auto it = lockouts.find(ip);
+	return it != lockouts.end() && QDateTime::currentMSecsSinceEpoch() < it->until;
+}
+
+void DirectorServer::recordBadPin(const QString &ip)
+{
+	Lockout &l = lockouts[ip];
+	l.failures++;
+	if (l.failures > kFreeTries) {
+		/* 2 s, 4 s, 8 s ... up to 5 minutes between guesses from this address */
+		qint64 wait = qMin<qint64>(kMaxLockoutMs, 1000LL << qMin(l.failures - kFreeTries, 20));
+		l.until = QDateTime::currentMSecsSinceEpoch() + wait;
+	}
+	if (lockouts.size() > 256) {
+		/* forget addresses whose lockout has passed, so the table can't grow without end */
+		qint64 now = QDateTime::currentMSecsSinceEpoch();
+		for (auto it = lockouts.begin(); it != lockouts.end();)
+			it = (it->until < now) ? lockouts.erase(it) : std::next(it);
+	}
+}
+
+int DirectorServer::unpairedCount() const
+{
+	int n = 0;
+	for (auto it = clients.constBegin(); it != clients.constEnd(); ++it)
+		if (!it->authed)
+			n++;
+	return n;
+}
+
 /* ---------------- connections ---------------- */
 
 void DirectorServer::onNewConnection()
 {
 	while (QTcpSocket *sock = server->nextPendingConnection()) {
+		/* too many half-open pairings at once: refuse, so nobody can tie up the server */
+		if (unpairedCount() >= kMaxUnpaired) {
+			sock->abort();
+			sock->deleteLater();
+			continue;
+		}
 		sock->setSocketOption(QAbstractSocket::LowDelayOption, 1);
 		Client c;
 		c.sock = sock;
@@ -302,8 +357,18 @@ void DirectorServer::handleMessage(Client &c, const QJsonObject &msg)
 	if (!c.authed) {
 		if (type != "hello")
 			return;
-		if (msg.value("pin").toString() != currentPin) {
+		if (lockedOut(c.ip)) {
+			QJsonObject e;
+			e["type"] = "error";
+			e["code"] = "locked_out";
+			e["message"] = "Too many wrong PINs. Wait a moment, then try again.";
+			send(c.sock, e);
+			c.sock->disconnectFromHost();
+			return;
+		}
+		if (!sameSecret(msg.value("pin").toString(), currentPin)) {
 			badPinCount++;
+			recordBadPin(c.ip);
 			QJsonObject e;
 			e["type"] = "error";
 			e["code"] = "bad_pin";
@@ -318,6 +383,7 @@ void DirectorServer::handleMessage(Client &c, const QJsonObject &msg)
 			return;
 		}
 		badPinCount = 0;
+		lockouts.remove(c.ip);
 		c.authed = true;
 		c.device = msg.value("device").toString().left(40);
 		if (c.device.isEmpty())
@@ -425,7 +491,7 @@ void DirectorServer::handleCommand(Client &c, int id, const QString &cmd, const 
 	}
 	if (cmd == "desk.send") {
 		QString text = args.value("text").toString().left(200);
-		QString mid = args.value("id").toString();
+		QString mid = args.value("id").toString().left(64);
 		if (text.isEmpty())
 			return result(c, id, false, {}, "empty");
 		dock->addMessage(mid, c.device, text);
@@ -514,7 +580,7 @@ QJsonObject DirectorServer::buildStatus()
 	QString path = outputPath(ro);
 	if (!path.isEmpty())
 		lastFile = path;
-	rec["path"] = lastFile;
+	/* file name only: the full path can contain the PC's account name */
 	rec["file"] = QFileInfo(lastFile).fileName();
 	rec["container"] = QFileInfo(lastFile).suffix().toLower();
 	rec["bytes"] = ro ? double(obs_output_get_total_bytes(ro)) : 0.0;

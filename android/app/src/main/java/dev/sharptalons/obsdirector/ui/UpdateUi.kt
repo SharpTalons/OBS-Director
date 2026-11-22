@@ -27,8 +27,7 @@ import dev.sharptalons.obsdirector.update.UpdateController as vm
 import dev.sharptalons.obsdirector.update.Updates
 
 /**
- * The prompt, mounted once over the whole app by AppShell (Design-Constants update-check,
- * UpdateUi.kt). Update downloads and opens Android's installer; Ignore stops asking for this
+ * The prompt, mounted once over the whole app by AppShell. Update downloads and opens Android's installer; Ignore stops asking for this
  * version (Settings still offers it); Back asks again next start. While downloading it can't
  * be dismissed and shows a percentage.
  */

@@ -73,7 +73,6 @@ data class Status(
     val recPaused: Boolean = false,
     val fileTimeMs: Long = 0,
     val file: String = "",
-    val path: String = "",
     val container: String = "",
     val recBytes: Long = 0,
     val diskFreeMb: Long = -1,

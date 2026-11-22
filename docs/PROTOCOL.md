@@ -28,17 +28,21 @@ One JSON object per line, UTF-8. The app speaks first and must pair within 10 se
 ### Pairing
 
 ```json
-→ {"type":"hello","pin":"4826","device":"Rich's phone","proto":1}
+→ {"type":"hello","pin":"4826","device":"Stage phone","proto":1}
 ← {"type":"welcome","proto":1,"pc":"STREAM-PC","obs":"31.1.1","plugin":"0.1.0","audioRate":48000,"videoPort":4468}
 ```
 
 A wrong PIN gets `{"type":"error","code":"bad_pin","message":"…"}` and the connection is closed. After more than five wrong PINs in a row the plugin makes a new PIN. The PIN is shown, and can be changed, under Tools, OBS Director.
 
+To stop the PIN being guessed, each address gets three free tries; after that it must wait 2 s, then 4 s, 8 s and so on, up to 5 minutes, between tries. While it waits, a `hello` gets `{"type":"error","code":"locked_out","message":"…"}` and is closed. A correct PIN clears the wait. At most eight unpaired connections are held at once; more are refused.
+
+The status carries the recording's file name only, never its full path.
+
 ### Status (plugin → app, every 250 ms)
 
 ```json
 {"type":"status","t":1795365974000,
- "rec":{"active":true,"paused":false,"fileTimeMs":2331000,"file":"2026-11-22 20-35-39.mp4","path":"D:/Recordings/2026-11-22 20-35-39.mp4","container":"mp4","bytes":11660000000,"diskFreeMB":421888},
+ "rec":{"active":true,"paused":false,"fileTimeMs":2331000,"file":"2026-11-22 20-35-39.mp4","container":"mp4","bytes":11660000000,"diskFreeMB":421888},
  "stream":{"active":true,"durationMs":6128000,"kbps":5940.2,"dropped":214,"total":367680,"congestion":0.0},
  "pc":{"cpu":18.4,"fps":60.0,"renderLag":0,"encodeLag":0},
  "scene":"Speaker wide"}

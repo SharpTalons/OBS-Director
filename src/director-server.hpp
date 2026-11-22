@@ -102,6 +102,16 @@ private:
 	QString currentPin;
 	int badPinCount = 0;
 
+	/* wrong-PIN backoff per address, so the 4-digit PIN can't be guessed by brute force */
+	struct Lockout {
+		int failures = 0;
+		qint64 until = 0;
+	};
+	QHash<QString, Lockout> lockouts;
+	bool lockedOut(const QString &ip);
+	void recordBadPin(const QString &ip);
+	int unpairedCount() const;
+
 	/* who last asked to start or stop the recording, so the app can tell "it wasn't you" */
 	QString pendingRecordBy;
 	QString lastStopBy;

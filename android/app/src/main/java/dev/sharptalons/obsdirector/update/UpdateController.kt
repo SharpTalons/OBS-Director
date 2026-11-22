@@ -16,7 +16,7 @@ import kotlinx.coroutines.withContext
 import java.io.File
 
 /**
- * The update check's state and actions (Design-Constants update-check, UpdateController.kt).
+ * The update check's state and actions.
  * The app has no view model, so this lives as a process-wide object next to Director; it is
  * started from DirectorApp, which makes the automatic check run once per process start.
  */

@@ -4,7 +4,7 @@ import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
 
-/** Downloads over HTTPS only (Design-Constants update-check, Net.kt). */
+/** Downloads over HTTPS only. */
 object Net {
     /**
      * Saves [url] to [dest], following at most 5 redirects, each HTTPS (GitHub sends downloads

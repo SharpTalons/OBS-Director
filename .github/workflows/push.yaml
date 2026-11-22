@@ -1,6 +1,6 @@
 name: Push
 run-name: ${{ github.ref_name }} push run 🚀
-# Every push to main builds the plugin for Windows, macOS and Ubuntu and the signed Android
+# Every push to main builds the Windows plugin installer and the signed Android
 # app, then publishes them as release v<version> (the version in buildspec.json), marked
 # latest. Pushing main again without a version bump refreshes that release's files. The
 # app's in-app update check reads releases/latest, so only app releases are ever "latest".
@@ -26,7 +26,6 @@ jobs:
   build-project:
     name: Build Project 🧱
     uses: ./.github/workflows/build-project.yaml
-    secrets: inherit
     permissions:
       contents: read
 
@@ -61,7 +60,6 @@ jobs:
         run: |
           shopt -s nullglob extglob
           mkdir -p release
-          commit_hash="${GITHUB_SHA:0:9}"
 
           # The app: OBS-Director-<version>.apk, the name the in-app update check looks for.
           apk="artifacts/obs-director-android-${VER}/OBS-Director-${VER}.apk"
@@ -71,10 +69,13 @@ jobs:
           fi
           cp "${apk}" release/
 
-          # The plugin for each OS
-          for f in artifacts/*-@(windows-x64|macos-universal|ubuntu-24.04-x86_64|sources)-${commit_hash}/*.@(zip|exe|pkg|tar.xz|deb|ddeb); do
-            cp "${f}" release/
-          done
+          # The plugin: OBS-Director-<version>-Windows-Setup.exe
+          exe="artifacts/obs-director-windows-${VER}/OBS-Director-${VER}-Windows-Setup.exe"
+          if [[ ! -f "${exe}" ]]; then
+            echo "::error::OBS-Director-${VER}-Windows-Setup.exe is missing from the Windows build. Nothing was published."
+            exit 1
+          fi
+          cp "${exe}" release/
           ls -la release
 
       - uses: actions/checkout@v4
@@ -96,7 +97,7 @@ jobs:
             echo ""
             echo "### Install"
             echo "- **Phone:** download \`OBS-Director-${VER}.apk\` on your Android phone and open it. It updates an earlier OBS Director in place and keeps your clips and settings. The app also offers this update by itself."
-            echo "- **OBS:** the plugin for your OS (Windows installer or zip, macOS pkg, Ubuntu deb). Needs OBS 31 or later."
+            echo "- **OBS (Windows):** close OBS, run \`OBS-Director-${VER}-Windows-Setup.exe\` and follow the steps. Needs OBS Studio 33 or later. It installs to \`C:\\ProgramData\\obs-studio\\plugins\\obs-director\` as OBS expects, and removes any older copy."
             echo ""
             echo "Android build ${CODE}, from commit ${GITHUB_SHA::7}."
             echo ""
@@ -114,8 +115,15 @@ jobs:
           # A pre-release (0.2.0-beta1) is never "latest", so the update check doesn't offer it.
           if [[ "${VER}" == *-* ]]; then latest=(--prerelease --latest=false); else latest=(--latest); fi
           if gh release view "${tag}" --repo "${GITHUB_REPOSITORY}" > /dev/null 2>&1; then
-            # Same version pushed again without a bump: refresh the files on that release.
+            # Same version pushed again without a bump: refresh the files on that release,
+            # and remove files this build no longer makes, so the release holds only current ones.
             gh release upload "${tag}" release/* --clobber --repo "${GITHUB_REPOSITORY}"
+            gh release view "${tag}" --repo "${GITHUB_REPOSITORY}" --json assets --jq '.assets[].name' | while read -r name; do
+              if [[ ! -f "release/${name}" ]]; then
+                echo "Removing ${name}, which this build no longer makes"
+                gh release delete-asset "${tag}" "${name}" --yes --repo "${GITHUB_REPOSITORY}"
+              fi
+            done
             gh release edit "${tag}" --title "${title}" --notes-file notes.md "${latest[@]}" --repo "${GITHUB_REPOSITORY}"
           else
             gh release create "${tag}" release/* --target "${GITHUB_SHA}" --title "${title}" --notes-file notes.md "${latest[@]}" --repo "${GITHUB_REPOSITORY}"

@@ -47,25 +47,35 @@ function Package {
     $ProductName = $BuildSpec.name
     $ProductVersion = $BuildSpec.version
 
-    $OutputName = "${ProductName}-${ProductVersion}-windows-${Target}"
+    # The installer, named like the app: OBS-Director-<version>-Windows-Setup.exe
+    $OutputName = "OBS-Director-${ProductVersion}-Windows-Setup"
+    $SourceDir = "${ProjectRoot}/release/${Configuration}/${ProductName}"
 
-    $RemoveArgs = @{
-        ErrorAction = 'SilentlyContinue'
-        Path = @(
-            "${ProjectRoot}/release/${ProductName}-*-windows-*.zip"
-        )
+    if ( ! ( Test-Path -Path "${SourceDir}/${ProductName}.dll" ) ) {
+        throw "${ProductName}.dll is missing from ${SourceDir}. Did the build's install step run?"
     }
 
-    Remove-Item @RemoveArgs
+    Remove-Item -ErrorAction SilentlyContinue -Path "${ProjectRoot}/release/OBS-Director-*-Windows-Setup.exe"
 
-    Log-Group "Archiving ${ProductName}..."
-    $CompressArgs = @{
-        Path = (Get-ChildItem -Path "${ProjectRoot}/release/${Configuration}" -Exclude "${OutputName}*.*")
-        CompressionLevel = 'Optimal'
-        DestinationPath = "${ProjectRoot}/release/${OutputName}.zip"
-        Verbose = ($Env:CI -ne $null)
+    Log-Group "Finding Inno Setup..."
+    $Iscc = "${env:ProgramFiles(x86)}/Inno Setup 6/ISCC.exe"
+    if ( ! ( Test-Path -Path $Iscc ) ) {
+        Invoke-External choco install innosetup --yes --no-progress
     }
-    Compress-Archive -Force @CompressArgs
+    if ( ! ( Test-Path -Path $Iscc ) ) {
+        throw "Inno Setup 6 (ISCC.exe) is not available."
+    }
+    Log-Group
+
+    Log-Group "Building ${OutputName}.exe..."
+    $IsccArgs = @(
+        "/DAppVersion=${ProductVersion}"
+        "/DSourceDir=$((Resolve-Path -Path $SourceDir).Path)"
+        "/DOutputDir=$((Resolve-Path -Path "${ProjectRoot}/release").Path)"
+        "/DOutputName=${OutputName}"
+        "${ProjectRoot}/cmake/windows/resources/installer.iss"
+    )
+    Invoke-External $Iscc @IsccArgs
     Log-Group
 }
 

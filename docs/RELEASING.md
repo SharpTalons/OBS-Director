@@ -13,7 +13,7 @@ One version for the whole project, following [Semantic Versioning](https://semve
 | Release tag | `v<version>`, for example `v0.1.0` |
 | Release title | `OBS Director <version>` |
 | App | `OBS-Director-<version>.apk` |
-| Plugin | `OBS Director-<version>-windows-x64` (installer and zip), `-macos-universal.pkg`, `-x86_64-linux-gnu.deb` |
+| Plugin (Windows only) | `OBS-Director-<version>-Windows-Setup.exe` |
 | Marked latest | every release; a pre-release (`0.2.0-beta1`) never is |
 
 ## To release
@@ -45,6 +45,10 @@ base64 -w0 release.jks
 
 Paste the second command's output into `ANDROID_KEYSTORE_BASE64`, then delete any copy of the key from the working tree. `.gitignore` blocks `*.jks`, `*.keystore` and other key files from being committed.
 
-## macOS signing (optional)
+## Windows installer
 
-The macOS package is signed and notarized when the `MACOS_SIGNING_*` and `MACOS_NOTARIZATION_*` secrets are set (see [`.github/workflows/build-project.yaml`](../.github/workflows/build-project.yaml)). Without them it builds unsigned.
+The plugin is built for Windows only. [`cmake/windows/resources/installer.iss`](../cmake/windows/resources/installer.iss) (Inno Setup 6) installs it in OBS Studio 33's plugin layout, `C:\ProgramData\obs-studio\plugins\obs-director\obs-director.dll` with `data\` beside it. It also removes copies from the legacy locations (Program Files, and the old `bin\64bit` layout), which OBS stops loading in version 34. It refuses to install over an OBS older than 33.
+
+Keep the installer's `AppId` unchanged: Windows uses it to match upgrades and the uninstaller.
+
+The installer is not code-signed yet, so Windows SmartScreen warns on first run. To sign it, add a code-signing certificate as Actions secrets and a `signtool` step after `Package-Windows.ps1`.

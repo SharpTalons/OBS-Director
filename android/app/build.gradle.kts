@@ -17,7 +17,12 @@ val appVersion = buildspec["version"] as String
 val versionParts = appVersion.substringBefore('-').split('.').map { it.toInt() }
 val appVersionCode = versionParts[0] * 10000 + versionParts[1] * 100 + versionParts[2]
 
-/* Release signing comes from CI secrets; without them the release build is signed with the debug key. */
+/*
+ * Release signing: the app's one permanent key, from CI secrets. Updates install over the old
+ * version only when both are signed with the same key, so a release is never signed with a
+ * throwaway debug key: without the key the release APK is left unsigned, and CI refuses to
+ * publish it (see .github/workflows/android.yaml).
+ */
 val keystorePath: String? = System.getenv("ANDROID_KEYSTORE_PATH")
 val hasReleaseKey = !keystorePath.isNullOrBlank() && file(keystorePath).exists()
 
@@ -50,7 +55,7 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            signingConfig = if (hasReleaseKey) signingConfigs.getByName("release") else signingConfigs.getByName("debug")
+            signingConfig = if (hasReleaseKey) signingConfigs.getByName("release") else null
         }
         debug {
             applicationIdSuffix = ".debug"
@@ -88,4 +93,5 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
     debugImplementation("androidx.compose.ui:ui-tooling")
+    testImplementation("junit:junit:4.13.2")
 }

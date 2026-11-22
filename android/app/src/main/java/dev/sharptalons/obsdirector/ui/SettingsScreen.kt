@@ -6,16 +6,12 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Power
-import androidx.compose.material.icons.outlined.Refresh
-import androidx.compose.material.icons.outlined.SystemUpdate
 import androidx.compose.material.icons.outlined.WifiOff
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import dev.sharptalons.obsdirector.core.Director
@@ -23,10 +19,6 @@ import dev.sharptalons.obsdirector.core.Exporter
 import dev.sharptalons.obsdirector.core.LinkState
 import dev.sharptalons.obsdirector.core.Prefs
 import dev.sharptalons.obsdirector.core.Tag
-import dev.sharptalons.obsdirector.update.Updater
-import kotlinx.coroutines.launch
-import java.text.DateFormat
-import java.util.Date
 
 @Composable
 private fun Section(title: String, why: String, content: @Composable () -> Unit) {
@@ -42,9 +34,6 @@ fun SettingsScreen(onConnect: () -> Unit) {
     val link by Director.link.collectAsState()
     val pc by Director.pc.collectAsState()
     val latency by Director.latencyMs.collectAsState()
-    val update by Updater.status.collectAsState()
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
 
     Text("Saved on this device only.", style = Type.finding)
     DCard {
@@ -148,34 +137,8 @@ fun SettingsScreen(onConnect: () -> Unit) {
                 SettingRow("Tell the desk when you're listening") { DSwitch(s.deskPresence, { v -> Prefs.update { it.copy(deskPresence = v) } }) }
             }
 
-            Section("Updates", "New versions come from the project's GitHub releases.") {
-                SettingRow("This version") { Text(Updater.currentVersion, style = Type.mono) }
-                SettingRow("Check automatically once a day") { DSwitch(s.autoCheckUpdates, { v -> Prefs.update { it.copy(autoCheckUpdates = v) } }) }
-                when (val u = update) {
-                    is Updater.State.Available -> {
-                        SettingRow("Version ${u.release.version} is ready") {
-                            PrimaryButton("Download", Icons.Outlined.SystemUpdate, height = 34.dp) { Updater.download(context, u.release) }
-                        }
-                        if (u.release.notes.isNotBlank()) Text(u.release.notes.take(800), style = Type.small, modifier = Modifier.padding(vertical = 8.dp))
-                    }
-                    is Updater.State.Downloading -> SettingRow("Downloading ${u.release.version}…") { Text("see notifications", style = Type.small) }
-                    is Updater.State.ReadyToInstall -> SettingRow("Version ${u.release.version} downloaded") {
-                        PrimaryButton("Install", Icons.Outlined.SystemUpdate, height = 34.dp) { Updater.install(context, u.file) }
-                    }
-                    else -> SettingRow(
-                        when (u) {
-                            is Updater.State.Checking -> "Checking…"
-                            is Updater.State.UpToDate -> "Up to date · checked ${DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(u.checkedAt))}"
-                            is Updater.State.Failed -> u.message
-                            else -> if (s.lastUpdateCheck > 0) "Last checked ${DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(s.lastUpdateCheck))}" else "Not checked yet"
-                        }
-                    ) { OutlineButton("Check now", Icons.Outlined.Refresh, height = 34.dp) { scope.launch { Updater.check(context) } } }
-                }
-                if (!Updater.canInstall(context)) Text("To install updates, Android will ask you to allow OBS Director to install apps the first time.", style = Type.small, modifier = Modifier.padding(top = 6.dp))
-            }
-
-            Section("About", "Versions on both ends.") {
-                SettingRow("OBS Director on this device") { Text(Updater.currentVersion, style = Type.mono) }
+            Section("About", "This app, and how it stays up to date.") {
+                UpdateRow()
                 SettingRow("This device's name in OBS") { Text(s.deviceName, style = Type.body) }
             }
         }

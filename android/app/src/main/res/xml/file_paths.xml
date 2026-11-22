@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- What the app may hand to Android's installer: only a downloaded update.
+     Keep it to this one folder; never expose the whole cache or files directory. -->
 <paths>
-    <external-files-path name="updates" path="Download/" />
-    <files-path name="exports" path="exports/" />
-    <files-path name="sessions" path="sessions/" />
+    <cache-path name="update" path="update/" />
 </paths>

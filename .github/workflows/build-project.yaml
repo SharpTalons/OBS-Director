@@ -42,7 +42,8 @@ jobs:
               ;;
             push)
               config_data=('codesign:true' 'notarize:false' 'package:true' 'config:RelWithDebInfo')
-              if [[ ${GITHUB_REF_NAME} =~ [0-9]+.[0-9]+.[0-9]+(-(rc|beta).+)? ]]; then
+              # main is what gets published as a release, so it builds the Release config
+              if [[ ${GITHUB_REF_NAME} == main || ${GITHUB_REF_NAME} == master || ${GITHUB_REF_NAME} =~ ^v?[0-9]+.[0-9]+.[0-9]+(-(rc|beta).+)?$ ]]; then
                 config_data[1]='notarize:true'
                 config_data[3]='config:Release'
               fi

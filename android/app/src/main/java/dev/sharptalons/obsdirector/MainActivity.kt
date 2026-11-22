@@ -14,7 +14,6 @@ import dev.sharptalons.obsdirector.core.LinkState
 import dev.sharptalons.obsdirector.core.Prefs
 import dev.sharptalons.obsdirector.ui.AppShell
 import dev.sharptalons.obsdirector.ui.DirectorTheme
-import dev.sharptalons.obsdirector.update.Updater
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 
@@ -36,12 +35,6 @@ class MainActivity : ComponentActivity() {
                     if (on) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
                     else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
                 }
-        }
-
-        // a quiet update check, at most once a day
-        val s = Prefs.settings.value
-        if (s.autoCheckUpdates && System.currentTimeMillis() - s.lastUpdateCheck > 86_400_000L) {
-            lifecycleScope.launch { Updater.check(this@MainActivity, quiet = true) }
         }
     }
 

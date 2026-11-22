@@ -28,11 +28,14 @@ First release of the plugin and the Android app.
 - Alerts: silent mix, clipping, recording stopped by someone else, disk nearly full, dropped frames, connection lost.
 - Keeps playing with the screen off; clip controls in the notification.
 - Auto-ends a running clip and reconnects when the network drops.
-- In-app updates from GitHub Releases.
+- In-app updates: checks this repository's releases each time the app opens, asks once with Update and Ignore, downloads with a percentage and hands the new version to Android's installer, keeping clips and settings. Settings, About has Check for updates and the release page.
+
+### Releases
+- Every push to `main` publishes release `v<version>` with the plugin for Windows, macOS and Ubuntu and `OBS-Director-<version>.apk`, marked latest. Releases are signed with the app's permanent key only.
 
 ### Known limits
 - The browser version (WebRTC and WebSocket modes) is not built yet; the app uses Direct UDP.
 - Audio missing from the phone's copy during a Wi-Fi drop is not yet refilled from the PC.
 
-[Unreleased]: https://github.com/SharpTalons/OBS-Director/compare/0.1.0...HEAD
-[0.1.0]: https://github.com/SharpTalons/OBS-Director/releases/tag/0.1.0
+[Unreleased]: https://github.com/SharpTalons/OBS-Director/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/SharpTalons/OBS-Director/releases/tag/v0.1.0

@@ -324,7 +324,7 @@ private suspend fun shareClipAudio(context: Context, r: Recording, c: Clip) {
     val out = File(dir, "${r.file.substringBeforeLast('.')} clip ${Director.tc(c.startMs).replace(':', '-')}.m4a")
     val ok = withContext(Dispatchers.IO) { ClipAudio.cut(src, r.audioOffsetMs, c.startMs, c.endMs, out) }
     if (!ok) { Director.toast("Couldn't cut the clip's audio."); return }
-    val uri = FileProvider.getUriForFile(context, "${context.packageName}.files", out)
+    val uri = FileProvider.getUriForFile(context, "${context.packageName}.share", out)
     context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("audio/mp4").putExtra(Intent.EXTRA_STREAM, uri)
         .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION), "Share clip audio").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
 }

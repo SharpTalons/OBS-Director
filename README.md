@@ -16,12 +16,12 @@ OBS Director is two parts:
 - **Desk**: quick and typed messages to the volunteers' dock in OBS; they answer with one tap.
 - **Background**: with the screen off the mix keeps playing and clips can be started and ended from the notification. Video always stops.
 - **Drops**: if Wi-Fi drops, a running clip is saved at the drop, listening pauses, and the app reconnects by itself. OBS keeps recording on the PC throughout.
-- **Updates**: the app checks this repository's releases and installs new versions.
+- **Updates**: each time the app opens it checks this repository's releases. When a newer version is out it asks once, with **Update** and **Ignore**; Update downloads it and hands it to Android's installer, keeping your clips and settings. Settings, About shows the version and a **Check for updates** button. Built to the [Design-Constants update-check spec](https://github.com/SharpTalons/Design-Constants/tree/main/plugins/design-constants/skills/update-check).
 
 ## Install
 
 1. Download the plugin for your OS from the [latest release](https://github.com/SharpTalons/OBS-Director/releases/latest) and install it (Windows installer or zip, macOS pkg, Ubuntu deb). Needs OBS 31 or later.
-2. Install `obs-director-android-<version>.apk` from the same release on your phone (Android 10 or later). Android asks you to allow installing from your browser or file manager the first time.
+2. Install `OBS-Director-<version>.apk` from the same release on your phone (Android 10 or later). Android asks you to allow installing from your browser or file manager the first time. After that, the app updates itself.
 3. In OBS, open **Tools, OBS Director** to see the PIN. On the phone, pick the PC, enter the PIN, connect.
 
 For clips to be written into the recording as chapters, set OBS to record in **Hybrid MP4** (Settings, Output, Recording, Recording Format).
@@ -32,12 +32,19 @@ The phone and the PC must be on the same network. Allow OBS through the Windows 
 
 One version for the whole project, following [Semantic Versioning](https://semver.org): `MAJOR.MINOR.PATCH`.
 
-- The single source of truth is `"version"` in [`buildspec.json`](buildspec.json). The plugin's CMake build reads it, and the Android build reads the same file.
-- Android `versionName` is that version; `versionCode` is `MAJOR × 10000 + MINOR × 100 + PATCH` (so `1.4.2` is `10402`).
-- A release is a git tag with the same version and no prefix (`0.1.0`, or `0.2.0-beta1` for a pre-release). Pushing the tag builds the plugin for Windows, macOS and Ubuntu and the signed Android APK, and publishes a GitHub release with all of them. The app's in-app updater reads that release.
-- Bump MAJOR when the [protocol](docs/PROTOCOL.md) changes in a way older apps or plugins can't follow; MINOR for new features; PATCH for fixes. Changes are listed in [CHANGELOG.md](CHANGELOG.md).
+- The single source of truth is `"version"` in [`buildspec.json`](buildspec.json). The plugin's CMake build reads it, the Android build reads the same file, and CI derives everything else from it.
+- Android `versionName` is that version; `versionCode` is `MAJOR × 10000 + MINOR × 100 + PATCH` (so `1.4.2` is `10402`), so it always goes up with the version.
+- Bump MAJOR when the [protocol](docs/PROTOCOL.md) changes in a way older apps or plugins can't follow, MINOR for new features, PATCH for fixes. Changes are listed in [CHANGELOG.md](CHANGELOG.md).
 
-To release: update `buildspec.json` and `CHANGELOG.md`, merge to `main`, then `git tag 0.1.0 && git push origin 0.1.0`.
+| Thing | Value |
+| --- | --- |
+| Release tag | `v<version>`, for example `v0.1.0` |
+| Release title | `OBS Director <version>` |
+| App | `OBS-Director-<version>.apk` |
+| Plugin | `OBS Director-<version>-windows-x64` (installer and zip), `-macos-universal.pkg`, `-x86_64-linux-gnu.deb` |
+| Marked latest | every release; a pre-release (`0.2.0-beta1`) never is |
+
+**To release:** change `"version"` in `buildspec.json`, add its section to `CHANGELOG.md`, and merge to `main`. The push to `main` builds everything and publishes `v<version>` with the plugin and the app, marked latest; the app on everyone's phone then offers it. Pushing `main` again without a bump replaces that release's files. A pre-release is published as a pre-release, so the update check never offers it.
 
 ## Building
 
@@ -52,7 +59,14 @@ Release APKs must always be signed with the same key, or updates won't install o
 | `ANDROID_KEY_ALIAS` | key alias |
 | `ANDROID_KEY_PASSWORD` | key password |
 
-Without them CI signs with a throwaway debug key and says so in the build log.
+Pull requests build without them, as a debug app (`dev.sharptalons.obsdirector.debug`) that installs beside the real one. A push to `main` refuses to publish without them: an APK signed with any other key would not install over earlier versions, and every in-app update would fail.
+
+To make the key once (keep the file and passwords somewhere safe; losing them means everyone has to uninstall to get updates):
+
+```bash
+keytool -genkeypair -v -keystore obs-director.jks -alias obs-director -keyalg RSA -keysize 4096 -validity 36500
+base64 -w0 obs-director.jks   # paste the output into ANDROID_KEYSTORE_BASE64
+```
 
 **Plugin**: built with [obs-plugintemplate](https://github.com/obsproject/obs-plugintemplate)'s CMake presets and workflows, for example `cmake --preset windows-x64 && cmake --build --preset windows-x64`. See the template's documentation for local setup.
 

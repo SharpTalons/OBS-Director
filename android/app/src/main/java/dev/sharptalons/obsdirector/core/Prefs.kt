@@ -41,9 +41,6 @@ data class Settings(
     // display
     val keepScreenOn: Boolean = true,
     val deskPresence: Boolean = true,
-    // updates
-    val autoCheckUpdates: Boolean = true,
-    val lastUpdateCheck: Long = 0,
 )
 
 private fun defaultDeviceName(): String {
@@ -87,8 +84,6 @@ object Prefs {
             resumeListen = sp.getBoolean("resumeListen", d.resumeListen),
             keepScreenOn = sp.getBoolean("keepScreenOn", d.keepScreenOn),
             deskPresence = sp.getBoolean("deskPresence", d.deskPresence),
-            autoCheckUpdates = sp.getBoolean("autoCheckUpdates", d.autoCheckUpdates),
-            lastUpdateCheck = sp.getLong("lastUpdateCheck", 0),
         )
     }
 
@@ -123,8 +118,6 @@ object Prefs {
             putBoolean("resumeListen", s.resumeListen)
             putBoolean("keepScreenOn", s.keepScreenOn)
             putBoolean("deskPresence", s.deskPresence)
-            putBoolean("autoCheckUpdates", s.autoCheckUpdates)
-            putLong("lastUpdateCheck", s.lastUpdateCheck)
         }.apply()
     }
 }

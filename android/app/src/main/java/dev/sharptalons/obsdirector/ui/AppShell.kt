@@ -55,6 +55,8 @@ import androidx.compose.ui.unit.sp
 import dev.sharptalons.obsdirector.core.ClipStore
 import dev.sharptalons.obsdirector.core.Director
 import dev.sharptalons.obsdirector.core.LinkState
+import dev.sharptalons.obsdirector.core.Prefs
+import dev.sharptalons.obsdirector.update.UpdateController
 import kotlinx.coroutines.delay
 
 @Composable
@@ -70,7 +72,12 @@ fun AppShell() {
     val recordings by ClipStore.recordings.collectAsState()
     val latency by Director.latencyMs.collectAsState()
 
+    val settings by Prefs.settings.collectAsState()
     val showConnect = screen == "connect" || (screen == "monitor" && link == LinkState.DISCONNECTED)
+    // First run: no PC paired yet and the connect screen is up. The update prompt waits for it.
+    val firstRun = showConnect && settings.lastIp.isBlank()
+    val pendingUpdate = UpdateController.update
+    if (UpdateController.updatePrompt && pendingUpdate != null && !firstRun) UpdateDialog(pendingUpdate)
     var now by remember { mutableLongStateOf(android.os.SystemClock.elapsedRealtime()) }
     LaunchedEffect(Unit) { while (true) { delay(1000); now = android.os.SystemClock.elapsedRealtime() } }
     LaunchedEffect(toast) { if (toast != null) { delay(3000); Director.clearToast() } }

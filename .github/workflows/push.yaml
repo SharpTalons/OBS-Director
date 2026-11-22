@@ -1,0 +1,134 @@
+name: Push
+run-name: ${{ github.ref_name }} push run 🚀
+# Every push to main builds the plugin for Windows, macOS and Ubuntu and the signed Android
+# app, then publishes them as release v<version> (the version in buildspec.json), marked
+# latest. Pushing main again without a version bump refreshes that release's files. The
+# app's in-app update check reads releases/latest, so only app releases are ever "latest".
+on:
+  push:
+    branches:
+      - master
+      - main
+      - 'release/**'
+permissions:
+  contents: write
+concurrency:
+  group: '${{ github.workflow }} @ ${{ github.ref }}'
+  cancel-in-progress: false
+jobs:
+  check-format:
+    name: Check Formatting 🔍
+    if: github.ref_name == 'master' || github.ref_name == 'main'
+    uses: ./.github/workflows/check-format.yaml
+    permissions:
+      contents: read
+
+  build-project:
+    name: Build Project 🧱
+    uses: ./.github/workflows/build-project.yaml
+    secrets: inherit
+    permissions:
+      contents: read
+
+  android:
+    name: Android App 🤖
+    uses: ./.github/workflows/android.yaml
+    with:
+      publish: ${{ github.ref_name == 'main' || github.ref_name == 'master' }}
+    secrets: inherit
+    permissions:
+      contents: read
+
+  publish-release:
+    name: Publish Release 🛫
+    if: github.ref_name == 'main' || github.ref_name == 'master'
+    runs-on: ubuntu-24.04
+    needs: [check-format, build-project, android]
+    defaults:
+      run:
+        shell: bash
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VER: ${{ needs.android.outputs.version }}
+      CODE: ${{ needs.android.outputs.versionCode }}
+    steps:
+      - name: Download Build Artifacts 📥
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Collect Files 🏷️
+        run: |
+          shopt -s nullglob extglob
+          mkdir -p release
+          commit_hash="${GITHUB_SHA:0:9}"
+
+          # The app: OBS-Director-<version>.apk, the name the in-app update check looks for.
+          apk="artifacts/obs-director-android-${VER}/OBS-Director-${VER}.apk"
+          if [[ ! -f "${apk}" ]]; then
+            echo "::error::OBS-Director-${VER}.apk is missing from the Android build. Nothing was published."
+            exit 1
+          fi
+          cp "${apk}" release/
+
+          # The plugin for each OS
+          for f in artifacts/*-@(windows-x64|macos-universal|ubuntu-24.04-x86_64|sources)-${commit_hash}/*.@(zip|exe|pkg|tar.xz|deb|ddeb); do
+            cp "${f}" release/
+          done
+          ls -la release
+
+      - uses: actions/checkout@v4
+        with:
+          path: src
+
+      - name: Write Release Notes 📝
+        run: |
+          # This version's section of CHANGELOG.md, then how to install, then checksums.
+          awk -v v="${VER}" '
+            $0 ~ "^## \\[" v "\\]" { on = 1; next }
+            on && /^## \[/ { exit }
+            on { print }
+          ' src/CHANGELOG.md > notes.md
+          if [[ ! -s notes.md ]]; then
+            echo "::warning::CHANGELOG.md has no section for ${VER}; the release notes only say how to install."
+          fi
+          {
+            echo ""
+            echo "### Install"
+            echo "- **Phone:** download \`OBS-Director-${VER}.apk\` on your Android phone and open it. It updates an earlier OBS Director in place and keeps your clips and settings. The app also offers this update by itself."
+            echo "- **OBS:** the plugin for your OS (Windows installer or zip, macOS pkg, Ubuntu deb). Needs OBS 31 or later."
+            echo ""
+            echo "Android build ${CODE}, from commit ${GITHUB_SHA::7}."
+            echo ""
+            echo "### Checksums"
+            for f in release/*; do
+              echo "    ${f##*/}: $(sha256sum "${f}" | cut -d ' ' -f 1)"
+            done
+          } >> notes.md
+          cat notes.md
+
+      - name: Publish v${{ env.VER }} 🛫
+        run: |
+          tag="v${VER}"
+          title="OBS Director ${VER}"
+          # A pre-release (0.2.0-beta1) is never "latest", so the update check doesn't offer it.
+          if [[ "${VER}" == *-* ]]; then latest=(--prerelease --latest=false); else latest=(--latest); fi
+          if gh release view "${tag}" --repo "${GITHUB_REPOSITORY}" > /dev/null 2>&1; then
+            # Same version pushed again without a bump: refresh the files on that release.
+            gh release upload "${tag}" release/* --clobber --repo "${GITHUB_REPOSITORY}"
+            gh release edit "${tag}" --title "${title}" --notes-file notes.md "${latest[@]}" --repo "${GITHUB_REPOSITORY}"
+          else
+            gh release create "${tag}" release/* --target "${GITHUB_SHA}" --title "${title}" --notes-file notes.md "${latest[@]}" --repo "${GITHUB_REPOSITORY}"
+          fi
+          echo "Published ${title}: https://github.com/${GITHUB_REPOSITORY}/releases/tag/${tag}"
+
+      - name: Check the Update Check Can Find It ☑️
+        run: |
+          sleep 5
+          if [[ "${VER}" == *-* ]]; then echo "Pre-release: not offered by the update check."; exit 0; fi
+          found=$(curl -s "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/latest" | jq -r .tag_name)
+          echo "releases/latest is ${found}"
+          [[ "${found}" == "v${VER}" ]] || { echo "::error::releases/latest is ${found}, not v${VER}"; exit 1; }
+          head=$(curl -sL "https://github.com/${GITHUB_REPOSITORY}/releases/download/v${VER}/OBS-Director-${VER}.apk" -r 0-1 | head -c 2)
+          [[ "${head}" == "PK" ]] || { echo "::error::The APK did not download"; exit 1; }
+          echo "The APK downloads."

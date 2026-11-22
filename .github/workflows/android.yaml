@@ -1,0 +1,129 @@
+name: Android App
+on:
+  workflow_call:
+    inputs:
+      publish:
+        description: This build will be published as a release, so it must carry the release key
+        type: boolean
+        default: false
+    outputs:
+      version:
+        description: Version from buildspec.json
+        value: ${{ jobs.android.outputs.version }}
+      versionCode:
+        description: Android versionCode derived from the version
+        value: ${{ jobs.android.outputs.versionCode }}
+  workflow_dispatch:
+jobs:
+  android:
+    name: Build Android App 🤖
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      versionCode: ${{ steps.version.outputs.code }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      APP: OBS-Director
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read Version 🏷️
+        id: version
+        run: |
+          # One version for the whole project: "version" in buildspec.json. The tag (v<version>),
+          # the APK name and the app's versionName all come from it.
+          version="$(jq -r .version buildspec.json)"
+          if [[ ! "${version}" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)(-[0-9A-Za-z.]+)?$ ]]; then
+            echo "::error file=buildspec.json::\"version\" must be MAJOR.MINOR.PATCH (optionally -beta1, -rc1), not \"${version}\""
+            exit 1
+          fi
+          code=$(( BASH_REMATCH[1] * 10000 + BASH_REMATCH[2] * 100 + BASH_REMATCH[3] ))
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "code=${code}" >> "$GITHUB_OUTPUT"
+          echo "Building OBS Director ${version} (versionCode ${code})"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Set Up Signing 🔑
+        id: signing
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          PUBLISH: ${{ inputs.publish }}
+        run: |
+          if [[ -n "${KEYSTORE_BASE64}" ]]; then
+            echo "${KEYSTORE_BASE64}" | base64 --decode > "${RUNNER_TEMP}/release.jks"
+            echo "ANDROID_KEYSTORE_PATH=${RUNNER_TEMP}/release.jks" >> "$GITHUB_ENV"
+            echo "release=true" >> "$GITHUB_OUTPUT"
+            echo "Release signing key found."
+          elif [[ "${PUBLISH}" == "true" ]]; then
+            # Never publish an APK signed with anything but the app's permanent key: it would not
+            # install over earlier versions, and the in-app update would fail for everyone.
+            echo "::error::No release signing key. Add the ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS and ANDROID_KEY_PASSWORD secrets (README, Building), then run this again. Nothing was published."
+            exit 1
+          else
+            echo "release=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::No release signing key in this run, so this is a debug build for testing (package dev.sharptalons.obsdirector.debug). It installs beside the release app, not over it."
+          fi
+
+      - name: Build APK 🧱
+        working-directory: android
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -o pipefail
+          chmod +x gradlew
+          task=assembleDebug
+          [[ "${{ steps.signing.outputs.release }}" == "true" ]] && task=assembleRelease
+          ./gradlew --no-daemon --stacktrace "${task}" testDebugUnitTest 2>&1 | tee "${RUNNER_TEMP}/gradle.log"
+
+      - name: Report Build Errors 🪲
+        if: failure()
+        run: |
+          log="${RUNNER_TEMP}/gradle.log"
+          [[ -f "$log" ]] || exit 0
+          # Kotlin and Android resource errors as annotations on the commit
+          grep -E '^e: |error:|ERROR:|FAILURE:|What went wrong' "$log" | head -40 | while IFS= read -r line; do
+            if [[ "$line" =~ ^e:\ file://([^:]+):([0-9]+):([0-9]+)\ (.*)$ ]]; then
+              f="${BASH_REMATCH[1]#${GITHUB_WORKSPACE}/}"
+              echo "::error file=${f},line=${BASH_REMATCH[2]},col=${BASH_REMATCH[3]}::${BASH_REMATCH[4]}"
+            else
+              echo "::error::${line}"
+            fi
+          done
+          {
+            echo '### Android build failed'
+            echo '```'
+            grep -E -A3 '^e: |error:|What went wrong' "$log" | head -120
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Name the APK after its version 🏷️
+        id: apk
+        run: |
+          # <App>-<version>.apk: the name the in-app update check looks for on the release.
+          version="${{ steps.version.outputs.version }}"
+          mkdir -p release
+          if [[ "${{ steps.signing.outputs.release }}" == "true" ]]; then
+            name="${APP}-${version}.apk"
+            cp android/app/build/outputs/apk/release/app-release.apk "release/${name}"
+          else
+            name="${APP}-${version}-debug.apk"
+            cp android/app/build/outputs/apk/debug/app-debug.apk "release/${name}"
+          fi
+          echo "name=${name}" >> "$GITHUB_OUTPUT"
+          ls -la release
+
+      - name: Upload APK 📡
+        uses: actions/upload-artifact@v4
+        with:
+          name: obs-director-android-${{ steps.version.outputs.version }}
+          path: release/${{ steps.apk.outputs.name }}

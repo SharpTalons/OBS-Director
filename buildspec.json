@@ -30,7 +30,7 @@
     },
     "name": "obs-director",
     "displayName": "OBS Director",
-    "version": "0.4.0",
+    "version": "0.4.1",
     "author": "SharpTalons",
     "website": "https://github.com/SharpTalons/OBS-Director",
     "email": "obs-director@users.noreply.github.com"

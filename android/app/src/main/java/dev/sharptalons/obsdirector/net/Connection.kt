@@ -23,7 +23,10 @@ import kotlinx.serialization.json.put
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.io.OutputStream
+import java.net.ConnectException
 import java.net.InetSocketAddress
+import java.net.NoRouteToHostException
+import java.net.SocketTimeoutException
 import java.net.Socket
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
@@ -70,7 +73,7 @@ class Connection(
                     is Result.Rejected -> { listener.onRejected(result.message); break }
                     is Result.Lost -> {
                         if (result.wasConnected) { everConnected = true; listener.onLost(result.reason) }
-                        if (!everConnected && attempt >= 2) { listener.onRejected("Couldn't reach the PC at $host. Check OBS is open with the plugin and this phone is on the same Wi-Fi. If it still fails, run the latest OBS Director installer on the PC: it lets phones through Windows Firewall."); break }
+                        if (!everConnected && attempt >= 2) { listener.onRejected(whyUnreachable(result.reason)); break }
                         if (!autoReconnect && everConnected) break
                     }
                 }
@@ -81,6 +84,22 @@ class Connection(
         }
     }
 
+    /** What to tell the person when the PC can't be reached at all, by what went wrong. */
+    private fun whyUnreachable(reason: String) = when (reason) {
+        NO_ANSWER -> "The PC at $host didn't answer. Windows Firewall is most likely blocking OBS: on the PC, run the OBS Director installer again and keep \"Allow phones on this network through Windows Firewall\" ticked."
+        REFUSED -> "The PC at $host is there, but OBS isn't accepting phones. Check OBS is open and has Tools, OBS Director in its menu (the plugin needs OBS 33 or later)."
+        SILENT -> "The PC at $host took the connection but OBS didn't reply. Restart OBS and try again."
+        NO_ROUTE -> "This phone can't reach $host. Check the phone is on the same Wi-Fi as the PC, not a guest or mobile network."
+        else -> "Couldn't connect to the PC at $host ($reason). Check OBS is open with the plugin and the phone is on the same Wi-Fi."
+    }
+
+    private companion object {
+        const val NO_ANSWER = "no-answer"
+        const val REFUSED = "refused"
+        const val NO_ROUTE = "no-route"
+        const val SILENT = "silent"
+    }
+
     private sealed class Result {
         data class Rejected(val message: String) : Result()
         data class Lost(val reason: String, val wasConnected: Boolean) : Result()
@@ -88,10 +107,12 @@ class Connection(
 
     private suspend fun runOnce(): Result = withContext(Dispatchers.IO) {
         var connected = false
+        var tcpUp = false
         try {
             val s = Socket()
             s.tcpNoDelay = true
             s.connect(InetSocketAddress(host, port), 4000)
+            tcpUp = true
             // Long enough to wait for someone to press Allow in OBS (the plugin gives up at 2 minutes).
             s.soTimeout = 130_000
             socket = s
@@ -116,6 +137,13 @@ class Connection(
                 }
             }
             Result.Lost("stopped", connected)
+        } catch (e: SocketTimeoutException) {
+            Result.Lost(if (connected) "timeout" else if (tcpUp) SILENT else NO_ANSWER, connected)
+        } catch (e: ConnectException) {
+            // "Connection refused": the PC answered, but nothing is listening on the port.
+            Result.Lost(if (e.message?.contains("refused", ignoreCase = true) == true) REFUSED else (e.message ?: "network error"), connected)
+        } catch (e: NoRouteToHostException) {
+            Result.Lost(NO_ROUTE, connected)
         } catch (e: Exception) {
             Result.Lost(e.message ?: "network error", connected)
         } finally {

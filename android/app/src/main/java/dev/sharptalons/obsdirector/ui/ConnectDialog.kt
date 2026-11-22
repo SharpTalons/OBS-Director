@@ -23,7 +23,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.Close
-import androidx.compose.material.icons.outlined.Computer
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Power
 import androidx.compose.material.icons.outlined.Refresh
@@ -80,9 +79,7 @@ fun ConnectDialog(onDismiss: () -> Unit) {
     val discovery = remember { Discovery(context) }
     val settings by Prefs.settings.collectAsState()
     DisposableEffect(Unit) {
-        discovery.start()
-        // Ask the last PC for its name straight away, so it's listed under its real name.
-        if (settings.lastIp.isNotBlank()) discovery.probe(settings.lastIp)
+        // A fresh list every time: only PCs that answer now are shown.
         discovery.search()
         onDispose { discovery.stop() }
     }
@@ -102,11 +99,8 @@ fun ConnectDialog(onDismiss: () -> Unit) {
     var searchRun by remember { mutableIntStateOf(0) }
     LaunchedEffect(searchRun) { searching = 6; while (searching > 0) { delay(1000); searching-- } }
 
-    val last = if (settings.lastIp.isNotBlank() && found.none { settings.lastPcName.isNotBlank() && it.name == settings.lastPcName })
-        listOf(FoundPc(settings.lastPcName.ifBlank { "PC at ${settings.lastIp}" }, settings.lastIp, settings.lastPort, lastSeen = 0))
-    else emptyList()
-    // Found PCs first: they carry the PC's real name; typed and last-used ones fill in.
-    val pcs = (found + typed + last).distinctBy { it.ip }
+    // Only what the scan finds now, plus an address typed in during this visit.
+    val pcs = (found + typed).distinctBy { it.ip }
 
     LaunchedEffect(link) { if (tapped != null && link == LinkState.CONNECTED) onDismiss() }
 
@@ -135,6 +129,7 @@ fun ConnectDialog(onDismiss: () -> Unit) {
                 }
             }
             Spacer(Modifier.height(8.dp))
+            if (pcs.isNotEmpty()) Text("A yellow dot means the PC answered the scan and is ready. Tap it to connect.", style = Type.small, modifier = Modifier.padding(bottom = 6.dp))
             if (pcs.isEmpty()) {
                 Text(
                     if (searching > 0) "Looking for OBS… Make sure OBS is open on the PC, with the plugin installed, on the same Wi-Fi as this phone."
@@ -219,13 +214,21 @@ private fun PcRow(p: FoundPc, status: RowStatus, onDisconnect: () -> Unit, onCli
             .clickable(onClick = onClick).padding(horizontal = 12.dp, vertical = 10.dp),
     ) {
         Row(Modifier.heightIn(min = 40.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Outlined.Computer, null, tint = if (active) edge else T.accent, modifier = Modifier.size(24.dp))
+            // Yellow: found by the scan, ready to connect. Green: connected. Grey: typed in, not found.
+            val found = p.lastSeen > 0L
+            val dot = when (status) {
+                is RowStatus.Connected -> T.positive
+                is RowStatus.Failed -> T.negative
+                else -> if (found) T.warning else T.idle
+            }
+            Box(Modifier.size(24.dp), contentAlignment = Alignment.Center) {
+                Box(Modifier.size(12.dp).clip(CircleShape).background(dot))
+            }
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Text(p.name, style = Type.body.copy(fontWeight = FontWeight.Medium))
                 Text(
-                    listOfNotNull(p.ip, p.plugin.takeIf { it.isNotBlank() }?.let { "plugin $it" },
-                        if (p.lastSeen == 0L) "last used" else null).joinToString("  ·  "),
+                    listOfNotNull(p.ip, if (p.lastSeen > 0L) "ready to connect" else "typed in, not found by the scan").joinToString("  ·  "),
                     style = Type.mono.copy(color = T.muted),
                 )
             }

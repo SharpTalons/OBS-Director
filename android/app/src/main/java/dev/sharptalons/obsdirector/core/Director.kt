@@ -49,6 +49,9 @@ object Director {
     val pc: StateFlow<FoundPc?> get() = pcState
     private val linkError = MutableStateFlow<String?>(null)
     val error: StateFlow<String?> get() = linkError
+    /** Set while OBS is asking someone at the PC to press Allow for this phone. */
+    private val approvalState = MutableStateFlow<String?>(null)
+    val awaitingApproval: StateFlow<String?> get() = approvalState
     private val lostSince = MutableStateFlow(0L)
     val lostAt: StateFlow<Long> get() = lostSince
     private val retries = MutableStateFlow(0)
@@ -125,7 +128,8 @@ object Director {
 
     // =============================================================== connect
 
-    fun connect(target: FoundPc, pin: String) {
+    /** Connect to [target]. The first time, OBS asks someone at the PC to press Allow. */
+    fun connect(target: FoundPc) {
         disconnect(keepError = false)
         val s = Prefs.settings.value
         pcState.value = target
@@ -133,13 +137,15 @@ object Director {
         linkState.value = LinkState.CONNECTING
         welcomed = false
         listenState.value = s.autoListen
-        Prefs.update { it.copy(lastIp = target.ip, lastPort = target.port, lastPin = pin, lastPcName = target.name) }
+        Prefs.update { it.copy(lastIp = target.ip, lastPort = target.port, lastPcName = target.name) }
 
-        val conn = Connection(target.ip, target.port, pin, s.deviceName, object : Connection.Listener {
+        val conn = Connection(target.ip, target.port, s.deviceId, s.deviceName, object : Connection.Listener {
             override fun onWelcome(info: JsonObject) = onWelcomed(info)
             override fun onMessage(msg: JsonObject) = onPluginMessage(msg)
             override fun onLost(reason: String) = onLinkLost()
+            override fun onPending(message: String) { approvalState.value = message }
             override fun onRejected(message: String) {
+                approvalState.value = null
                 linkError.value = message
                 linkState.value = LinkState.DISCONNECTED
                 stopAudio()
@@ -160,6 +166,7 @@ object Director {
         stopAudio()
         finishRecorder()
         linkState.value = LinkState.DISCONNECTED
+        approvalState.value = null
         if (!keepError) linkError.value = null
         alertState.value = emptyList()
         if (::app.isInitialized) MonitorService.stop(app)
@@ -167,8 +174,11 @@ object Director {
 
     private fun onWelcomed(info: JsonObject) {
         welcomed = true
+        approvalState.value = null
         pluginVersion = info["plugin"]?.jsonPrimitive?.content ?: ""
         val name = info["pc"]?.jsonPrimitive?.content
+        // Remember the PC's real name, so a PC typed in by address shows its name next time.
+        if (!name.isNullOrBlank()) Prefs.update { it.copy(lastPcName = name) }
         pcState.value = pcState.value?.copy(name = name ?: pcState.value?.name ?: "OBS PC", plugin = pluginVersion,
             obs = info["obs"]?.jsonPrimitive?.content ?: "")
         val wasLost = linkState.value == LinkState.LOST

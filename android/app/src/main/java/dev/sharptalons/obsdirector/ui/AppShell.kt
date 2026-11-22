@@ -74,6 +74,7 @@ fun AppShell() {
     val reconnected by Director.reconnectedAfterMs.collectAsState()
     val recordings by ClipStore.recordings.collectAsState()
     val latency by Director.latencyMs.collectAsState()
+    val awaiting by Director.awaitingApproval.collectAsState()
 
     val settings by Prefs.settings.collectAsState()
     // The connect pop-up, from the connect icon in the top bar. On first run (no PC paired
@@ -118,7 +119,7 @@ fun AppShell() {
                     Text(
                         when (link) {
                             LinkState.CONNECTED -> "${pc?.name ?: "OBS PC"}  ·  Direct UDP, $latency ms"
-                            LinkState.CONNECTING -> "Connecting to ${pc?.name ?: pc?.ip ?: "the PC"}…"
+                            LinkState.CONNECTING -> if (awaiting != null) "Waiting for Allow in OBS on ${pc?.name ?: "the PC"}" else "Connecting to ${pc?.name ?: pc?.ip ?: "the PC"}…"
                             LinkState.LOST -> "${pc?.name ?: "OBS PC"}  ·  reconnecting"
                             LinkState.DISCONNECTED -> "Not connected"
                         },
@@ -201,20 +202,27 @@ private fun ConnectIcon(link: LinkState, onClick: () -> Unit) {
     }
 }
 
-/** Monitor while no PC is connected: one card and one button, which opens the connect pop-up. */
+/** Monitor while no PC is connected: reconnect to the last PC in one tap, or pick another. */
 @Composable
 private fun NotConnected(onConnect: () -> Unit) {
     val settings by Prefs.settings.collectAsState()
+    val error by Director.error.collectAsState()
     Text("Connect this phone to the OBS PC to listen, watch and mark clips.", style = Type.finding)
     Spacer(Modifier.height(16.dp))
     DCard {
         CardHeader("Not connected", Icons.Outlined.Cast)
-        Text(
-            if (settings.lastPcName.isNotBlank()) "Last used: ${settings.lastPcName} (${settings.lastIp})."
-            else "Make sure OBS is open on the PC with the OBS Director plugin, on the same Wi-Fi as this phone.",
-            style = Type.small,
-        )
-        Spacer(Modifier.height(14.dp))
-        PrimaryButton("Connect", Icons.Outlined.Power, Modifier.fillMaxWidth()) { onConnect() }
+        if (settings.lastIp.isNotBlank()) {
+            val name = settings.lastPcName.ifBlank { "PC at ${settings.lastIp}" }
+            PrimaryButton("Connect to $name", Icons.Outlined.Power, Modifier.fillMaxWidth()) {
+                Director.connect(dev.sharptalons.obsdirector.core.FoundPc(name, settings.lastIp, settings.lastPort, lastSeen = 0))
+            }
+            Spacer(Modifier.height(10.dp))
+            OutlineButton("Choose another PC", Icons.Outlined.Cast, Modifier.fillMaxWidth()) { onConnect() }
+        } else {
+            Text("Make sure OBS is open on the PC with the OBS Director plugin, on the same Wi-Fi as this phone.", style = Type.small)
+            Spacer(Modifier.height(14.dp))
+            PrimaryButton("Find PCs", Icons.Outlined.Power, Modifier.fillMaxWidth()) { onConnect() }
+        }
+        error?.let { Text(it, style = Type.small.copy(color = T.negative), modifier = Modifier.padding(top = 10.dp)) }
     }
 }

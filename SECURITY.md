@@ -8,17 +8,23 @@ Include what you found, how to reproduce it, and which version you tested.
 
 ## How OBS Director protects your session
 
-- The plugin only talks to devices on your local network. Don't forward its ports
-  (TCP 4466 and 4468, UDP 4467) to the internet.
-- A phone has to enter the PIN shown under **Tools, OBS Director** before it can see or
-  control anything. Wrong guesses are slowed down per device, and after repeated misses
-  the plugin makes a new PIN.
+- The plugin only talks to devices on your local network. Its installer opens TCP 4466 and 4468
+  and UDP 4467 in Windows Firewall for the local subnet only. Don't forward them to the internet.
+- A phone can only connect after someone at the PC presses **Allow** in OBS. OBS then remembers
+  that phone (by a random ID the app made for itself) and lets it connect without asking again.
+  **Tools, OBS Director** lists the allowed phones; removing one disconnects it at once.
+- After **Deny**, or no answer, that address has to wait before it can ask again, and only a few
+  questions can be open at once, so nobody can flood OBS with requests.
+- The connection isn't encrypted, so treat the network like the room: use it on a network you
+  trust, not open public Wi-Fi.
 - Audio is only sent back to the paired phone's own address. Live video needs a one-time
   token that's only given to a paired phone.
 - The phone gets the recording's file name, never its full path on the PC.
 - Messages from the phone are shown in the OBS dock as plain text.
 - The app downloads updates over HTTPS from this repository's releases only. Android
   refuses an update that isn't signed with the same key as the installed app.
+- When the project's code-signing certificate is set up, the Windows installer, its uninstaller
+  and the plugin DLL are signed; the release notes say whether a release is.
 
-If you think the PIN has been seen by someone it shouldn't have, press **New PIN** under
-**Tools, OBS Director**.
+If a phone you don't recognise is in the allowed list, select it under **Tools, OBS Director** and
+press **Remove**, or press **Remove all** and allow your own phones again.

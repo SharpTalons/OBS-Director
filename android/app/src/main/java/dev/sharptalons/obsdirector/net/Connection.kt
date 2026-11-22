@@ -35,7 +35,7 @@ import java.util.concurrent.atomic.AtomicInteger
 class Connection(
     private val host: String,
     private val port: Int,
-    private val pin: String,
+    private val deviceId: String,
     private val device: String,
     private val listener: Listener,
 ) {
@@ -44,6 +44,8 @@ class Connection(
         fun onMessage(msg: JsonObject)
         fun onLost(reason: String)
         fun onRejected(message: String)
+        /** OBS is asking someone at the PC to press Allow for this phone. */
+        fun onPending(message: String)
         fun onRetry(attempt: Int)
     }
 
@@ -68,7 +70,7 @@ class Connection(
                     is Result.Rejected -> { listener.onRejected(result.message); break }
                     is Result.Lost -> {
                         if (result.wasConnected) { everConnected = true; listener.onLost(result.reason) }
-                        if (!everConnected && attempt >= 2) { listener.onRejected("Couldn't reach $host:$port. Check the PC is on the same network and OBS is open."); break }
+                        if (!everConnected && attempt >= 2) { listener.onRejected("Couldn't reach the PC at $host. Check OBS is open with the plugin and this phone is on the same Wi-Fi. If it still fails, run the latest OBS Director installer on the PC: it lets phones through Windows Firewall."); break }
                         if (!autoReconnect && everConnected) break
                     }
                 }
@@ -90,12 +92,13 @@ class Connection(
             val s = Socket()
             s.tcpNoDelay = true
             s.connect(InetSocketAddress(host, port), 4000)
-            s.soTimeout = 6000
+            // Long enough to wait for someone to press Allow in OBS (the plugin gives up at 2 minutes).
+            s.soTimeout = 130_000
             socket = s
             out = s.getOutputStream()
             val reader = BufferedReader(InputStreamReader(s.getInputStream(), Charsets.UTF_8))
             write(buildJsonObject {
-                put("type", "hello"); put("pin", pin); put("device", device); put("proto", Protocol.VERSION)
+                put("type", "hello"); put("deviceId", deviceId); put("device", device); put("proto", Protocol.VERSION)
             })
             while (isActive && !closed) {
                 val line = reader.readLine() ?: return@withContext Result.Lost("closed", connected)
@@ -103,6 +106,7 @@ class Connection(
                 val msg = runCatching { Json.parseToJsonElement(line).jsonObject }.getOrNull() ?: continue
                 when (msg["type"]?.jsonPrimitive?.content) {
                     "welcome" -> { connected = true; s.soTimeout = 6000; listener.onWelcome(msg) }
+                    "pending" -> listener.onPending(msg["message"]?.jsonPrimitive?.content ?: "Waiting for someone to press Allow in OBS.")
                     "error" -> return@withContext Result.Rejected(msg["message"]?.jsonPrimitive?.content ?: "Rejected by the PC")
                     "result" -> {
                         val id = msg["id"]?.jsonPrimitive?.int ?: -1

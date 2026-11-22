@@ -4,7 +4,7 @@ Monitor and direct an OBS session from your phone while volunteers run the PC.
 
 OBS Director is two parts:
 
-- **The OBS plugin** (this repository's root): runs inside OBS on the streaming PC. It sends the recording and stream status, the program mix and a small live picture to your phone over the local network, takes start/stop/pause commands, writes your clips into the recording as chapter markers, and adds a dock where volunteers see your messages.
+- **The OBS plugin** (this repository's root): runs inside OBS on the Windows streaming PC. It sends the recording and stream status, the program mix and a small live picture to your phone over the local network, takes start/stop/pause commands, writes your clips into the recording as chapter markers, and adds a dock where volunteers see your messages.
 - **The Android app** ([`android/`](android)): listen to the mix, watch record and stream health, start and stop the recording, and mark clips with tags and notes for cutting short videos later.
 
 ## What the app does
@@ -22,26 +22,28 @@ OBS Director is two parts:
 
 ### What you need
 
-- A Windows, macOS or Ubuntu PC with **OBS Studio 31 or later**.
+- A Windows 10 or 11 PC (64-bit) with **OBS Studio 33 or later**.
 - An Android phone with **Android 10 or later**.
 - The phone and the PC on the **same network** (the same Wi-Fi, or the PC wired to the same router).
+
+The plugin is for Windows only.
 
 ### 1. Install the plugin on the PC
 
 1. Close OBS.
-2. Download the plugin for your system from the [latest release](https://github.com/SharpTalons/OBS-Director/releases/latest):
-   - **Windows**: `OBS Director-<version>-windows-x64` installer (or the zip, unpacked into your OBS folder).
-   - **macOS**: `OBS Director-<version>-macos-universal.pkg`.
-   - **Ubuntu**: `OBS Director-<version>-x86_64-linux-gnu.deb`, installed with `sudo apt install ./<file>.deb`.
-3. Open OBS. You should now see **Tools, OBS Director** in the menu and an **OBS Director** dock (turn it on under **Docks** if it's hidden).
+2. Download `OBS-Director-<version>-Windows-Setup.exe` from the [latest release](https://github.com/SharpTalons/OBS-Director/releases/latest) and run it. Windows asks for permission to make changes, because the plugin is installed for everyone on the PC.
+3. Follow the steps. The installer puts the plugin where OBS 33 and later look for plugins, `C:\ProgramData\obs-studio\plugins\obs-director`, and removes any older copy from the legacy locations.
+4. Open OBS. You should now see **Tools, OBS Director** in the menu and an **OBS Director** dock (turn it on under **Docks** if it's hidden).
+
+To update, run the newer installer the same way. To remove the plugin, use **Settings, Apps, Installed apps, OBS Director, Uninstall**. Your PIN is kept, so phones you've paired still connect after an update.
+
+Windows may show "Windows protected your PC" because the installer isn't code-signed yet. Choose **More info**, then **Run anyway**.
 
 ### 2. Let the phone reach the PC
 
 The plugin uses TCP 4466 (control), UDP 4467 (finding the PC) and TCP 4468 (live picture).
 
-- **Windows**: the first time OBS starts with the plugin, Windows asks whether to allow OBS on networks. Allow it on **private** networks. If you missed the prompt, allow OBS in Windows Security, Firewall, Allow an app through firewall, and make sure your Wi-Fi is set to a private network.
-- **macOS**: if asked, allow OBS to accept incoming connections.
-- **Ubuntu**: if you use `ufw`, run `sudo ufw allow 4466,4468/tcp` and `sudo ufw allow 4467/udp`.
+The first time OBS starts with the plugin, Windows asks whether to allow OBS on networks. Allow it on **private** networks. If you missed the prompt, allow OBS in **Windows Security, Firewall & network protection, Allow an app through firewall**, and make sure your Wi-Fi is set to a private network (**Settings, Network & internet, Wi-Fi**, your network, **Private network**).
 
 Keep these ports on your local network. Don't forward them to the internet.
 
@@ -69,6 +71,7 @@ To stop a device from connecting again, press **New PIN** under **Tools, OBS Dir
 - **"That PIN doesn't match"**: check the PIN in **Tools, OBS Director**. After too many wrong PINs the plugin makes you wait before trying again, and may make a new PIN.
 - **Connects, but no sound or picture**: the firewall is letting the control channel through but not UDP 4467 or TCP 4468. Check step 2.
 - **No chapters in the recording**: the recording format isn't Hybrid MP4 (step 3).
+- **The plugin doesn't appear in OBS**: check that OBS is version 33 or later (**Help, About**), then run the installer again.
 
 ## Building from source
 
@@ -80,13 +83,13 @@ cd android && ./gradlew assembleDebug
 
 The debug app (`dev.sharptalons.obsdirector.debug`) installs beside the released one.
 
-**Plugin**: built with [obs-plugintemplate](https://github.com/obsproject/obs-plugintemplate)'s CMake presets, for example:
+**Plugin**: Windows only, with Visual Studio 2022, CMake 3.28 or later and PowerShell 7. Built on [obs-plugintemplate](https://github.com/obsproject/obs-plugintemplate):
 
 ```bash
 cmake --preset windows-x64 && cmake --build --preset windows-x64
 ```
 
-Other presets are `macos` and `ubuntu-x86_64`. See the template's documentation for the tools each platform needs.
+To build the installer as well, install [Inno Setup 6](https://jrsoftware.org/isinfo.php), then run `.github/scripts/Build-Windows.ps1` and `.github/scripts/Package-Windows.ps1` with the `CI` environment variable set. The installer lands in `release/`.
 
 CI builds both on every push and pull request. Maintainers: releasing and signing are described in [docs/RELEASING.md](docs/RELEASING.md).
 

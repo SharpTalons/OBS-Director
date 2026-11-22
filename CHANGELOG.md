@@ -5,10 +5,19 @@ All notable changes to OBS Director (plugin and Android app). The project follow
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-22
+
+The plugin is now Windows only and installs with a setup program, in the plugin layout OBS Studio 33 introduced.
+
 ### Security
 - Plugin: wrong PINs are slowed down per device (three free tries, then 2 s doubling up to 5 minutes), unpaired connections are capped at eight, and the PIN is compared in constant time.
 - Plugin: the status sends the recording's file name only, never its full path, and never falls back to an output URL.
 - Plugin: messages and device names from phones are shown in the dock as plain text.
+
+### Plugin
+- Windows only: the macOS and Ubuntu builds are removed.
+- The plugin now ships as a Windows installer, `OBS-Director-<version>-Windows-Setup.exe`. It installs to OBS Studio 33's plugin layout (`C:\ProgramData\obs-studio\plugins\obs-director`), removes copies from legacy locations that OBS 34 will stop loading, and checks that OBS 33 or later is installed.
+- Needs OBS Studio 33 or later.
 
 ### Docs
 - Step-by-step setup in the README, including firewall and troubleshooting; release and signing notes moved to docs/RELEASING.md; SECURITY.md added.
@@ -45,5 +54,6 @@ First release of the plugin and the Android app.
 - The browser version (WebRTC and WebSocket modes) is not built yet; the app uses Direct UDP.
 - Audio missing from the phone's copy during a Wi-Fi drop is not yet refilled from the PC.
 
-[Unreleased]: https://github.com/SharpTalons/OBS-Director/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/SharpTalons/OBS-Director/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/SharpTalons/OBS-Director/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/SharpTalons/OBS-Director/releases/tag/v0.1.0

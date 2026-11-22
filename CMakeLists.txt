@@ -22,18 +22,12 @@ target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE OBS::obs-frontend-api)
 
 find_package(Qt6 REQUIRED COMPONENTS Core Widgets Network)
 target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE Qt6::Core Qt6::Widgets Qt6::Network)
-target_compile_options(
-  ${CMAKE_PROJECT_NAME}
-  PRIVATE $<$<C_COMPILER_ID:Clang,AppleClang>:-Wno-quoted-include-in-framework-header -Wno-comma>
-)
 set_target_properties(
   ${CMAKE_PROJECT_NAME}
   PROPERTIES AUTOMOC ON AUTOUIC ON AUTORCC ON
 )
 
-if(OS_WINDOWS)
-  target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE ws2_32)
-endif()
+target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE ws2_32)
 
 target_sources(
   ${CMAKE_PROJECT_NAME}

@@ -63,7 +63,7 @@ fun UpdateDialog(u: Updates.Release) {
     )
 }
 
-/** The first row of Settings › About: the installed version, what the last check found, and one action. */
+/** The first row of Settings › Updates and about: the installed version, what the last check found, and one action. */
 @Composable
 fun UpdateRow() {
     val u = vm.update

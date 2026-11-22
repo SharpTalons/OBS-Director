@@ -16,7 +16,7 @@ OBS Director is two parts:
 - **Desk**: quick and typed messages to the volunteers' dock in OBS; they answer with one tap.
 - **Background**: with the screen off the mix keeps playing and clips can be started and ended from the notification. Video always stops.
 - **Drops**: if Wi-Fi drops, a running clip is saved at the drop, listening pauses, and the app reconnects by itself. OBS keeps recording on the PC throughout.
-- **Updates**: each time the app opens it checks this repository's releases. When a newer version is out it asks once, with **Update** and **Ignore**; Update downloads it and hands it to Android's installer, keeping your clips and settings. Settings, About shows the version and a **Check for updates** button.
+- **Updates**: each time the app opens it checks this repository's releases. When a newer version is out it asks once, with **Update** and **Ignore**; Update downloads it and hands it to Android's installer, keeping your clips and settings. To check yourself at any time, open **Settings, Updates and about** and press **Check for updates**; if there's a newer version the button becomes **Update to <version>**.
 
 ## Setup
 

@@ -137,7 +137,7 @@ fun SettingsScreen(onConnect: () -> Unit) {
                 SettingRow("Tell the desk when you're listening") { DSwitch(s.deskPresence, { v -> Prefs.update { it.copy(deskPresence = v) } }) }
             }
 
-            Section("About", "This app, and how it stays up to date.") {
+            Section("Updates and about", "Check for a new version, and see which one you have.") {
                 UpdateRow()
                 SettingRow("This device's name in OBS") { Text(s.deviceName, style = Type.body) }
             }

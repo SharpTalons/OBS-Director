@@ -132,11 +132,17 @@ jobs:
 
       - name: Check the Update Check Can Find It ☑️
         run: |
-          sleep 5
           if [[ "${VER}" == *-* ]]; then echo "Pre-release: not offered by the update check."; exit 0; fi
-          found=$(curl -s "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/latest" | jq -r .tag_name)
-          echo "releases/latest is ${found}"
-          [[ "${found}" == "v${VER}" ]] || { echo "::error::releases/latest is ${found}, not v${VER}"; exit 1; }
+          # GitHub's API can take a little while to report a new release as latest, so keep
+          # asking for up to 2 minutes before calling it a failure.
+          found=""
+          for attempt in $(seq 1 12); do
+            sleep 10
+            found=$(curl -s -H "Authorization: Bearer ${GH_TOKEN}" "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/latest" | jq -r .tag_name)
+            echo "Try ${attempt}: releases/latest is ${found}"
+            [[ "${found}" == "v${VER}" ]] && break
+          done
+          [[ "${found}" == "v${VER}" ]] || { echo "::error::releases/latest is still ${found}, not v${VER}, after 2 minutes"; exit 1; }
           head=$(curl -sL "https://github.com/${GITHUB_REPOSITORY}/releases/download/v${VER}/OBS-Director-${VER}.apk" -r 0-1 | head -c 2)
           [[ "${head}" == "PK" ]] || { echo "::error::The APK did not download"; exit 1; }
           echo "The APK downloads."

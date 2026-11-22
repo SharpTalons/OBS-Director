@@ -5,6 +5,12 @@ All notable changes to OBS Director (plugin and Android app). The project follow
 
 ## [Unreleased]
 
+### Android app
+- The update check now lives under Settings, **Updates and about**, so it's easier to find.
+
+### Releases
+- The release workflow waits up to 2 minutes for GitHub to report the new release as latest, instead of failing after 5 seconds.
+
 ## [0.2.0] - 2026-11-22
 
 The plugin is now Windows only and installs with a setup program, in the plugin layout OBS Studio 33 introduced.

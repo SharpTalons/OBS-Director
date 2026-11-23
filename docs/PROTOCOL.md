@@ -84,6 +84,7 @@ The status carries the recording's file name only, never its full path.
 | `video.start` | | Result has `token`, `port`, `width`, `height` for the video channel |
 | `video.stop` | | Closes this device's video channel |
 | `chapter.add` | `name` | Adds a chapter marker at the current position (OBS 30.2+, Hybrid MP4 only); `ok:false, error:"chapters_unsupported"` otherwise |
+| `clips.write` | `file`, `edl`, `csv` | Saves the clip list next to the recording as `<name>.edl` and `<name>.csv`. `file` is the recording's file name only, and must be a recording OBS made while the plugin was running (`error:"unknown_recording"` otherwise). At most 1 MB each. Result has `files` (the names written) and `pc`. Added in 0.5.0; older plugins answer `unknown_command` |
 | `desk.send` | `id`, `text` | Shows a message in the volunteers' dock |
 | `desk.feed` | `text` | Adds a line to the dock's activity feed |
 

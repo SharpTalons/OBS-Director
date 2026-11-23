@@ -41,6 +41,12 @@ data class Settings(
     val resumeListen: Boolean = true,
     // display
     val keepScreenOn: Boolean = true,
+    /** Show a floating bubble with the time and a Clip button when the app is in the background. */
+    val bubble: Boolean = true,
+    /** Warn when the phone's battery drops below this percent; 0 = off. */
+    val batteryWarn: Int = 15,
+    /** Have the plugin save each recording's clip list (EDL and CSV) next to the recording. */
+    val pcClipLists: Boolean = true,
     val deskPresence: Boolean = true,
 )
 
@@ -84,6 +90,9 @@ object Prefs {
             autoReconnect = sp.getBoolean("autoReconnect", d.autoReconnect),
             resumeListen = sp.getBoolean("resumeListen", d.resumeListen),
             keepScreenOn = sp.getBoolean("keepScreenOn", d.keepScreenOn),
+            bubble = sp.getBoolean("bubble", d.bubble),
+            batteryWarn = sp.getInt("batteryWarn", d.batteryWarn),
+            pcClipLists = sp.getBoolean("pcClipLists", d.pcClipLists),
             deskPresence = sp.getBoolean("deskPresence", d.deskPresence),
         )
     }
@@ -118,6 +127,9 @@ object Prefs {
             putBoolean("autoReconnect", s.autoReconnect)
             putBoolean("resumeListen", s.resumeListen)
             putBoolean("keepScreenOn", s.keepScreenOn)
+            putBoolean("bubble", s.bubble)
+            putInt("batteryWarn", s.batteryWarn)
+            putBoolean("pcClipLists", s.pcClipLists)
             putBoolean("deskPresence", s.deskPresence)
         }.apply()
     }

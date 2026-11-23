@@ -22,6 +22,7 @@ the Free Software Foundation; either version 2 of the License, or
 
 #include <QDateTime>
 #include <QFileInfo>
+#include <QSaveFile>
 #include <QHostAddress>
 #include <QHostInfo>
 #include <QApplication>
@@ -744,6 +745,33 @@ void DirectorServer::handleCommand(Client &c, int id, const QString &cmd, const 
 		bool ok = obs_frontend_recording_add_chapter(name.isEmpty() ? nullptr : name.toUtf8().constData());
 		return result(c, id, ok, {}, ok ? QString() : QStringLiteral("chapters_unsupported"));
 	}
+	if (cmd == "clips.write") {
+		/* The phone's clip list for one recording, saved next to it as <name>.edl and <name>.csv
+		 * so the editor finds it. Only for recordings OBS made while this plugin was running,
+		 * only those two extensions, and at most 1 MB each. */
+		QString file = args.value("file").toString();
+		if (file.isEmpty() || file != QFileInfo(file).fileName() || !recordedFiles.contains(file))
+			return result(c, id, false, {}, "unknown_recording");
+		QFileInfo rec(recordedFiles.value(file));
+		QJsonObject written;
+		for (const char *ext : {"edl", "csv"}) {
+			QString text = args.value(QString::fromLatin1(ext)).toString();
+			if (text.isEmpty())
+				continue;
+			QByteArray bytes = text.toUtf8();
+			if (bytes.size() > 1024 * 1024)
+				return result(c, id, false, {}, "too_large");
+			QString out = rec.absolutePath() + "/" + rec.completeBaseName() + "." + ext;
+			QSaveFile f(out);
+			if (!f.open(QIODevice::WriteOnly) || f.write(bytes) != bytes.size() || !f.commit())
+				return result(c, id, false, {}, "write_failed");
+			written[QString::fromLatin1(ext)] = QFileInfo(out).fileName();
+		}
+		QJsonObject d;
+		d["files"] = written;
+		d["pc"] = QHostInfo::localHostName();
+		return result(c, id, true, d);
+	}
 	if (cmd == "desk.send") {
 		QString text = args.value("text").toString().left(200);
 		QString mid = args.value("id").toString().left(64);
@@ -760,6 +788,15 @@ void DirectorServer::handleCommand(Client &c, int id, const QString &cmd, const 
 }
 
 /* ---------------- video ---------------- */
+
+void DirectorServer::rememberRecording(const QString &path)
+{
+	if (path.isEmpty())
+		return;
+	if (recordedFiles.size() > 500)
+		recordedFiles.clear();
+	recordedFiles.insert(QFileInfo(path).fileName(), QFileInfo(path).absoluteFilePath());
+}
 
 void DirectorServer::onVideoConnection()
 {
@@ -833,8 +870,11 @@ QJsonObject DirectorServer::buildStatus()
 	rec["fileTimeMs"] = double(audio->fileTimeUs() / 1000);
 	obs_output_t *ro = obs_frontend_get_recording_output();
 	QString path = outputPath(ro);
-	if (!path.isEmpty())
+	if (!path.isEmpty()) {
 		lastFile = path;
+		if (recording)
+			rememberRecording(path);
+	}
 	/* file name only: the full path can contain the PC's account name */
 	rec["file"] = QFileInfo(lastFile).fileName();
 	rec["container"] = QFileInfo(lastFile).suffix().toLower();
@@ -987,6 +1027,7 @@ void DirectorServer::handleFrontendEvent(enum obs_frontend_event e)
 		if (last) {
 			lastFile = QString::fromUtf8(last);
 			bfree(last);
+			rememberRecording(lastFile);
 		}
 		d["by"] = lastStopBy;
 		d["file"] = QFileInfo(lastFile).fileName();

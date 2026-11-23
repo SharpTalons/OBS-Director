@@ -41,7 +41,11 @@ class AudioEngine(private val onPcm: (pcm: ShortArray, fileTimeUs: Long, recordi
     private var track: AudioTrack? = null
 
     @Volatile var listening = true
+    /** 0..3: up to 1 is the player's own volume; above 1 the mix is boosted here, with a soft limiter. */
     @Volatile var volume = 0.8f
+    /** Follows the phone's active output and says when to make a fresh track. */
+    @Volatile var router: OutputRouter? = null
+    private var boosted = ShortArray(0)
     /** 0 = adaptive (starts at 10 ms, grows when packets arrive late) */
     @Volatile var targetBufferMs = 0
 
@@ -93,15 +97,20 @@ class AudioEngine(private val onPcm: (pcm: ShortArray, fileTimeUs: Long, recordi
         thread = null
         socket = null
         releaseTrack()
+        router?.releaseCallRoute()
         levelState.value = Levels()
     }
 
     private fun makeTrack(): AudioTrack {
+        val route = router?.current()
+        router?.dirty = false
+        route?.let { router?.applyCallRoute(it) }
         val minBytes = AudioTrack.getMinBufferSize(RATE, AudioFormat.CHANNEL_OUT_STEREO, AudioFormat.ENCODING_PCM_16BIT)
-        return AudioTrack.Builder()
+        val t = AudioTrack.Builder()
             .setAudioAttributes(
                 AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                    // A call-only Bluetooth headset only hears the call channel.
+                    .setUsage(if (route?.callChannel == true) AudioAttributes.USAGE_VOICE_COMMUNICATION else AudioAttributes.USAGE_MEDIA)
                     .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
                     .build()
             )
@@ -114,8 +123,12 @@ class AudioEngine(private val onPcm: (pcm: ShortArray, fileTimeUs: Long, recordi
             )
             .setBufferSizeInBytes(max(minBytes, RATE * CHANNELS * 2 / 5)) // room for 200 ms, we keep far less
             .setTransferMode(AudioTrack.MODE_STREAM)
-            .setPerformanceMode(AudioTrack.PERFORMANCE_MODE_LOW_LATENCY)
+            // Low latency only to the phone or wired headphones: Bluetooth adds its own delay,
+            // and on some phones a low-latency track won't move to a Bluetooth headset.
+            .setPerformanceMode(if (route == null || route.lowLatency) AudioTrack.PERFORMANCE_MODE_LOW_LATENCY else AudioTrack.PERFORMANCE_MODE_NONE)
             .build()
+        route?.device?.let { t.setPreferredDevice(it) }
+        return t
     }
 
     private fun releaseTrack() {
@@ -200,15 +213,22 @@ class AudioEngine(private val onPcm: (pcm: ShortArray, fileTimeUs: Long, recordi
 
     private fun play(pcm: ShortArray) {
         if (!listening) {
-            if (track != null) releaseTrack()
+            if (track != null) { releaseTrack(); router?.releaseCallRoute() }
             return
         }
+        // A headset came or went: start a fresh track on the new output.
+        if (track != null && router?.dirty == true) releaseTrack()
         val t = track ?: makeTrack().also {
             track = it
             framesWritten = 0
             it.play()
+            // Say where the sound actually went, and keep saying it if Android moves it.
+            router?.reportRouted(it.routedDevice)
+            it.addOnRoutingChangedListener({ r -> router?.reportRouted(r.routedDevice) }, android.os.Handler(android.os.Looper.getMainLooper()))
         }
-        t.setVolume(volume)
+        val v = volume.coerceIn(0f, 3f)
+        t.setVolume(v.coerceAtMost(1f))
+        val out = if (v > 1f) boost(pcm, v) else pcm
 
         val target = if (targetBufferMs > 0) targetBufferMs else adaptiveMs
         val buffered = bufferedMs()
@@ -219,14 +239,34 @@ class AudioEngine(private val onPcm: (pcm: ShortArray, fileTimeUs: Long, recordi
         }
         // drift correction: drop a packet when we're ahead, repeat one when we run dry
         if (buffered > target + 25) return
-        val n = t.write(pcm, 0, pcm.size, AudioTrack.WRITE_NON_BLOCKING)
+        val n = t.write(out, 0, out.size, AudioTrack.WRITE_NON_BLOCKING)
         if (n > 0) framesWritten += n / CHANNELS
         if (buffered < target / 2) {
-            val m = t.write(pcm, 0, pcm.size, AudioTrack.WRITE_NON_BLOCKING)
+            val m = t.write(out, 0, out.size, AudioTrack.WRITE_NON_BLOCKING)
             if (m > 0) framesWritten += m / CHANNELS
         }
         val outMs = (t.bufferSizeInFrames * 1000 / RATE).coerceAtMost(40)
         latency.value = (bufferedMs() + 6 + outMs / 2).toInt()
+    }
+
+    /**
+     * Louder than 100%: multiply by [gain], then a soft limiter above 70% of full scale rounds
+     * peaks off instead of clipping them. Only what you hear: saved audio is untouched.
+     */
+    private fun boost(pcm: ShortArray, gain: Float): ShortArray {
+        if (boosted.size != pcm.size) boosted = ShortArray(pcm.size)
+        val knee = 0.7f
+        for (i in pcm.indices) {
+            var x = pcm[i] / 32768f * gain
+            val a = abs(x)
+            if (a > knee) {
+                val over = (a - knee) / (1f - knee)
+                val soft = knee + (1f - knee) * kotlin.math.tanh(over)
+                x = if (x < 0) -soft else soft
+            }
+            boosted[i] = (x * 32767f).toInt().coerceIn(-32768, 32767).toShort()
+        }
+        return boosted
     }
 
     private fun toDb(peak: Int): Float = if (peak <= 0) -90f else (20 * log10(peak / 32768.0)).toFloat()

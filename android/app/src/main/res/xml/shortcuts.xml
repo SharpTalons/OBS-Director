@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="clip"
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_clip"
+        android:shortcutShortLabel="@string/shortcut_clip"
+        android:shortcutLongLabel="@string/shortcut_clip_long">
+        <intent
+            android:action="dev.sharptalons.obsdirector.shortcut.CLIP"
+            android:targetPackage="dev.sharptalons.obsdirector"
+            android:targetClass="dev.sharptalons.obsdirector.MainActivity" />
+    </shortcut>
+    <shortcut
+        android:shortcutId="stage"
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_stage"
+        android:shortcutShortLabel="@string/shortcut_stage"
+        android:shortcutLongLabel="@string/shortcut_stage_long">
+        <intent
+            android:action="dev.sharptalons.obsdirector.shortcut.STAGE"
+            android:targetPackage="dev.sharptalons.obsdirector"
+            android:targetClass="dev.sharptalons.obsdirector.MainActivity" />
+    </shortcut>
+    <shortcut
+        android:shortcutId="exit"
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_exit"
+        android:shortcutShortLabel="@string/shortcut_exit"
+        android:shortcutLongLabel="@string/shortcut_exit_long">
+        <intent
+            android:action="dev.sharptalons.obsdirector.shortcut.EXIT"
+            android:targetPackage="dev.sharptalons.obsdirector"
+            android:targetClass="dev.sharptalons.obsdirector.MainActivity" />
+    </shortcut>
+</shortcuts>

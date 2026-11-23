@@ -5,18 +5,22 @@ Monitor and direct an OBS session from your phone while volunteers run the PC.
 OBS Director is two parts:
 
 - **The OBS plugin** (this repository's root): runs inside OBS on the Windows streaming PC. It sends the recording and stream status, the program mix and a small live picture to your phone over the local network, takes start/stop/pause commands, writes your clips into the recording as chapter markers, and adds a dock where volunteers see your messages.
-- **The Android app** ([`android/`](android)): listen to the mix, watch record and stream health, start and stop the recording, and mark clips with tags and notes for cutting short videos later.
+- **The Android app** ([`android/`](android)): listen to the mix, watch record and stream health, start and stop the recording, and mark clips with notes for cutting short videos later.
 
 ## What the app does
 
-- **Monitor**: the recording's file name and timecode, the mix (left and right meters, listening with about 40 ms of delay), stream health, and the live output when you switch it on (off by default, never in the background).
-- **Clips**: one button. A clip starts a minute before your tap (so the build-up is in) and ends a couple of seconds after the second tap. Add tags (Key point, Funny, Story, Q&A), a typed or spoken note, and adjust the edges later on a waveform.
-- **Export**: DaVinci Resolve marker EDL (clips become coloured markers spanning their length), CSV or a plain list. Clip audio can be shared as .m4a.
-- **Alerts**: silent mix, clipping, recording stopped by someone else, disk nearly full, dropped frames, connection lost. The phone buzzes even when locked, and most alerts can be sent to the desk with one tap.
-- **Desk**: quick and typed messages to the volunteers' dock in OBS; they answer with one tap.
-- **Background**: with the screen off the mix keeps playing and clips can be started and ended from the notification. Video always stops.
+- **Monitor**: the recording's file name and timecode, the Clip button, the mix with meters that read like OBS's own (−60 to 0 dB, green, yellow from −20, red from −9, with a peak hold), listening with about 40 ms of delay, and the live picture when you switch it on (off by default, never in the background). A line under the meter says how the phone's Wi-Fi is holding up.
+- **Listening**: plays through whatever your phone is using: Bluetooth, a wired headset, a USB sound card, the headphone jack or the speaker. Switch on the phone and the mix follows. Volume goes up to 300% for quiet rooms, with a soft limiter so it doesn't crackle.
+- **Clips**: one button, which shows the clip's length while it runs. A clip starts a minute before your tap (so the build-up is in) and ends a couple of seconds after the second tap. Add a typed or spoken note.
+- **Recordings**: one row per recording, with its clips. Each clip has a **+** for its actions: play, adjust the edges on a waveform, edit the note, share its audio as .m4a, or delete it (with undo).
+- **Export**: from inside a recording, as a DaVinci Resolve marker EDL, CSV or a plain list, to share or save on the phone. The plugin also saves the EDL and CSV next to the recording on the PC, so the editor finds them there (you can turn this off in Settings).
+- **Stream**: tap the Stream chip on Monitor for the stream, the PC (processor, frame rate, lag, disk) and the network, each on its own tab.
+- **Stage mode**: the moon icon in the top bar. A black, dim screen with the time, the meter and a big Clip button, for a phone propped up during a service or a show.
+- **Outside the app**: a floating bubble with the time; tap it for the Clip button. Long-press the app icon for **Start clip**, **Stage mode** and **Close OBS Director**. Press Back three times to close the app too.
+- **Alerts**: silent mix, recording stopped by someone else, disk nearly full, dropped frames, connection lost, and the phone's own battery running low. The phone buzzes even when locked, and most alerts can be sent to the desk with one tap.
+- **Desk**: typed messages to the volunteers' dock in OBS; they answer with one tap.
 - **Drops**: if Wi-Fi drops, a running clip is saved at the drop, listening pauses, and the app reconnects by itself. OBS keeps recording on the PC throughout.
-- **Updates**: each time the app opens it checks this repository's releases. When a newer version is out it asks once, with **Update** and **Ignore**; Update downloads it and hands it to Android's installer, keeping your clips and settings. To check yourself at any time, open **Settings**, then **Updates and about**, and press **Check for updates**; if there's a newer version the button becomes **Update to <version>**.
+- **Updates**: each time the app opens it checks this repository's releases. When a newer version is out it asks once, with **Update** and **Ignore**; Update downloads it and hands it to Android's installer, keeping your clips and settings. To check yourself at any time, open **Settings**, scroll to **About**, and press **Check for updates**.
 
 ## Setup
 
@@ -119,5 +123,5 @@ See [SECURITY.md](SECURITY.md) for how the connection is protected and how to re
 
 - The OBS plugin (`src/`, `cmake/`, `data/`) links against libobs and is licensed under the GNU GPL v2 or later.
 - The Android app (`android/`) is under the MIT licence in [LICENSE](LICENSE).
-- The app bundles Public Sans and JetBrains Mono, both under the SIL Open Font License 1.1.
+- The app bundles the Roboto font, under the Apache License 2.0.
 - "OBS" and "OBS Studio" are trademarks of the OBS Project; this project is not affiliated with it.

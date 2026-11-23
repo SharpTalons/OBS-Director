@@ -24,6 +24,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonObject
@@ -118,9 +119,50 @@ object Director {
     private val dropHistory = ArrayDeque<Pair<Long, Int>>()
     private var lastDurationSave = 0L
 
+    /** Follows whatever output the phone is using, and reports it. */
+    lateinit var router: dev.sharptalons.obsdirector.audio.OutputRouter
+        private set
+
     fun init(context: Context) {
         app = context.applicationContext
+        router = dev.sharptalons.obsdirector.audio.OutputRouter(app).also { it.start() }
         scope.launch { alertLoop() }
+        scope.launch { clipListLoop() }
+    }
+
+    /** What each recording's clip list looked like the last time it went to the PC. */
+    private val sentClipLists = HashMap<String, Int>()
+
+    /**
+     * Keeps each recording's clip list (EDL and CSV) saved next to the recording on the PC, when
+     * Settings say so: a second after the clips change, and again after a reconnect. The plugin
+     * only writes next to recordings OBS made while it was running, and refuses anything else.
+     */
+    @OptIn(kotlinx.coroutines.FlowPreview::class)
+    private suspend fun clipListLoop() {
+        kotlinx.coroutines.flow.combine(ClipStore.recordings, linkState, Prefs.settings) { recs, link, s -> Triple(recs, link, s.pcClipLists) }
+            .debounce(1500)
+            .collect { (recs, link, on) ->
+                if (!on || link != LinkState.CONNECTED) return@collect
+                val conn = connection ?: return@collect
+                for (r in recs) {
+                    if (r.clips.isEmpty()) continue
+                    val sig = r.clips.hashCode()
+                    if (sentClipLists[r.file] == sig) continue
+                    sentClipLists[r.file] = sig
+                    val res = conn.command("clips.write", mapOf(
+                        "file" to JsonPrimitive(r.file),
+                        "edl" to JsonPrimitive(Exporter.edl(r)),
+                        "csv" to JsonPrimitive(Exporter.csv(r)),
+                    ))
+                    if (res.ok()) {
+                        val pcName = pcState.value?.name ?: "the PC"
+                        if (r.savedOnPc != pcName) ClipStore.update(r.file) { it.copy(savedOnPc = pcName) }
+                    } else if (res["error"]?.jsonPrimitive?.content == "not_connected" || res["error"]?.jsonPrimitive?.content == "timeout") {
+                        sentClipLists.remove(r.file) // try again on the next change or reconnect
+                    }
+                }
+            }
     }
 
     fun toast(msg: String) { toastState.value = msg }
@@ -136,6 +178,7 @@ object Director {
         linkError.value = null
         linkState.value = LinkState.CONNECTING
         welcomed = false
+        sentClipLists.clear()
         listenState.value = s.autoListen
         Prefs.update { it.copy(lastIp = target.ip, lastPort = target.port, lastPcName = target.name) }
 
@@ -277,6 +320,7 @@ object Director {
         if (engine == null) {
             engine = AudioEngine { pcm, fileTimeUs, recording, gap -> onPcm(pcm, fileTimeUs, recording, gap) }.also { e ->
                 e.volume = Prefs.settings.value.volume
+                e.router = router
                 e.targetBufferMs = Prefs.settings.value.bufferMs
                 e.listening = listenState.value
                 scope.launch { e.levels.collect { levelsState.value = it } }
@@ -301,9 +345,11 @@ object Director {
         engine?.listening = on
     }
 
-    fun setVolume(v: Float) {
-        engine?.volume = v
-        Prefs.update { it.copy(volume = v) }
+    /** 0..3 (0–300%). Heard at once while dragging; saved with [save]. */
+    fun setVolume(v: Float, save: Boolean = true) {
+        val c = v.coerceIn(0f, 3f)
+        engine?.volume = c
+        if (save) Prefs.update { it.copy(volume = c) }
     }
 
     fun setBuffer(ms: Int) {
@@ -312,7 +358,25 @@ object Director {
     }
 
     /** Audio thread: hand packets to the session recorder for the recording they belong to. */
+    /** Hours of recording the OBS PC's disk still has room for, at the current bitrate; null if unknown. */
+    fun diskHoursLeft(s: Status): Double? {
+        val bytesPerSec = if (s.fileTimeMs > 10_000) s.recBytes * 1000.0 / s.fileTimeMs else 0.0
+        if (bytesPerSec <= 0 || s.diskFreeMb < 0) return null
+        return s.diskFreeMb * 1048576.0 / bytesPerSec / 3600.0
+    }
+
+    // Wi-Fi quality: every audio gap (packets that never arrived) is a dropout.
+    private val dropoutTimes = ArrayDeque<Long>()
+
+    /** Audio dropouts in the last minute, for the Wi-Fi quality line. */
+    fun dropoutsLastMinute(): Int = synchronized(dropoutTimes) {
+        val cutoff = SystemClock.elapsedRealtime() - 60_000
+        while (dropoutTimes.isNotEmpty() && dropoutTimes.first() < cutoff) dropoutTimes.removeFirst()
+        dropoutTimes.size
+    }
+
     private fun onPcm(pcm: ShortArray, fileTimeUs: Long, recording: Boolean, gap: Boolean) {
+        if (gap) synchronized(dropoutTimes) { dropoutTimes.addLast(SystemClock.elapsedRealtime()) }
         if (!recording || !Prefs.settings.value.saveAudio) {
             if (recorder != null && !recording) finishRecorder()
             return

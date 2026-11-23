@@ -14,6 +14,7 @@ class DirectorApp : Application() {
         ClipStore.init(this)
         Notifier.createChannels(this)
         Director.init(this)
+        dev.sharptalons.obsdirector.core.PhoneBattery.init(this)
         UpdateController.init(this)
     }
 }

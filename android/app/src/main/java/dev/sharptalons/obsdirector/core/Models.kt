@@ -35,6 +35,8 @@ data class Recording(
     val audioOffsetMs: Long = 0,
     /** loudness envelope, one value 0..1 per 100 ms of file time, for the adjust waveform */
     val envelope: List<Float> = emptyList(),
+    /** name of the PC that saved this recording's clip list next to the file, once it has */
+    val savedOnPc: String? = null,
 )
 
 @Serializable

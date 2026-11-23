@@ -8,7 +8,15 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
@@ -125,9 +133,9 @@ fun AppShell() {
 
     Column(Modifier.fillMaxSize().background(T.ground).windowInsetsPadding(WindowInsets.statusBars)) {
         HeadBar(link, pc, latency, awaiting, onStage = { screen = "stage" }, onConnect = { connectOpen = true })
-        Box(Modifier.weight(1f)) {
-            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                // connection banners
+        // banners for the link and alerts, shown above every screen
+        val top: @Composable () -> Unit = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 if (link == LinkState.LOST) {
                     val ago = (now - lostAt) / 1000
                     Banner(PillKind.WARN, Icons.Outlined.WifiOff, "Connection to ${pc?.name ?: "the PC"} lost",
@@ -138,23 +146,31 @@ fun AppShell() {
                 }
                 alerts.filter { it.id != "net" }.forEach { a ->
                     Banner(if (a.severe) PillKind.REC else PillKind.WARN, Icons.Outlined.Warning, a.title, a.body, onDismiss = { Director.dismissAlert(a.id) }) {
-                        if (a.offerStartRecording) PrimaryButton("Start recording", Icons.Outlined.FiberManualRecord, height = 34.dp) { Director.recordStart(); Director.dismissAlert(a.id) }
-                        if (a.deskText != null) OutlineButton("Tell the desk", Icons.AutoMirrored.Outlined.Send, height = 34.dp) { Director.deskAboutAlert(a) }
+                        if (a.offerStartRecording) PrimaryButton("Start recording", Icons.Outlined.FiberManualRecord) { Director.recordStart(); Director.dismissAlert(a.id) }
+                        if (a.deskText != null) OutlineButton("Tell the desk", Icons.AutoMirrored.Outlined.Send) { Director.deskAboutAlert(a) }
                     }
                 }
-
-                when {
-                    screen == "recording" -> RecordingScreen(openFile, onBack = { screen = "recordings" })
-                    screen == "recordings" -> RecordingsScreen(onOpen = { openFile = it; screen = "recording" })
-                    screen == "stream" -> {
-                        RoundIcon(Icons.AutoMirrored.Outlined.ArrowBack, "Back to Monitor", T.text) { screen = "monitor" }
-                        StreamScreen()
+            }
+        }
+        Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
+            // on tablets, in landscape and on unfolded phones the content keeps a phone's reading width
+            val content = Modifier.fillMaxHeight().widthIn(max = 640.dp).fillMaxWidth()
+            when (screen) {
+                "recording" -> RecordingScreen(openFile, content, top, onBack = { screen = "recordings" })
+                "recordings" -> RecordingsScreen(content, top, onOpen = { openFile = it; screen = "recording" })
+                else -> Column(content.verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    top()
+                    when {
+                        screen == "stream" -> {
+                            RoundIcon(Icons.AutoMirrored.Outlined.ArrowBack, "Back to Monitor", T.text) { screen = "monitor" }
+                            StreamScreen()
+                        }
+                        screen == "config" -> SettingsScreen(onConnect = { connectOpen = true })
+                        disconnectedMonitor -> NotConnected { connectOpen = true }
+                        else -> MonitorScreen(onOpenRecording = { openFile = it; screen = "recording" }, onOpenStream = { screen = "stream" })
                     }
-                    screen == "config" -> SettingsScreen(onConnect = { connectOpen = true })
-                    disconnectedMonitor -> NotConnected { connectOpen = true }
-                    else -> MonitorScreen(onOpenRecording = { openFile = it; screen = "recording" }, onOpenStream = { screen = "stream" })
+                    Spacer(Modifier.height(24.dp))
                 }
-                Spacer(Modifier.height(24.dp))
             }
 
             if (toast != null) {
@@ -165,7 +181,7 @@ fun AppShell() {
         }
 
         HorizontalDivider(color = T.rule)
-        Row(Modifier.fillMaxWidth().background(T.ground).windowInsetsPadding(WindowInsets.navigationBars).padding(vertical = 6.dp)) {
+        Row(Modifier.fillMaxWidth().background(T.ground).windowInsetsPadding(WindowInsets.navigationBars).padding(vertical = 6.dp).selectableGroup()) {
             val tab = when (screen) { "recordings", "recording" -> "recordings"; "config" -> "config"; else -> "monitor" }
             NavItem("Monitor", Icons.Outlined.Headphones, tab == "monitor", badge = if (alerts.any { it.id != "net" }) "!" else null, Modifier.weight(1f)) { screen = "monitor" }
             NavItem("Recordings", Icons.Outlined.VideoLibrary, tab == "recordings", badge = if (recordings.any { it.live }) "•" else null, Modifier.weight(1f)) { screen = "recordings" }
@@ -178,16 +194,17 @@ fun AppShell() {
 private fun NavItem(label: String, icon: ImageVector, selected: Boolean, badge: String?, modifier: Modifier, onClick: () -> Unit) {
     Column(
         modifier
-            .height(52.dp)
-            .clickable(onClick = onClick)
+            .height(56.dp)
+            .selectable(selected = selected, role = Role.Tab, onClick = onClick)
+            .semantics { if (badge != null) stateDescription = if (badge == "!") "Needs attention" else "Recording now" }
             .drawBehind { if (selected) drawLine(T.accent, Offset(size.width / 2 - 40f, 0f), Offset(size.width / 2 + 40f, 0f), 4f) },
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
         Box {
-            Icon(icon, label, tint = if (selected) T.text else T.muted, modifier = Modifier.size(20.dp))
+            Icon(icon, null, tint = if (selected) T.text else T.muted, modifier = Modifier.size(22.dp))
             if (badge != null) Text(badge, style = Type.mono.copy(fontSize = 10.sp, color = if (badge == "!") T.warning else T.text),
-                modifier = Modifier.align(Alignment.TopEnd).padding(start = 22.dp))
+                modifier = Modifier.align(Alignment.TopEnd).padding(start = 24.dp).clearAndSetSemantics { })
         }
         Text(label, style = Type.small.copy(fontSize = 11.sp, color = if (selected) T.text else T.muted))
     }

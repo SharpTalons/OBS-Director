@@ -117,7 +117,7 @@ fun ConnectDialog(onDismiss: () -> Unit) {
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("Connect to OBS", style = Type.title.copy(fontSize = 20.sp), modifier = Modifier.weight(1f))
-                Icon(Icons.Outlined.Close, "Close", tint = T.muted, modifier = Modifier.size(36.dp).clip(CircleShape).clickable { onDismiss() }.padding(6.dp))
+                Icon(Icons.Outlined.Close, "Close", tint = T.muted, modifier = Modifier.size(48.dp).clip(CircleShape).clickable(role = androidx.compose.ui.semantics.Role.Button) { onDismiss() }.padding(12.dp))
             }
             Text("Tap a PC to connect. The first time, someone at the PC presses Allow in OBS.", style = Type.small, modifier = Modifier.padding(top = 4.dp))
 
@@ -153,7 +153,7 @@ fun ConnectDialog(onDismiss: () -> Unit) {
             Spacer(Modifier.height(10.dp))
             if (!typing) {
                 Row(
-                    Modifier.fillMaxWidth().heightIn(min = 44.dp).clip(RoundedCornerShape(6.dp)).clickable { typing = true }.padding(vertical = 8.dp),
+                    Modifier.fillMaxWidth().heightIn(min = 48.dp).clip(RoundedCornerShape(6.dp)).clickable(role = androidx.compose.ui.semantics.Role.Button) { typing = true }.padding(vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Icon(Icons.Outlined.Edit, null, tint = T.accent, modifier = Modifier.size(18.dp))
@@ -213,7 +213,7 @@ private fun PcRow(p: FoundPc, status: RowStatus, onDisconnect: () -> Unit, onCli
             .border(1.dp, edge, RoundedCornerShape(6.dp))
             .clickable(onClick = onClick).padding(horizontal = 12.dp, vertical = 10.dp),
     ) {
-        Row(Modifier.heightIn(min = 40.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
             // Yellow: found by the scan, ready to connect. Green: connected. Grey: typed in, not found.
             val found = p.lastSeen > 0L
             val dot = when (status) {

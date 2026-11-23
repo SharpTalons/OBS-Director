@@ -7,6 +7,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -93,19 +97,21 @@ private fun clipsText(n: Int) = when (n) { 0 -> "No clips"; 1 -> "1 clip"; else 
 
 /** The list: one plain row per recording; tap one to see its clips. */
 @Composable
-fun RecordingsScreen(onOpen: (String) -> Unit) {
+fun RecordingsScreen(modifier: Modifier, top: @Composable () -> Unit, onOpen: (String) -> Unit) {
     val recordings by ClipStore.recordings.collectAsState()
     val live = recordings.filter { it.live }
     val past = recordings.filterNot { it.live }
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        ScreenTitle("Recordings", "Tap one to see its clips and export them")
-        if (recordings.isEmpty()) {
+    LazyColumn(modifier, contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        item { top() }
+        item { ScreenTitle("Recordings", "Tap one to see its clips and export them") }
+        if (recordings.isEmpty()) item {
             Section { Text("No recordings yet. Clips you mark while OBS records show up here, one row per recording.", style = Type.body.copy(color = T.muted)) }
         }
-        if (live.isNotEmpty()) GroupLabel("Now", Tints.rec.ink)
-        live.forEach { r -> RecordingRow(r, null, onOpen) }
-        if (past.isNotEmpty()) GroupLabel("Earlier", T.muted)
-        past.forEachIndexed { i, r -> RecordingRow(r, tileTints[i % tileTints.size], onOpen) }
+        if (live.isNotEmpty()) item { GroupLabel("Now", Tints.rec.ink) }
+        items(live, key = { "live:" + it.file }) { r -> RecordingRow(r, null, onOpen) }
+        if (past.isNotEmpty()) item { GroupLabel("Earlier", T.muted) }
+        itemsIndexed(past, key = { _, r -> r.file }) { i, r -> RecordingRow(r, tileTints[i % tileTints.size], onOpen) }
+        item { Spacer(Modifier.height(16.dp)) }
     }
 }
 
@@ -138,7 +144,7 @@ private fun RecordingRow(r: Recording, tint: Tint?, onOpen: (String) -> Unit) {
 
 /** One recording: its clips, each with a + for its actions, and Export at the top. */
 @Composable
-fun RecordingScreen(file: String, onBack: () -> Unit) {
+fun RecordingScreen(file: String, modifier: Modifier, top: @Composable () -> Unit, onBack: () -> Unit) {
     val recordings by ClipStore.recordings.collectAsState()
     val settings by Prefs.settings.collectAsState()
     val playback by ClipPlayer.playback.collectAsState()
@@ -150,19 +156,20 @@ fun RecordingScreen(file: String, onBack: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    LazyColumn(modifier, contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        item { top() }
+        item { Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             RoundIcon(Icons.AutoMirrored.Outlined.ArrowBack, "Back to Recordings", T.text, onBack)
             Column(Modifier.weight(1f)) {
                 Text(r?.let { recordingTitle(it) } ?: "Recording", style = Type.title.copy(fontSize = 20.sp, fontWeight = FontWeight.Bold), modifier = Modifier.semantics { heading() })
                 Text(listOfNotNull(r?.let { if (it.live) "Recording" else Director.len(it.durationMs) }, r?.let { clipsText(it.clips.size) }).joinToString(" · "), style = Type.small.copy(fontSize = 13.sp))
             }
-            PrimaryButton("Export", Icons.Outlined.IosShare, height = 40.dp, enabled = r?.clips?.isNotEmpty() == true) { exporting = true }
-        }
-        if (r == null) { Text("This recording isn't on this phone any more.", style = Type.body); return@Column }
-        Text(r.file, style = Type.small, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 4.dp))
+            PrimaryButton("Export", Icons.Outlined.IosShare, enabled = r?.clips?.isNotEmpty() == true) { exporting = true }
+        } }
+        if (r == null) { item { Text("This recording isn't on this phone any more.", style = Type.body) }; return@LazyColumn }
+        item { Text(r.file, style = Type.small, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 4.dp)) }
 
-        if (settings.pcClipLists && r.savedOnPc != null) {
+        if (settings.pcClipLists && r.savedOnPc != null) item {
             Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Tints.ok.bg).padding(horizontal = 14.dp, vertical = 12.dp),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Icon(Icons.Outlined.DesktopWindows, null, tint = Tints.ok.ink, modifier = Modifier.size(20.dp))
@@ -171,15 +178,15 @@ fun RecordingScreen(file: String, onBack: () -> Unit) {
             }
         }
 
-        removed?.let { c ->
+        removed?.let { c -> item {
             Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(T.raised).padding(start = 14.dp, end = 6.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("Clip at ${Director.tc(c.startMs)} deleted.", style = Type.body, modifier = Modifier.weight(1f))
-                OutlineButton("Undo", Icons.AutoMirrored.Outlined.Undo, height = 44.dp) { ClipStore.addClip(r.file, c); removed = null }
+                OutlineButton("Undo", Icons.AutoMirrored.Outlined.Undo) { ClipStore.addClip(r.file, c); removed = null }
             }
-        }
-        if (r.clips.isEmpty()) Section { Text("No clips in this recording.", style = Type.body.copy(color = T.muted)) }
+        } }
+        if (r.clips.isEmpty()) item { Section { Text("No clips in this recording.", style = Type.body.copy(color = T.muted)) } }
 
-        r.clips.forEachIndexed { i, c ->
+        itemsIndexed(r.clips, key = { _, c -> c.id }) { i, c ->
             val isOpen = open == c.id
             val key = "${r.file}:${c.id}"
             val playing = playback.playing && playback.key == key
@@ -229,6 +236,7 @@ fun RecordingScreen(file: String, onBack: () -> Unit) {
                 }
             }
         }
+        item { Spacer(Modifier.height(16.dp)) }
     }
     if (exporting && r != null) ExportSheet(r) { exporting = false }
 }

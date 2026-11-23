@@ -86,7 +86,7 @@ fun StreamScreen() {
                         bars.forEachIndexed { i, d ->
                             val x = (n - bars.size + i) * (w + gap)
                             val h = (size.height * d / top).coerceAtLeast(4f)
-                            val c = when { d >= settings.dropsPerMinute -> T.warning; d > 0 -> Tints.ok.ink; else -> Color(0xFF2E3A33) }
+                            val c = when { d >= settings.dropsPerMinute -> T.warning; d > 0 -> Tints.ok.ink; else -> T.chartEmpty }
                             drawRect(c, Offset(x, size.height - h), Size(w, h))
                         }
                     }

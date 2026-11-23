@@ -226,7 +226,7 @@ private fun MixCard(lost: Boolean) {
         DSwitch(listening, { Director.setListening(it) }, "Listen to the mix")
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Volume", style = Type.small, modifier = Modifier.width(60.dp))
-            Slider(vol, { vol = it }, Modifier.weight(1f), onValueChangeFinished = { Director.setVolume(vol) },
+            Slider(vol, { vol = it; Director.setVolume(it, save = false) }, Modifier.weight(1f), valueRange = 0f..3f, onValueChangeFinished = { Director.setVolume(vol) },
                 colors = SliderDefaults.colors(thumbColor = T.meter, activeTrackColor = T.meter, inactiveTrackColor = T.raised))
             Text("${(vol * 100).toInt()}%", style = Type.mono, modifier = Modifier.width(48.dp).padding(start = 8.dp))
         }

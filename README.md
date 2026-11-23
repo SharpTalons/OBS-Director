@@ -119,5 +119,5 @@ See [SECURITY.md](SECURITY.md) for how the connection is protected and how to re
 
 - The OBS plugin (`src/`, `cmake/`, `data/`) links against libobs and is licensed under the GNU GPL v2 or later.
 - The Android app (`android/`) is under the MIT licence in [LICENSE](LICENSE).
-- The app bundles Public Sans and JetBrains Mono, both under the SIL Open Font License 1.1.
+- The app bundles the Roboto font, under the Apache License 2.0.
 - "OBS" and "OBS Studio" are trademarks of the OBS Project; this project is not affiliated with it.

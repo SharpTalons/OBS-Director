@@ -93,6 +93,24 @@ fun AppShell() {
     LaunchedEffect(Unit) { while (true) { delay(1000); now = android.os.SystemClock.elapsedRealtime() } }
     LaunchedEffect(toast) { if (toast != null) { delay(3000); Director.clearToast() } }
 
+    // Back three times within 2 s closes the app (pop-ups and Settings pages take Back first).
+    val activity = androidx.compose.ui.platform.LocalContext.current as? android.app.Activity
+    var backTaps by remember { mutableStateOf(listOf<Long>()) }
+    androidx.activity.compose.BackHandler {
+        val at = android.os.SystemClock.elapsedRealtime()
+        val taps = backTaps.filter { at - it < 2000 } + at
+        backTaps = taps
+        when (taps.size) {
+            1 -> Director.toast("Press Back 2 more times to close OBS Director")
+            2 -> Director.toast("Press Back once more to close")
+            else -> {
+                backTaps = emptyList()
+                Director.disconnect()
+                activity?.finishAndRemoveTask()
+            }
+        }
+    }
+
     Column(Modifier.fillMaxSize().background(T.ground).windowInsetsPadding(WindowInsets.statusBars)) {
         Box(Modifier.weight(1f)) {
             Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) {

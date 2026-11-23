@@ -36,16 +36,17 @@ object T {
     val clipGreen = Color(0xFF44A282)
 }
 
+/** Roboto throughout (Apache 2.0, bundled so every phone shows the same type). */
 val Sans = FontFamily(
-    Font(R.font.public_sans_regular, FontWeight.Normal),
-    Font(R.font.public_sans_medium, FontWeight.Medium),
-    Font(R.font.public_sans_semibold, FontWeight.SemiBold),
+    Font(R.font.roboto_regular, FontWeight.Normal),
+    Font(R.font.roboto_medium, FontWeight.Medium),
+    Font(R.font.roboto_medium, FontWeight.SemiBold),
+    Font(R.font.roboto_bold, FontWeight.Bold),
 )
 
-val Mono = FontFamily(
-    Font(R.font.jetbrains_mono_regular, FontWeight.Normal),
-    Font(R.font.jetbrains_mono_medium, FontWeight.Medium),
-)
+/** Timecodes and figures: Roboto too, with fixed-width digits so numbers don't jitter. */
+val Mono = Sans
+private const val TABULAR = "tnum"
 
 object Type {
     val title = TextStyle(fontFamily = Sans, fontWeight = FontWeight.SemiBold, fontSize = 24.sp, color = T.text)
@@ -54,9 +55,9 @@ object Type {
     val body = TextStyle(fontFamily = Sans, fontSize = 14.sp, lineHeight = 20.sp, color = T.text)
     val small = TextStyle(fontFamily = Sans, fontSize = 12.sp, lineHeight = 17.sp, color = T.muted)
     val label = TextStyle(fontFamily = Sans, fontSize = 12.sp, color = T.muted)
-    val timecode = TextStyle(fontFamily = Mono, fontWeight = FontWeight.Medium, fontSize = 34.sp, letterSpacing = (-0.5).sp, color = T.text)
-    val figure = TextStyle(fontFamily = Mono, fontSize = 16.sp, color = T.text)
-    val mono = TextStyle(fontFamily = Mono, fontSize = 13.sp, color = T.text)
+    val timecode = TextStyle(fontFamily = Mono, fontFeatureSettings = TABULAR, fontWeight = FontWeight.Medium, fontSize = 34.sp, letterSpacing = (-0.5).sp, color = T.text)
+    val figure = TextStyle(fontFamily = Mono, fontFeatureSettings = TABULAR, fontSize = 16.sp, color = T.text)
+    val mono = TextStyle(fontFamily = Mono, fontFeatureSettings = TABULAR, fontSize = 13.sp, color = T.text)
 }
 
 @Composable

@@ -118,9 +118,23 @@ object Director {
     private val dropHistory = ArrayDeque<Pair<Long, Int>>()
     private var lastDurationSave = 0L
 
+    /** Where the mix plays (speaker, headphones, Bluetooth), following headsets as they connect. */
+    lateinit var router: dev.sharptalons.obsdirector.audio.OutputRouter
+        private set
+
     fun init(context: Context) {
         app = context.applicationContext
+        router = dev.sharptalons.obsdirector.audio.OutputRouter(app).also {
+            it.choice = runCatching { dev.sharptalons.obsdirector.audio.OutputRouter.Choice.valueOf(Prefs.settings.value.output) }
+                .getOrDefault(dev.sharptalons.obsdirector.audio.OutputRouter.Choice.AUTO)
+            it.start()
+        }
         scope.launch { alertLoop() }
+    }
+
+    fun setOutput(choice: dev.sharptalons.obsdirector.audio.OutputRouter.Choice) {
+        router.choice = choice
+        Prefs.update { it.copy(output = choice.name) }
     }
 
     fun toast(msg: String) { toastState.value = msg }
@@ -277,6 +291,7 @@ object Director {
         if (engine == null) {
             engine = AudioEngine { pcm, fileTimeUs, recording, gap -> onPcm(pcm, fileTimeUs, recording, gap) }.also { e ->
                 e.volume = Prefs.settings.value.volume
+                e.router = router
                 e.targetBufferMs = Prefs.settings.value.bufferMs
                 e.listening = listenState.value
                 scope.launch { e.levels.collect { levelsState.value = it } }
@@ -301,9 +316,11 @@ object Director {
         engine?.listening = on
     }
 
-    fun setVolume(v: Float) {
-        engine?.volume = v
-        Prefs.update { it.copy(volume = v) }
+    /** 0..3 (0–300%). Heard at once while dragging; saved with [save]. */
+    fun setVolume(v: Float, save: Boolean = true) {
+        val c = v.coerceIn(0f, 3f)
+        engine?.volume = c
+        if (save) Prefs.update { it.copy(volume = c) }
     }
 
     fun setBuffer(ms: Int) {

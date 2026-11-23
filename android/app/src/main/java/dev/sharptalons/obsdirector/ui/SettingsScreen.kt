@@ -205,6 +205,20 @@ private fun ListeningPage() {
     val s by Prefs.settings.collectAsState()
     val latency by Director.latencyMs.collectAsState()
 
+    val output by Director.router.outputName.collectAsState()
+    Group("Play through", "Automatic follows whatever you plug in or pair: headphones, then Bluetooth, then the speaker.")
+    SettingRow("Output") {
+        Tabs(listOf("Automatic", "Phone", "Bluetooth"), when (s.output) { "PHONE" -> "Phone"; "BLUETOOTH" -> "Bluetooth"; else -> "Automatic" }) { o ->
+            Director.setOutput(when (o) {
+                "Phone" -> dev.sharptalons.obsdirector.audio.OutputRouter.Choice.PHONE
+                "Bluetooth" -> dev.sharptalons.obsdirector.audio.OutputRouter.Choice.BLUETOOTH
+                else -> dev.sharptalons.obsdirector.audio.OutputRouter.Choice.AUTO
+            })
+        }
+    }
+    SettingRow("Playing through") { Text(output, style = Type.body, textAlign = TextAlign.End) }
+    Note("A Bluetooth headset that only does calls gets the mix over the call channel: mono and a little lower in quality, but you hear it.")
+
     Group("Delay", "Lower delay can click when Wi-Fi stutters. Auto picks for you.")
     SettingRow("Buffer") {
         Tabs(listOf("Auto", "10 ms", "20 ms", "40 ms"), if (s.bufferMs == 0) "Auto" else "${s.bufferMs} ms") { o ->

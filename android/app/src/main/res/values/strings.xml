@@ -1,4 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">OBS Director</string>
+    <string name="shortcut_clip">Start clip</string>
+    <string name="shortcut_clip_long">Start a clip</string>
+    <string name="shortcut_stage">Stage mode</string>
+    <string name="shortcut_stage_long">Open stage mode</string>
+    <string name="shortcut_exit">Close</string>
+    <string name="shortcut_exit_long">Close OBS Director</string>
 </resources>

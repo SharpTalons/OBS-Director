@@ -152,4 +152,8 @@ private:
 	os_cpu_usage_info_t *cpu = nullptr;
 	double cpuUsage = 0;
 	QString lastFile;
+	/* recordings OBS made while the plugin ran: file name -> full path. clips.write may only
+	 * write next to one of these. */
+	QHash<QString, QString> recordedFiles;
+	void rememberRecording(const QString &path);
 };

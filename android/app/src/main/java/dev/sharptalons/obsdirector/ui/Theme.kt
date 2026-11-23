@@ -11,29 +11,82 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 import dev.sharptalons.obsdirector.R
 
-/** Design tokens: the "data terminal" style from the OBS Director design. */
+/**
+ * Design tokens, the same names as the design canvas (DESIGN.md). Dark only, by design: the app
+ * is used in dark rooms. Text colours meet WCAG AA on [ground] and [surface].
+ */
 object T {
-    val ground = Color(0xFF171719)
-    val surface = Color(0xFF131217)
-    val raised = Color(0xFF212023)
-    val border = Color(0xFF222224)
-    val rule = Color(0xFF1B1A1F)
-    val control = Color(0xFF3A3A3E)
+    val ground = Color(0xFF121214)
+    val surface = Color(0xFF1C1C20)
+    val surface2 = Color(0xFF1E1E22)
+    val sunken = Color(0xFF151518)
+    val raised = Color(0xFF2A2A30) // the "control" fill: secondary buttons, tracks
+    val border = Color(0xFF26262B)
+    val rule = Color(0xFF26262B)
+    val control = Color(0xFF3A3A40) // strong lines, switch off
     val text = Color(0xFFFFFFFF)
-    val muted = Color(0xFF8A8C92)
-    val accent = Color(0xFF4A8AD6)
-    val positive = Color(0xFF44A282)
-    val negative = Color(0xFFE5566F)
-    val warning = Color(0xFFD9A441)
-    val idle = Color(0xFF3A3A3E)
+    val text2 = Color(0xFFC9CBD0)
+    val muted = Color(0xFFA6A8AE)
+    /** Blue for text and outlines on dark. */
+    val accent = Color(0xFF7FB0EC)
+    /** Blue for filled buttons: white text on it is 5.8:1. */
+    val blue = Color(0xFF2B66B0)
+    val positive = Color(0xFF4CC38A)
+    val negative = Color(0xFFFF5C76)
+    val warning = Color(0xFFF2C46B)
+    val idle = Color(0xFF3A3A40)
+    val onRec = Color(0xFF1A0B0E)
+    val video = Color(0xFF0B0B0D)
     val meter = Color(0xFFD8D8DC)
-    val pillNegBg = Color(0xFF2C1A20)
-    val pillWarnBg = Color(0xFF2A2416)
-    val pillOkBg = Color(0xFF1B2828)
-    val pillOkInk = Color(0xFF5FC39C)
-    val pillNeutralBg = Color(0xFF212023)
-    val pillNeutralInk = Color(0xFFBDBDC0)
-    val clipGreen = Color(0xFF44A282)
+    val pillNegBg = Color(0xFF3A1B22)
+    val pillWarnBg = Color(0xFF33291A)
+    val pillOkBg = Color(0xFF183327)
+    val pillOkInk = Color(0xFF6EDDA8)
+    val pillNeutralBg = Color(0xFF2A2A30)
+    val pillNeutralInk = Color(0xFFC9CBD0)
+    val clipGreen = Color(0xFF4CC38A)
+}
+
+/** A tinted tile or chip: a dark background and a light ink of one hue. Colour means category. */
+data class Tint(val bg: Color, val ink: Color)
+
+object Tints {
+    val rec = Tint(Color(0xFF3A1B22), Color(0xFFFF8A9C))      // recording, clips, live
+    val ok = Tint(Color(0xFF183327), Color(0xFF6EDDA8))       // good status, connection
+    val blue = Tint(Color(0xFF172A40), Color(0xFF7FB0EC))     // play, info, bitrate
+    val teal = Tint(Color(0xFF14303A), Color(0xFF5FD4E8))     // listening, adjust
+    val amber = Tint(Color(0xFF33291A), Color(0xFFF2C46B))    // warnings, notes, controls
+    val orange = Tint(Color(0xFF3A2614), Color(0xFFF7A35C))   // alerts
+    val purple = Tint(Color(0xFF2A2340), Color(0xFFB9A2FF))   // disk, audio on the phone, share
+    val neutral = Tint(Color(0xFF2A2A30), Color(0xFFFFFFFF))
+}
+
+/** OBS's own meter colours: green to -20 dB, yellow to -9 dB, red above; dim when unlit. */
+object MeterColors {
+    val green = Color(0xFF4CFF4C)
+    val yellow = Color(0xFFFFFF4C)
+    val red = Color(0xFFFF4C4C)
+    val greenOff = Color(0xFF1F4A1F)
+    val yellowOff = Color(0xFF4A4A1F)
+    val redOff = Color(0xFF4A1F1F)
+}
+
+/** Stage mode: dim, low-glare colours on black. */
+object Stage {
+    val ground = Color(0xFF000000)
+    val text = Color(0xFFD4D5D8)
+    val time = Color(0xFFE2E3E6)
+    val muted = Color(0xFF9A9CA2)
+    val hint = Color(0xFF8E9096)
+    val rec = Color(0xFFB23A4D)
+    val clip = Color(0xFF5A1E28)
+    val clipInk = Color(0xFFF0C9CF)
+    val clipLabel = Color(0xFFE3B5BD)
+    val surface = Color(0xFF0D0D0D)
+    val track = Color(0xFF141414)
+    val green = Color(0xFF2E7D3A)
+    val yellow = Color(0xFF8C8A2E)
+    val red = Color(0xFF8C2E3A)
 }
 
 /** Roboto throughout (Apache 2.0, bundled so every phone shows the same type). */
@@ -66,7 +119,7 @@ fun DirectorTheme(content: @Composable () -> Unit) {
         colorScheme = darkColorScheme(
             primary = T.text,
             onPrimary = Color.Black,
-            secondary = T.accent,
+            secondary = T.blue,
             background = T.ground,
             surface = T.surface,
             onSurface = T.text,

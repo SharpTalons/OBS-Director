@@ -137,9 +137,9 @@ fun DSwitch(checked: Boolean, onChange: (Boolean) -> Unit, label: String? = null
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(
-            Modifier.size(34.dp, 20.dp).clip(CircleShape).background(if (checked) T.text else T.control).padding(3.dp),
+            Modifier.size(52.dp, 30.dp).clip(CircleShape).background(if (checked) T.blue else T.control).padding(3.dp),
             contentAlignment = if (checked) Alignment.CenterEnd else Alignment.CenterStart,
-        ) { Box(Modifier.size(14.dp).clip(CircleShape).background(if (checked) Color.Black else Color.White)) }
+        ) { Box(Modifier.size(24.dp).clip(CircleShape).background(Color.White)) }
         if (label != null) {
             Spacer(Modifier.width(10.dp))
             Text(label, style = Type.body)
@@ -153,14 +153,14 @@ fun PrimaryButton(text: String, icon: ImageVector? = null, modifier: Modifier = 
         modifier
             .height(height)
             .clip(CircleShape)
-            .background(if (enabled) T.text else T.control)
-            .clickable(enabled = enabled, onClick = onClick)
+            .background(if (enabled) T.blue else T.raised)
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
             .padding(horizontal = 20.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Center,
     ) {
-        if (icon != null) { Icon(icon, null, tint = Color.Black, modifier = Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)) }
-        Text(text, style = Type.body.copy(color = if (enabled) Color.Black else T.muted, fontWeight = FontWeight.Medium))
+        if (icon != null) { Icon(icon, null, tint = if (enabled) Color.White else T.muted, modifier = Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)) }
+        Text(text, style = Type.body.copy(color = if (enabled) Color.White else T.muted, fontWeight = FontWeight.Medium))
     }
 }
 
@@ -171,7 +171,7 @@ fun OutlineButton(text: String, icon: ImageVector? = null, modifier: Modifier = 
             .height(height)
             .clip(CircleShape)
             .border(1.dp, T.control, CircleShape)
-            .clickable(enabled = enabled, onClick = onClick)
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
             .padding(horizontal = 18.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Center,

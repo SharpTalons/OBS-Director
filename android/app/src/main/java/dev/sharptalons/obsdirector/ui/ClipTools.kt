@@ -77,89 +77,7 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import kotlin.math.abs
 
-@Composable
-fun ClipsScreen(recordings: List<Recording>) {
-    var tagFilter by remember { mutableStateOf<String?>(null) }
-    var open by remember { mutableStateOf<String?>(null) }
-    var removed by remember { mutableStateOf<Pair<String, Clip>?>(null) }
-    val playback by ClipPlayer.playback.collectAsState()
-    val total = recordings.sumOf { it.clips.size }
-
-    Text("$total clips across ${recordings.size} recordings. Play, adjust or export them as markers for your editor.", style = Type.finding)
-    Spacer(Modifier.height(16.dp))
-
-    removed?.let { (file, clip) ->
-        Row(Modifier.fillMaxWidth().padding(bottom = 12.dp).clip(RoundedCornerShape(6.dp)).background(T.raised).padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("Clip at ${Director.tc(clip.startMs)} deleted.", style = Type.body, modifier = Modifier.weight(1f))
-            OutlineButton("Undo", Icons.AutoMirrored.Outlined.Undo, height = 34.dp) { ClipStore.addClip(file, clip); removed = null }
-        }
-    }
-
-    DCard {
-        CardHeader("Clips by recording", Icons.Outlined.ContentCut)
-        TagChips(listOfNotNull(tagFilter), { id -> tagFilter = if (tagFilter == id) null else id }, allChip = true, allSelected = tagFilter == null, onAll = { tagFilter = null })
-        Spacer(Modifier.height(8.dp))
-        Text("Times are from the start of each file.", style = Type.small)
-        if (recordings.isEmpty()) {
-            Spacer(Modifier.height(12.dp))
-            Text("No recordings yet. Clips you take while monitoring appear here, grouped by recording.", style = Type.body.copy(color = T.muted))
-        }
-        recordings.forEach { r ->
-            Spacer(Modifier.height(20.dp))
-            Text(r.file, style = Type.body.copy(fontSize = 15.sp, fontWeight = FontWeight.Medium))
-            val audio = when {
-                r.audioFile == null -> "Audio not saved on this device"
-                r.live -> "Audio on this device, recording now"
-                else -> "Audio on this device" + if (r.gaps.isNotEmpty()) ", ${r.gaps.size} Wi-Fi gaps (${"%.1f".format(r.gaps.sumOf { it.lengthMs } / 1000.0)} s)" else ", complete"
-            }
-            Text("${if (r.live) "recording now" else Director.tc(r.durationMs) + " long"} · ${r.clips.size} clips · $audio", style = Type.small)
-            HorizontalDivider(color = T.rule, modifier = Modifier.padding(top = 8.dp))
-            val shown = r.clips.filter { tagFilter == null || it.tags.contains(tagFilter) }
-            if (shown.isEmpty()) Text(if (tagFilter == null) "No clips in this recording yet." else "No ${Tag.of(tagFilter!!)?.label} clips in this recording.",
-                style = Type.small, modifier = Modifier.padding(vertical = 12.dp))
-            shown.forEach { c ->
-                val idx = r.clips.indexOf(c) + 1
-                val key = "${r.file}:${c.id}"
-                val playing = playback.playing && playback.key == key
-                Row(Modifier.fillMaxWidth().heightIn(min = 52.dp).padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text("$idx", style = Type.mono.copy(color = T.muted), modifier = Modifier.width(26.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text("${Director.tc(c.startMs)} → ${Director.tc(c.endMs)}", style = Type.mono.copy(fontSize = 14.sp))
-                        Text(Director.len(c.lengthMs), style = Type.small)
-                        Row(Modifier.padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text(if (playing) "Playing ${Director.len(playback.posMs - playback.fromMs)} of ${Director.len(c.lengthMs)}"
-                                else c.note.ifBlank { "No note" }, style = Type.body.copy(color = if (playing) T.pillOkInk else if (c.note.isBlank()) T.muted else T.text))
-                            c.tags.mapNotNull { Tag.of(it) }.forEach { TagPill(it) }
-                        }
-                    }
-                    Column(horizontalAlignment = Alignment.End) {
-                        RowAction(if (playing) "Stop" else "Play", if (playing) Icons.Outlined.Stop else Icons.Outlined.PlayArrow) {
-                            if (playing) ClipPlayer.stop() else playClip(r, c, key)
-                        }
-                        RowAction(if (open == key) "Close" else "Adjust", if (open == key) Icons.Outlined.Close else Icons.Outlined.Tune) {
-                            open = if (open == key) null else key
-                        }
-                    }
-                }
-                if (open == key) AdjustPanel(r, c, onClose = { open = null }, onDelete = { ClipStore.removeClip(r.file, c.id); removed = r.file to c; open = null })
-                HorizontalDivider(color = T.rule)
-            }
-        }
-    }
-    Spacer(Modifier.height(16.dp))
-    ExportCard(recordings)
-}
-
-@Composable
-private fun RowAction(label: String, icon: androidx.compose.ui.graphics.vector.ImageVector, onClick: () -> Unit) {
-    Row(Modifier.heightIn(min = 36.dp).clip(RoundedCornerShape(6.dp)).clickable(onClick = onClick).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-        Icon(icon, null, tint = T.muted, modifier = Modifier.size(16.dp))
-        Spacer(Modifier.width(6.dp))
-        Text(label, style = Type.body.copy(color = T.muted))
-    }
-}
-
-private fun playClip(r: Recording, c: Clip, key: String, from: Long = c.startMs, to: Long = c.endMs) {
+internal fun playClip(r: Recording, c: Clip, key: String, from: Long = c.startMs, to: Long = c.endMs) {
     val f = ClipStore.audioFileFor(r)
     when {
         f == null -> Director.toast("This recording's audio isn't saved on this device.")
@@ -168,15 +86,11 @@ private fun playClip(r: Recording, c: Clip, key: String, from: Long = c.startMs,
     }
 }
 
+/** Fine-tune a clip's start and end on the waveform; Save keeps the note as it is. */
 @Composable
-private fun AdjustPanel(r: Recording, c: Clip, onClose: () -> Unit, onDelete: () -> Unit) {
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
+internal fun AdjustPanel(r: Recording, c: Clip, onClose: () -> Unit) {
     var start by remember(c.id) { mutableLongStateOf(c.startMs) }
     var end by remember(c.id) { mutableLongStateOf(c.endMs) }
-    var note by remember(c.id) { mutableStateOf(c.note) }
-    var tags by remember(c.id) { mutableStateOf(c.tags) }
-    var voice by remember(c.id) { mutableStateOf("") }
     var error by remember(c.id) { mutableStateOf<String?>(null) }
     val playback by ClipPlayer.playback.collectAsState()
     val envelope = Director.liveEnvelope(r.file) ?: r.envelope
@@ -268,31 +182,12 @@ private fun AdjustPanel(r: Recording, c: Clip, onClose: () -> Unit, onDelete: ()
             OutlineButton("Hear end", Icons.Outlined.PlayArrow, height = 36.dp) { playClip(r, c, "adj", (end - 1500).coerceAtLeast(0), end + 1500) }
         }
 
-        Spacer(Modifier.height(14.dp))
-        Text("Tags", style = Type.label)
-        Spacer(Modifier.height(6.dp))
-        TagChips(tags, { id -> tags = if (tags.contains(id)) tags - id else tags + id })
-        Spacer(Modifier.height(12.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            OutlinedTextField(note, { note = it.take(140) }, Modifier.weight(1f), label = { Text("Note") }, singleLine = true, colors = fieldColors(), textStyle = Type.body)
-            Spacer(Modifier.width(8.dp))
-            VoiceButton(onText = { note = if (note.isBlank()) it else "$note $it" }, onStatus = { voice = it })
-        }
-        if (voice.isNotEmpty()) Text(voice, style = Type.small, modifier = Modifier.padding(top = 4.dp))
-
-        Spacer(Modifier.height(12.dp))
-        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlineButton("Delete clip", Icons.Outlined.Delete, height = 36.dp) { ClipPlayer.stop(); onDelete() }
-            OutlineButton("Share audio", Icons.Outlined.Share, height = 36.dp) {
-                scope.launch { shareClipAudio(context, r, c.copy(startMs = start, endMs = end)) }
-            }
-        }
         Spacer(Modifier.height(8.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlineButton("Revert", Icons.AutoMirrored.Outlined.Undo, Modifier.weight(1f), height = 40.dp) { start = c.startMs; end = c.endMs; note = c.note; tags = c.tags; error = null }
-            PrimaryButton("Save", Icons.Outlined.Check, Modifier.weight(1f), height = 40.dp) {
+            OutlineButton("Revert", Icons.AutoMirrored.Outlined.Undo, Modifier.weight(1f), height = 44.dp) { start = c.startMs; end = c.endMs; error = null }
+            PrimaryButton("Save", Icons.Outlined.Check, Modifier.weight(1f), height = 44.dp) {
                 ClipPlayer.stop()
-                ClipStore.updateClip(r.file, c.copy(startMs = start, endMs = end, note = note.trim(), tags = tags))
+                ClipStore.updateClip(r.file, c.copy(startMs = start, endMs = end))
                 Director.toast("Clip saved. The export uses the new times.")
                 onClose()
             }
@@ -316,7 +211,7 @@ private fun EdgeEditor(label: String, ms: Long, moved: Boolean, onNudge: (Long) 
     }
 }
 
-private suspend fun shareClipAudio(context: Context, r: Recording, c: Clip) {
+internal suspend fun shareClipAudio(context: Context, r: Recording, c: Clip) {
     val src = ClipStore.audioFileFor(r)
     if (src == null) { Director.toast("This recording's audio isn't saved on this device."); return }
     if (r.live) { Director.toast("Shareable once the recording stops."); return }
@@ -327,50 +222,4 @@ private suspend fun shareClipAudio(context: Context, r: Recording, c: Clip) {
     val uri = FileProvider.getUriForFile(context, "${context.packageName}.share", out)
     context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("audio/mp4").putExtra(Intent.EXTRA_STREAM, uri)
         .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION), "Share clip audio").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-}
-
-@Composable
-private fun ExportCard(recordings: List<Recording>) {
-    val context = LocalContext.current
-    val settings by Prefs.settings.collectAsState()
-    var file by remember { mutableStateOf(recordings.firstOrNull()?.file) }
-    var format by remember { mutableStateOf(settings.exportFormat) }
-    val rec = recordings.firstOrNull { it.file == file } ?: recordings.firstOrNull()
-    val text = rec?.takeIf { it.clips.isNotEmpty() }?.let { Exporter.export(it, format) } ?: "No clips in this recording yet."
-    val save = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
-        if (uri != null) runCatching { context.contentResolver.openOutputStream(uri)?.use { it.write(text.toByteArray()) } }
-            .onSuccess { Director.toast("Saved") }.onFailure { Director.toast("Couldn't save the file") }
-    }
-
-    DCard {
-        CardHeader("Export for editing", Icons.Outlined.Description)
-        if (recordings.isEmpty()) { Text("Nothing to export yet.", style = Type.small); return@DCard }
-        Text("Recording", style = Type.label)
-        Row(Modifier.horizontalScroll(rememberScrollState()).padding(vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            recordings.forEach { r -> Chip(r.file.substringBeforeLast('.'), null, r.file == rec?.file) { file = r.file } }
-        }
-        Text("Format", style = Type.label)
-        Tabs(Exporter.formats, format) { format = it }
-        Spacer(Modifier.height(10.dp))
-        Box(Modifier.fillMaxWidth().heightIn(max = 260.dp).clip(RoundedCornerShape(6.dp)).background(T.ground).border(1.dp, T.border, RoundedCornerShape(6.dp))
-            .horizontalScroll(rememberScrollState()).padding(12.dp)) {
-            Text(text, style = Type.mono.copy(fontSize = 11.sp, color = T.meter, lineHeight = 17.sp))
-        }
-        Spacer(Modifier.height(12.dp))
-        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            PrimaryButton("Copy", Icons.Outlined.ContentCopy, height = 36.dp, enabled = rec?.clips?.isNotEmpty() == true) {
-                val cm = context.getSystemService(ClipboardManager::class.java)
-                cm.setPrimaryClip(ClipData.newPlainText("OBS Director clips", text))
-                Director.toast("Copied")
-            }
-            OutlineButton("Share", Icons.Outlined.Share, height = 36.dp, enabled = rec?.clips?.isNotEmpty() == true) {
-                context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text), "Share clips"))
-            }
-            OutlineButton("Save file", Icons.Outlined.Description, height = 36.dp, enabled = rec?.clips?.isNotEmpty() == true) {
-                save.launch("${rec?.file?.substringBeforeLast('.')}.${Exporter.extension(format)}")
-            }
-        }
-        Spacer(Modifier.height(10.dp))
-        Text(Exporter.how(format), style = Type.small)
-    }
 }

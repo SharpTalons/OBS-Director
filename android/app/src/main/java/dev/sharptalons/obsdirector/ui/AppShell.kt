@@ -22,10 +22,11 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.Send
 import androidx.compose.material.icons.outlined.Cast
 import androidx.compose.material.icons.outlined.CastConnected
-import androidx.compose.material.icons.outlined.ContentCut
+import androidx.compose.material.icons.outlined.VideoLibrary
 import androidx.compose.material.icons.outlined.FiberManualRecord
 import androidx.compose.material.icons.outlined.Headphones
 import androidx.compose.material.icons.outlined.Power
@@ -55,6 +56,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.sharptalons.obsdirector.MainIntents
 import dev.sharptalons.obsdirector.core.ClipStore
 import dev.sharptalons.obsdirector.core.Director
 import dev.sharptalons.obsdirector.core.LinkState
@@ -64,7 +66,9 @@ import kotlinx.coroutines.delay
 
 @Composable
 fun AppShell() {
-    var screen by rememberSaveable { mutableStateOf("monitor") }
+    var screen by rememberSaveable { mutableStateOf(MainIntents.startScreen ?: "monitor") }
+    var openFile by rememberSaveable { mutableStateOf("") }
+    LaunchedEffect(MainIntents.startScreen) { MainIntents.startScreen?.let { screen = it; MainIntents.startScreen = null } }
     val link by Director.link.collectAsState()
     val pc by Director.pc.collectAsState()
     val alerts by Director.alerts.collectAsState()
@@ -96,7 +100,10 @@ fun AppShell() {
     // Back three times within 2 s closes the app (pop-ups and Settings pages take Back first).
     val activity = androidx.compose.ui.platform.LocalContext.current as? android.app.Activity
     var backTaps by remember { mutableStateOf(listOf<Long>()) }
-    androidx.activity.compose.BackHandler {
+    androidx.activity.compose.BackHandler(enabled = screen != "monitor") {
+        screen = when (screen) { "recording" -> "recordings"; else -> "monitor" }
+    }
+    androidx.activity.compose.BackHandler(enabled = screen == "monitor") {
         val at = android.os.SystemClock.elapsedRealtime()
         val taps = backTaps.filter { at - it < 2000 } + at
         backTaps = taps
@@ -111,9 +118,15 @@ fun AppShell() {
         }
     }
 
+    if (screen == "stage") {
+        StageScreen(onExit = { screen = "monitor" })
+        return
+    }
+
     Column(Modifier.fillMaxSize().background(T.ground).windowInsetsPadding(WindowInsets.statusBars)) {
+        HeadBar(link, pc, latency, awaiting, onStage = { screen = "stage" }, onConnect = { connectOpen = true })
         Box(Modifier.weight(1f)) {
-            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) {
+            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 // connection banners
                 if (link == LinkState.LOST) {
                     val ago = (now - lostAt) / 1000
@@ -130,57 +143,33 @@ fun AppShell() {
                     }
                 }
 
-                // scope line, title and the screen's one-line summary; the connect icon on the right
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(6.dp).clip(CircleShape).background(if (link == LinkState.CONNECTED) T.positive else T.muted))
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        when (link) {
-                            LinkState.CONNECTED -> "${pc?.name ?: "OBS PC"}  ·  Direct UDP, $latency ms"
-                            LinkState.CONNECTING -> if (awaiting != null) "Waiting for Allow in OBS on ${pc?.name ?: "the PC"}" else "Connecting to ${pc?.name ?: pc?.ip ?: "the PC"}…"
-                            LinkState.LOST -> "${pc?.name ?: "OBS PC"}  ·  reconnecting"
-                            LinkState.DISCONNECTED -> "Not connected"
-                        },
-                        style = Type.small,
-                        modifier = Modifier.weight(1f),
-                    )
-                    ConnectIcon(link) { connectOpen = true }
-                }
-                Spacer(Modifier.height(6.dp))
-                Text(when {
-                    screen == "clips" -> "Clips"
-                    screen == "config" -> "Settings"
-                    else -> "Monitor"
-                }, style = Type.title)
-                Spacer(Modifier.height(16.dp))
-
                 when {
-                    disconnectedMonitor -> NotConnected { connectOpen = true }
-                    screen == "clips" -> ClipsScreen(recordings)
+                    screen == "recording" -> RecordingScreen(openFile, onBack = { screen = "recordings" })
+                    screen == "recordings" -> RecordingsScreen(onOpen = { openFile = it; screen = "recording" })
+                    screen == "stream" -> {
+                        RoundIcon(Icons.AutoMirrored.Outlined.ArrowBack, "Back to Monitor", T.text) { screen = "monitor" }
+                        StreamScreen()
+                    }
                     screen == "config" -> SettingsScreen(onConnect = { connectOpen = true })
-                    else -> MonitorScreen(onOpenClips = { screen = "clips" })
+                    disconnectedMonitor -> NotConnected { connectOpen = true }
+                    else -> MonitorScreen(onOpenRecording = { openFile = it; screen = "recording" }, onOpenStream = { screen = "stream" })
                 }
-                Spacer(Modifier.height(if (screen == "monitor" && link != LinkState.DISCONNECTED) 140.dp else 24.dp))
-            }
-
-            // the clip panel rides above the tab bar while monitoring
-            if (screen == "monitor" && link != LinkState.DISCONNECTED) {
-                Box(Modifier.align(Alignment.BottomCenter).padding(horizontal = 12.dp, vertical = 8.dp)) { ClipPanel() }
+                Spacer(Modifier.height(24.dp))
             }
 
             if (toast != null) {
-                Box(Modifier.align(Alignment.TopCenter).padding(top = 12.dp).clip(RoundedCornerShape(6.dp)).background(T.text).padding(horizontal = 16.dp, vertical = 10.dp)) {
+                Box(Modifier.align(Alignment.TopCenter).padding(top = 12.dp).clip(RoundedCornerShape(12.dp)).background(T.text).padding(horizontal = 16.dp, vertical = 10.dp)) {
                     Text(toast ?: "", style = Type.body.copy(color = Color.Black, fontWeight = FontWeight.Medium))
                 }
             }
         }
 
-        HorizontalDivider(color = T.border)
+        HorizontalDivider(color = T.rule)
         Row(Modifier.fillMaxWidth().background(T.ground).windowInsetsPadding(WindowInsets.navigationBars).padding(vertical = 6.dp)) {
-            val clipCount = recordings.sumOf { it.clips.size }
-            NavItem("Monitor", Icons.Outlined.Headphones, screen == "monitor", badge = if (alerts.any { it.id != "net" }) "!" else null, Modifier.weight(1f)) { screen = "monitor" }
-            NavItem("Clips", Icons.Outlined.ContentCut, screen == "clips", badge = if (clipCount > 0) "$clipCount" else null, Modifier.weight(1f)) { screen = "clips" }
-            NavItem("Settings", Icons.Outlined.Settings, screen == "config", null, Modifier.weight(1f)) { screen = "config" }
+            val tab = when (screen) { "recordings", "recording" -> "recordings"; "config" -> "config"; else -> "monitor" }
+            NavItem("Monitor", Icons.Outlined.Headphones, tab == "monitor", badge = if (alerts.any { it.id != "net" }) "!" else null, Modifier.weight(1f)) { screen = "monitor" }
+            NavItem("Recordings", Icons.Outlined.VideoLibrary, tab == "recordings", badge = if (recordings.any { it.live }) "•" else null, Modifier.weight(1f)) { screen = "recordings" }
+            NavItem("Settings", Icons.Outlined.Settings, tab == "config", null, Modifier.weight(1f)) { screen = "config" }
         }
     }
 }
@@ -191,7 +180,7 @@ private fun NavItem(label: String, icon: ImageVector, selected: Boolean, badge: 
         modifier
             .height(52.dp)
             .clickable(onClick = onClick)
-            .drawBehind { if (selected) drawLine(T.accent, Offset(size.width / 2 - 40f, 0f), Offset(size.width / 2 + 40f, 0f), 2f) },
+            .drawBehind { if (selected) drawLine(T.accent, Offset(size.width / 2 - 40f, 0f), Offset(size.width / 2 + 40f, 0f), 4f) },
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
@@ -201,22 +190,6 @@ private fun NavItem(label: String, icon: ImageVector, selected: Boolean, badge: 
                 modifier = Modifier.align(Alignment.TopEnd).padding(start = 22.dp))
         }
         Text(label, style = Type.small.copy(fontSize = 11.sp, color = if (selected) T.text else T.muted))
-    }
-}
-
-/** The top bar's connect icon: opens the connect pop-up. Its colour says how the link is. */
-@Composable
-private fun ConnectIcon(link: LinkState, onClick: () -> Unit) {
-    val (icon, tint, label) = when (link) {
-        LinkState.CONNECTED -> Triple(Icons.Outlined.CastConnected, T.positive, "Connected. Change or disconnect")
-        LinkState.CONNECTING, LinkState.LOST -> Triple(Icons.Outlined.Cast, T.warning, "Connecting")
-        LinkState.DISCONNECTED -> Triple(Icons.Outlined.Cast, T.accent, "Connect to OBS")
-    }
-    Box(
-        Modifier.size(44.dp).clip(CircleShape).background(if (link == LinkState.DISCONNECTED) T.raised else T.ground).clickable(onClick = onClick),
-        contentAlignment = Alignment.Center,
-    ) {
-        Icon(icon, label, tint = tint, modifier = Modifier.size(24.dp))
     }
 }
 

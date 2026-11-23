@@ -5,6 +5,27 @@ All notable changes to OBS Director (plugin and Android app). The project follow
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-23
+
+A simpler, more colourful app, built around one Clip button, with clip lists saved on the PC.
+
+### Android app
+- New look: a head bar on every screen with the PC, the delay, Stage mode and the connect icon; coloured sections; Roboto throughout.
+- Monitor: the Clip button sits in the Recording section and shows the clip's length while it runs. Tags and quick desk messages are gone.
+- Meters read like OBS's: −60 to 0 dB, green, yellow from −20, red from −9, falling at OBS's rate, with a 20-second peak hold.
+- Plays through whatever output the phone is using, Bluetooth included. Call-only Bluetooth headsets get the mix over the call channel.
+- Volume up to 300%, with a soft limiter.
+- Recordings: one row per recording; inside, each clip has a **+** with Play, Adjust, Note, Share audio and Delete (with undo). Export lives inside the recording.
+- Stream screen with Stream, Computer and Network tabs, opened from the Stream chip on Monitor.
+- Stage mode: black and dim, with the time, the meter and a big Clip button.
+- Floating bubble over other apps, with the time and the Clip button.
+- Long-press the app icon for Start clip, Stage mode and Close OBS Director. Back three times closes the app.
+- Warnings when the phone's battery runs low, and a Wi-Fi quality line under the meter.
+- Settings is one list in coloured groups, with choices in a sheet from the bottom.
+
+### Plugin
+- New `clips.write` command: saves each recording's clip list as an EDL and a CSV next to the recording, only for recordings OBS made while the plugin was running.
+
 ## [0.4.1] - 2026-11-22
 
 ### Windows installer
@@ -99,7 +120,8 @@ First release of the plugin and the Android app.
 - The browser version (WebRTC and WebSocket modes) is not built yet; the app uses Direct UDP.
 - Audio missing from the phone's copy during a Wi-Fi drop is not yet refilled from the PC.
 
-[Unreleased]: https://github.com/SharpTalons/OBS-Director/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/SharpTalons/OBS-Director/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/SharpTalons/OBS-Director/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/SharpTalons/OBS-Director/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/SharpTalons/OBS-Director/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/SharpTalons/OBS-Director/compare/v0.2.0...v0.3.0

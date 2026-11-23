@@ -13,8 +13,6 @@ data class Settings(
     val lastPort: Int = 4466,
     /** A random ID for this phone, made once: OBS remembers it after someone presses Allow. */
     val deviceId: String = "",
-    /** Where to play the mix: AUTO, PHONE or BLUETOOTH (OutputRouter.Choice). */
-    val output: String = "AUTO",
     val lastPcName: String = "",
     // audio
     val bufferMs: Int = 0, // 0 = auto
@@ -65,7 +63,6 @@ object Prefs {
             lastPort = sp.getInt("lastPort", d.lastPort),
             deviceId = sp.getString("deviceId", null) ?: java.util.UUID.randomUUID().toString().also { sp.edit().putString("deviceId", it).remove("lastPin").apply() },
             lastPcName = sp.getString("lastPcName", "") ?: "",
-            output = sp.getString("output", d.output) ?: d.output,
             bufferMs = sp.getInt("bufferMs", d.bufferMs),
             autoListen = sp.getBoolean("autoListen", d.autoListen),
             volume = sp.getFloat("volume", d.volume),
@@ -100,7 +97,6 @@ object Prefs {
             putInt("lastPort", s.lastPort)
             putString("deviceId", s.deviceId)
             putString("lastPcName", s.lastPcName)
-            putString("output", s.output)
             putInt("bufferMs", s.bufferMs)
             putBoolean("autoListen", s.autoListen)
             putFloat("volume", s.volume)

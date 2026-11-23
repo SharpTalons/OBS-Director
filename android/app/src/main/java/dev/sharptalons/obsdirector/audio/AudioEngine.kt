@@ -43,7 +43,7 @@ class AudioEngine(private val onPcm: (pcm: ShortArray, fileTimeUs: Long, recordi
     @Volatile var listening = true
     /** 0..3: up to 1 is the player's own volume; above 1 the mix is boosted here, with a soft limiter. */
     @Volatile var volume = 0.8f
-    /** Picks the output (speaker, headphones, Bluetooth) and says when to rebuild the track. */
+    /** Follows the phone's active output and says when to make a fresh track. */
     @Volatile var router: OutputRouter? = null
     private var boosted = ShortArray(0)
     /** 0 = adaptive (starts at 10 ms, grows when packets arrive late) */
@@ -222,6 +222,9 @@ class AudioEngine(private val onPcm: (pcm: ShortArray, fileTimeUs: Long, recordi
             track = it
             framesWritten = 0
             it.play()
+            // Say where the sound actually went, and keep saying it if Android moves it.
+            router?.reportRouted(it.routedDevice)
+            it.addOnRoutingChangedListener({ r -> router?.reportRouted(r.routedDevice) }, android.os.Handler(android.os.Looper.getMainLooper()))
         }
         val v = volume.coerceIn(0f, 3f)
         t.setVolume(v.coerceAtMost(1f))

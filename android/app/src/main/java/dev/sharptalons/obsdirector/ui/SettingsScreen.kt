@@ -206,16 +206,7 @@ private fun ListeningPage() {
     val latency by Director.latencyMs.collectAsState()
 
     val output by Director.router.outputName.collectAsState()
-    Group("Play through", "Automatic follows whatever you plug in or pair: headphones, then Bluetooth, then the speaker.")
-    SettingRow("Output") {
-        Tabs(listOf("Automatic", "Phone", "Bluetooth"), when (s.output) { "PHONE" -> "Phone"; "BLUETOOTH" -> "Bluetooth"; else -> "Automatic" }) { o ->
-            Director.setOutput(when (o) {
-                "Phone" -> dev.sharptalons.obsdirector.audio.OutputRouter.Choice.PHONE
-                "Bluetooth" -> dev.sharptalons.obsdirector.audio.OutputRouter.Choice.BLUETOOTH
-                else -> dev.sharptalons.obsdirector.audio.OutputRouter.Choice.AUTO
-            })
-        }
-    }
+    Group("Play through", "Whatever your phone is using: Bluetooth, a headset, a USB sound card, the headphone jack or the speaker. Switch on the phone and the mix follows.")
     SettingRow("Playing through") { Text(output, style = Type.body, textAlign = TextAlign.End) }
     Note("A Bluetooth headset that only does calls gets the mix over the call channel: mono and a little lower in quality, but you hear it.")
 

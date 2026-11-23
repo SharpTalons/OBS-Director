@@ -118,23 +118,14 @@ object Director {
     private val dropHistory = ArrayDeque<Pair<Long, Int>>()
     private var lastDurationSave = 0L
 
-    /** Where the mix plays (speaker, headphones, Bluetooth), following headsets as they connect. */
+    /** Follows whatever output the phone is using, and reports it. */
     lateinit var router: dev.sharptalons.obsdirector.audio.OutputRouter
         private set
 
     fun init(context: Context) {
         app = context.applicationContext
-        router = dev.sharptalons.obsdirector.audio.OutputRouter(app).also {
-            it.choice = runCatching { dev.sharptalons.obsdirector.audio.OutputRouter.Choice.valueOf(Prefs.settings.value.output) }
-                .getOrDefault(dev.sharptalons.obsdirector.audio.OutputRouter.Choice.AUTO)
-            it.start()
-        }
+        router = dev.sharptalons.obsdirector.audio.OutputRouter(app).also { it.start() }
         scope.launch { alertLoop() }
-    }
-
-    fun setOutput(choice: dev.sharptalons.obsdirector.audio.OutputRouter.Choice) {
-        router.choice = choice
-        Prefs.update { it.copy(output = choice.name) }
     }
 
     fun toast(msg: String) { toastState.value = msg }

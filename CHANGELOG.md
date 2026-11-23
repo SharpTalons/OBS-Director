@@ -5,6 +5,17 @@ All notable changes to OBS Director (plugin and Android app). The project follow
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-11-23
+
+Fixes from the design audit of 0.5.0.
+
+### Android app
+- TalkBack: the bottom tabs say which one is selected and read each name once; new alerts are announced as they appear.
+- Every button is at least 48 dp tall, including those in the connect pop-up, alert banners and the Adjust panel.
+- Tablets, landscape and unfolded phones keep a phone's reading width instead of stretching. Stage mode in landscape puts the Clip button beside the time.
+- Recordings and their clips are lazy lists, so long histories scroll smoothly.
+- The last hard-coded colours, the floating bubble's included, now come from the theme.
+
 ## [0.5.0] - 2026-11-23
 
 A simpler, more colourful app, built around one Clip button, with clip lists saved on the PC.
@@ -120,7 +131,8 @@ First release of the plugin and the Android app.
 - The browser version (WebRTC and WebSocket modes) is not built yet; the app uses Direct UDP.
 - Audio missing from the phone's copy during a Wi-Fi drop is not yet refilled from the PC.
 
-[Unreleased]: https://github.com/SharpTalons/OBS-Director/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/SharpTalons/OBS-Director/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/SharpTalons/OBS-Director/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/SharpTalons/OBS-Director/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/SharpTalons/OBS-Director/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/SharpTalons/OBS-Director/compare/v0.3.0...v0.4.0

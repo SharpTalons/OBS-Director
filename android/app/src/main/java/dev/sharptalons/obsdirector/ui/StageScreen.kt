@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -83,20 +84,22 @@ fun StageScreen(onExit: () -> Unit) {
             Text(listOf(if (status.recActive) (if (status.recPaused) "PAUSED" else "REC") else "NOT RECORDING", Director.pc.value?.name ?: "OBS").joinToString(" · "),
                 style = Type.body.copy(fontSize = 13.sp, color = Stage.muted), modifier = Modifier.weight(1f))
             Text("Exit stage mode", style = Type.body.copy(color = Stage.muted),
-                modifier = Modifier.heightIn(min = 44.dp).clip(RoundedCornerShape(8.dp)).clickable(role = Role.Button, onClick = onExit).padding(horizontal = 4.dp, vertical = 12.dp))
+                modifier = Modifier.heightIn(min = 48.dp).clip(RoundedCornerShape(8.dp)).clickable(role = Role.Button, onClick = onExit).padding(horizontal = 4.dp, vertical = 12.dp))
         }
-        Column(Modifier.weight(1f).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(22.dp, Alignment.CenterVertically)) {
+        // landscape: the time and meter on the left, the Clip button filling the right
+        val wide = androidx.compose.ui.platform.LocalConfiguration.current.let { it.screenWidthDp > it.screenHeightDp }
+        val running = clipStart != null
+        val enabled = status.recActive && !lost
+        val length = clipLength(Director.nowFileTimeMs() - (clipStart ?: 0))
+        val info: @Composable (Modifier) -> Unit = { m -> Column(m, verticalArrangement = Arrangement.spacedBy(22.dp, Alignment.CenterVertically)) {
             Text(Director.tc(if (status.recActive && !lost) Director.nowFileTimeMs() else status.fileTimeMs),
                 style = Type.timecode.copy(fontSize = 72.sp, fontWeight = FontWeight.Normal, letterSpacing = (-2).sp, color = Stage.time),
                 textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
             ObsMeter(levels, listening && !lost, barHeight = 6.dp, showScale = false, dim = true)
             Text(if (clips == 1) "1 clip so far" else "$clips clips so far", style = Type.body.copy(color = Stage.hint), textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
-        }
-        val running = clipStart != null
-        val enabled = status.recActive && !lost
-        val length = clipLength(Director.nowFileTimeMs() - (clipStart ?: 0))
-        Column(
-            Modifier.fillMaxWidth().height(180.dp).clip(RoundedCornerShape(28.dp))
+        } }
+        val clipButton: @Composable (Modifier) -> Unit = { m -> Column(
+            m.clip(RoundedCornerShape(28.dp))
                 .background(if (running) Stage.clip else Stage.surface)
                 .border(2.dp, if (running) Stage.clip else Stage.clip.copy(alpha = if (enabled) 1f else 0.4f), RoundedCornerShape(28.dp))
                 .clickable(enabled = enabled, role = Role.Button) { if (running) Director.endClip() else Director.startClip() }
@@ -111,6 +114,15 @@ fun StageScreen(onExit: () -> Unit) {
                 Text(if (enabled) "starts ${settings.leadMinutes} min before your tap" else "Start recording to clip",
                     style = Type.body.copy(fontSize = 15.sp, color = Stage.hint), modifier = Modifier.padding(top = 6.dp))
             }
+        } }
+        if (wide) {
+            Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
+                info(Modifier.weight(1f).fillMaxHeight())
+                clipButton(Modifier.weight(1f).fillMaxHeight())
+            }
+        } else {
+            info(Modifier.weight(1f).fillMaxWidth())
+            clipButton(Modifier.fillMaxWidth().height(180.dp))
         }
         Text("The screen stays on and dim. Exit stage mode is at the top.", style = Type.small.copy(color = Stage.hint), textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
     }

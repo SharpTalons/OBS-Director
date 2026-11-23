@@ -52,6 +52,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -139,15 +140,15 @@ internal fun AdjustPanel(r: Recording, c: Clip, onClose: () -> Unit) {
                 val i = (t / 100).toInt()
                 val a = envelope.getOrNull(i) ?: 0.05f
                 val h = (a.coerceIn(0.04f, 1f)) * size.height * 0.92f
-                drawRect(Color(0xFF55555C), Offset(k * bw + bw * 0.2f, (size.height - h) / 2), Size(bw * 0.6f, h))
+                drawRect(T.waveform, Offset(k * bw + bw * 0.2f, (size.height - h) / 2), Size(bw * 0.6f, h))
             }
             gaps.filter { it.atMs in from..to }.forEach { g ->
                 val x = (g.atMs - from) / span.toFloat() * size.width
-                drawRect(Color(0x40D9A441), Offset(x, 0f), Size((g.lengthMs / span.toFloat() * size.width).coerceAtLeast(3f), size.height))
+                drawRect(T.waveGap, Offset(x, 0f), Size((g.lengthMs / span.toFloat() * size.width).coerceAtLeast(3f), size.height))
             }
             val sx = (start - from) / span.toFloat() * size.width
             val ex = (end - from) / span.toFloat() * size.width
-            drawRect(Color(0x2944A282), Offset(sx, 0f), Size(ex - sx, size.height))
+            drawRect(T.waveSelection, Offset(sx, 0f), Size(ex - sx, size.height))
             drawRect(T.clipGreen, Offset(sx - 1f, 0f), Size(3f, size.height))
             drawRect(T.clipGreen, Offset(ex - 1f, 0f), Size(3f, size.height))
             drawRect(T.clipGreen, Offset(sx - 9f, 0f), Size(18f, 18f))
@@ -175,11 +176,11 @@ internal fun AdjustPanel(r: Recording, c: Clip, onClose: () -> Unit) {
         Spacer(Modifier.height(12.dp))
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             val adjPlaying = playback.playing && playback.key == "adj"
-            PrimaryButton(if (adjPlaying) "Stop" else "Play clip", if (adjPlaying) Icons.Outlined.Stop else Icons.Outlined.PlayArrow, height = 36.dp) {
+            PrimaryButton(if (adjPlaying) "Stop" else "Play clip", if (adjPlaying) Icons.Outlined.Stop else Icons.Outlined.PlayArrow, height = 48.dp) {
                 if (adjPlaying) ClipPlayer.stop() else playClip(r, c, "adj", start, end)
             }
-            OutlineButton("Hear start", Icons.Outlined.PlayArrow, height = 36.dp) { playClip(r, c, "adj", (start - 1500).coerceAtLeast(0), start + 1500) }
-            OutlineButton("Hear end", Icons.Outlined.PlayArrow, height = 36.dp) { playClip(r, c, "adj", (end - 1500).coerceAtLeast(0), end + 1500) }
+            OutlineButton("Hear start", Icons.Outlined.PlayArrow, height = 48.dp) { playClip(r, c, "adj", (start - 1500).coerceAtLeast(0), start + 1500) }
+            OutlineButton("Hear end", Icons.Outlined.PlayArrow, height = 48.dp) { playClip(r, c, "adj", (end - 1500).coerceAtLeast(0), end + 1500) }
         }
 
         Spacer(Modifier.height(8.dp))
@@ -202,7 +203,8 @@ private fun EdgeEditor(label: String, ms: Long, moved: Boolean, onNudge: (Long) 
     Text("${Director.tc(ms)}.${(ms % 1000) / 100}", style = Type.figure.copy(fontSize = 20.sp, color = if (moved) T.pillOkInk else T.text))
     Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         listOf(-10_000L, -1000L, -100L, 100L, 1000L, 10_000L).forEach { d ->
-            Box(Modifier.weight(1f).height(36.dp).clip(RoundedCornerShape(6.dp)).border(1.dp, T.control, RoundedCornerShape(6.dp)).clickable { onNudge(d) },
+            Box(Modifier.weight(1f).height(48.dp).clip(RoundedCornerShape(10.dp)).border(1.dp, T.control, RoundedCornerShape(10.dp))
+                .clickable(role = Role.Button, onClickLabel = "Move $label ${if (d > 0) "later" else "earlier"}") { onNudge(d) },
                 contentAlignment = Alignment.Center) {
                 val s = if (abs(d) >= 1000) "${abs(d) / 1000}" else "0.${abs(d) / 100}"
                 Text((if (d > 0) "+" else "−") + s, style = Type.mono.copy(fontSize = 12.sp))

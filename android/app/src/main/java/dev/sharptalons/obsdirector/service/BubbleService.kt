@@ -19,6 +19,9 @@ import dev.sharptalons.obsdirector.MainActivity
 import dev.sharptalons.obsdirector.core.Director
 import dev.sharptalons.obsdirector.core.LinkState
 import dev.sharptalons.obsdirector.core.Prefs
+import dev.sharptalons.obsdirector.ui.Stage
+import dev.sharptalons.obsdirector.ui.T
+import androidx.compose.ui.graphics.toArgb
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -82,24 +85,24 @@ class BubbleService : Service() {
         shown = true
         wm = getSystemService(WindowManager::class.java)
 
-        bubbleTime = label(13f, 0xFFFFFFFF.toInt(), bold = true).apply {
-            background = rounded(0xFF1C1C20.toInt(), 28, 0xFFFF5C76.toInt())
+        bubbleTime = label(13f, T.text.toArgb(), bold = true).apply {
+            background = rounded(T.surface.toArgb(), 28, T.negative.toArgb())
             minWidth = dp(56); minHeight = dp(56); setPadding(dp(10), 0, dp(10), 0)
             contentDescription = "OBS Director. Tap for the Clip button"
         }
 
-        panelTime = label(28f, 0xFFFFFFFF.toInt())
-        clipButton = label(18f, 0xFFFFFFFF.toInt(), bold = true).apply {
+        panelTime = label(28f, T.text.toArgb())
+        clipButton = label(18f, T.text.toArgb(), bold = true).apply {
             minHeight = dp(72)
             setOnClickListener { if (Director.clipStart.value == null) Director.startClip() else Director.endClip(); refresh() }
         }
-        val open = label(15f, 0xFF7FB0EC.toInt()).apply {
+        val open = label(15f, T.accent.toArgb()).apply {
             text = "Open app"; minHeight = dp(48)
             setOnClickListener {
                 startActivity(Intent(this@BubbleService, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP))
             }
         }
-        val hideIt = label(15f, 0xFFC9CBD0.toInt()).apply {
+        val hideIt = label(15f, T.text2.toArgb()).apply {
             text = "Hide bubble"; minHeight = dp(48)
             setOnClickListener { stopSelf() }
         }
@@ -110,7 +113,7 @@ class BubbleService : Service() {
         }
         panel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            background = rounded(0xFF1C1C20.toInt(), 22)
+            background = rounded(T.surface.toArgb(), 22)
             setPadding(dp(14), dp(12), dp(14), dp(6))
             addView(panelTime)
             addView(clipButton, LinearLayout.LayoutParams(dp(220), LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(8) })
@@ -149,10 +152,10 @@ class BubbleService : Service() {
         if (start != null) {
             val len = (Director.nowFileTimeMs() - start).coerceAtLeast(0) / 1000
             clipButton.text = "End clip · ${len / 60}:${"%02d".format(len % 60)}"
-            clipButton.background = rounded(0xFFB23A4D.toInt(), 18)
+            clipButton.background = rounded(Stage.rec.toArgb(), 18)
         } else {
             clipButton.text = "Clip"
-            clipButton.background = rounded(if (s.recActive) 0xFF2B66B0.toInt() else 0xFF2A2A30.toInt(), 18)
+            clipButton.background = rounded(if (s.recActive) T.blue.toArgb() else T.raised.toArgb(), 18)
         }
         clipButton.isEnabled = s.recActive && Director.link.value == LinkState.CONNECTED
         clipButton.alpha = if (clipButton.isEnabled) 1f else 0.6f

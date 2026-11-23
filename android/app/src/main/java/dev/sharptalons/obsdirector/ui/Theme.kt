@@ -16,6 +16,11 @@ import dev.sharptalons.obsdirector.R
  * is used in dark rooms. Text colours meet WCAG AA on [ground] and [surface].
  */
 object T {
+    // the Adjust waveform and the dropped-frames chart
+    val waveform = Color(0xFF55555C)
+    val waveGap = Color(0x40D9A441)
+    val waveSelection = Color(0x2944A282)
+    val chartEmpty = Color(0xFF2E3A33)
     val ground = Color(0xFF121214)
     val surface = Color(0xFF1C1C20)
     val surface2 = Color(0xFF1E1E22)

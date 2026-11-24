@@ -52,10 +52,11 @@ static void showConnectInfo(void *)
 	dlg.setMinimumWidth(420);
 	auto *root = new QVBoxLayout(&dlg);
 
-	auto *intro =
-		new QLabel(QStringLiteral("Open OBS Director on your phone and tap this PC in the list. The first "
-					  "time a phone connects, OBS asks you to allow it."),
-			   &dlg);
+	auto *intro = new QLabel(
+		QStringLiteral("Open OBS Director on your phone and tap this PC in the list, or open the "
+			       "web address below in Chrome, Edge or Firefox on any computer on this network. "
+			       "The first time a phone or browser connects, OBS asks you to allow it."),
+		&dlg);
 	intro->setWordWrap(true);
 	root->addWidget(intro);
 
@@ -70,16 +71,29 @@ static void showConnectInfo(void *)
 	showAddress();
 	QObject::connect(server, &DirectorServer::addressChanged, &dlg, showAddress);
 	form->addRow(QStringLiteral("Address"), addr);
+	auto *web = new QLabel(&dlg);
+	web->setTextFormat(Qt::RichText);
+	web->setOpenExternalLinks(true);
+	web->setTextInteractionFlags(Qt::TextBrowserInteraction);
+	auto showWeb = [web]() {
+		const QString w = server->webAddress();
+		web->setText(w.isEmpty() ? QStringLiteral("Not connected to a network")
+					 : QStringLiteral("<a href=\"%1\">%1</a>").arg(w.toHtmlEscaped()));
+	};
+	showWeb();
+	QObject::connect(server, &DirectorServer::addressChanged, &dlg, showWeb);
+	form->addRow(QStringLiteral("In a browser"), web);
 	form->addRow(QStringLiteral("Plugin"), new QLabel(QString::fromUtf8(PLUGIN_VERSION), &dlg));
 	root->addLayout(form);
 
-	auto *heading = new QLabel(QStringLiteral("Phones allowed to connect"), &dlg);
+	auto *heading = new QLabel(QStringLiteral("Phones and browsers allowed to connect"), &dlg);
 	heading->setStyleSheet("font-weight: 600; margin-top: 8px;");
 	root->addWidget(heading);
 	auto *list = new QListWidget(&dlg);
 	list->setMinimumHeight(110);
 	root->addWidget(list);
-	auto *empty = new QLabel(QStringLiteral("None yet. Phones appear here once you press Allow."), &dlg);
+	auto *empty =
+		new QLabel(QStringLiteral("None yet. Phones and browsers appear here once you press Allow."), &dlg);
 	empty->setStyleSheet("color: palette(mid);");
 	root->addWidget(empty);
 
@@ -118,14 +132,14 @@ static void showConnectInfo(void *)
 	QObject::connect(removeAll, &QPushButton::clicked, &dlg, [&dlg]() {
 		if (QMessageBox::question(
 			    &dlg, QStringLiteral("OBS Director"),
-			    QStringLiteral("Remove every phone? Each one will need to be allowed again.")) ==
+			    QStringLiteral("Remove every phone and browser? Each one will need to be allowed again.")) ==
 		    QMessageBox::Yes)
 			server->forgetAllDevices();
 	});
 
 	auto *note = new QLabel(
 		QStringLiteral(
-			"A removed phone is disconnected and has to be allowed again. Clips are written into the "
+			"A removed phone or browser is disconnected and has to be allowed again. Clips are written into the "
 			"recording as chapter markers when OBS records in Hybrid MP4 (Settings, Output, Recording "
 			"Format)."),
 		&dlg);

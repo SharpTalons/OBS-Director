@@ -41,6 +41,8 @@ target_sources(
     src/video-preview.hpp
     src/desk-dock.cpp
     src/desk-dock.hpp
+    src/web-server.cpp
+    src/web/web.qrc
 )
 
 set_target_properties_plugin(${CMAKE_PROJECT_NAME} PROPERTIES OUTPUT_NAME ${_name})

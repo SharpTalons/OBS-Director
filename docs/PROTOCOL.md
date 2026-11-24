@@ -8,8 +8,9 @@ How the OBS plugin and the OBS Director app talk on a local network. Everything 
 | 4467 | UDP | plugin → network, and both ways for probes | Discovery beacon every 2 s; answers to probes |
 | (app's choice) | UDP | plugin → app | The program mix as PCM |
 | 4468 | TCP | app → plugin | Live output as H.264, opened with a token |
+| 4470 | TCP (HTTP, WebSocket) | browser → plugin | The browser version: the page, then the control channel, the mix and the live output on one WebSocket |
 
-The plugin listens on IPv4 only. Its Windows installer allows TCP 4466 and 4468 and UDP 4467 through Windows Firewall, from the local subnet only.
+The plugin listens on IPv4 only. Its Windows installer allows TCP 4466, 4468 and 4470 and UDP 4467 through Windows Firewall, from the local subnet only.
 
 Version 2 replaced the PIN with approve-once pairing. An app or plugin on version 1 can't pair with one on version 2: install both from the same release.
 
@@ -137,3 +138,43 @@ The app sends the token from `video.start` and a newline. The plugin then sends 
 | 17 | bytes | H.264 Annex B |
 
 The stream is 640×360, x264 baseline with no B-frames, 1.2 Mb/s, one keyframe a second, at about 24 fps (the canvas frame rate divided down). The encoder runs only while at least one device has the video channel open. A slow device has non-key frames dropped rather than building up delay.
+
+## The browser version (TCP 4470)
+
+Added in 0.6.0. The plugin serves a small web app from its own resources (`src/web/`) and speaks the same protocol to it over a WebSocket, so a browser on any computer on the network can do what the phone app does.
+
+### HTTP
+
+| Path | What |
+| --- | --- |
+| `/` | The page |
+| `/app.js`, `/app.css`, `/icon.svg` | Its script, styles and icon |
+| `/ws` | The WebSocket (below) |
+
+- **Methods:** only GET; anything else gets 405.
+- **Request size:** at most 8 KB, which must arrive within 10 s.
+- **Host check:** a request is answered only if its `Host` is an IP address, `localhost`, or the PC's own name (also with `.local`, `.lan` or `.home`); anything else gets 421. That stops a website elsewhere from reaching the plugin by pointing its own name at the PC (DNS rebinding).
+- **Headers:** every response says `Cache-Control: no-cache`, `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY` and `Referrer-Policy: no-referrer`.
+- **Content Security Policy:** the page has a strict one, so it can load nothing from anywhere else and can only connect back to the same address.
+
+### WebSocket (`GET /ws`)
+
+A standard WebSocket (RFC 6455, version 13). If the request carries an `Origin`, it must be `http://` plus the same `Host`; otherwise 403. So only the plugin's own page can open it, not a page from another site in the same browser.
+
+- **Text frames** carry the same JSON messages as TCP 4466, one per frame, with no newline. The same rules apply:
+  - the browser says `hello` within 10 s, with its own random `deviceId`
+  - OBS asks **Allow** once
+  - the browser then gets `welcome`, `status`, `result`, `event` and `pong`
+- **Frame size:** the browser's frames must be masked, unfragmented and at most 64 KB. Anything else closes the connection.
+- **Ping and close:** `ping` frames get `pong`, and `close` is answered.
+
+Two commands work differently for a browser:
+
+| Command | Args | Does |
+| --- | --- | --- |
+| `audio.start` | `ws: true` | Sends the mix over this WebSocket instead of UDP. Each binary frame is one 5 ms audio packet, exactly as in the UDP layout below. A browser that falls 256 KB behind skips packets rather than drifting. |
+| `video.start` | `ws: true` | Sends the live output over this WebSocket instead of TCP 4468. Each binary frame is one `ODV1` frame as on TCP 4468, starting from the next keyframe (codec config always goes through). A browser 1 MB behind skips to the next keyframe. |
+
+Binary frames are told apart by their first four bytes, `ODA1` (audio) or `ODV1` (video).
+
+The page plays the mix with the Web Audio API, about 120 ms behind. For the live picture, it repackages each H.264 frame as fragmented MP4 for Media Source Extensions, which work on a plain `http://` page. Settings, clips and the saved session audio (Opus, in 30 s pieces in IndexedDB) stay in that browser.

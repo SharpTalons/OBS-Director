@@ -8,8 +8,8 @@ $ErrorActionPreference = 'Continue'
 # (Private or Public), and only the plugin's ports.
 $Local = @('10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16', 'LocalSubnet')
 $Rules = @(
-    @{ Name = 'OBS Director (control and video)'; Protocol = 'TCP'; Ports = @('4466', '4468')
-       Description = 'Lets OBS Director phones on this network connect to OBS.' },
+    @{ Name = 'OBS Director (control and video)'; Protocol = 'TCP'; Ports = @('4466', '4468', '4470')
+       Description = 'Lets OBS Director phones and browsers on this network connect to OBS.' },
     @{ Name = 'OBS Director (discovery)'; Protocol = 'UDP'; Ports = @('4467')
        Description = 'Lets OBS Director phones on this network find this PC.' }
 )

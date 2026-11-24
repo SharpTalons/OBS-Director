@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="referrer" content="no-referrer">
+<title>OBS Director</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="app.css">
+<script src="app.js" defer></script>
+</head>
+<body>
+<div id="app" class="shell">
+  <header class="head">
+    <span class="mark" aria-hidden="true"><span></span></span>
+    <div class="head-text">
+      <div class="head-title">OBS Director</div>
+      <div class="head-status"><span id="link-dot" class="dot"></span><span id="link-line">Connecting…</span></div>
+    </div>
+    <span id="browser-name" class="head-browser"></span>
+    <button id="stage-open" class="round" type="button" aria-label="Stage mode" hidden>
+      <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+    </button>
+  </header>
+  <div id="banners" class="banners" aria-live="polite"></div>
+  <div id="view" class="view"></div>
+  <div id="toast" class="toast" role="status" hidden></div>
+</div>
+<noscript><p class="noscript">OBS Director needs JavaScript switched on in this browser.</p></noscript>
+</body>
+</html>

@@ -112,7 +112,7 @@ void UdpAudio::removeDestination(const std::string &ip, uint16_t port)
 		empty = dests.empty();
 	}
 	if (empty)
-		stop();
+		stopIfIdle();
 }
 
 void UdpAudio::clearDestinations()
@@ -121,7 +121,28 @@ void UdpAudio::clearDestinations()
 		std::lock_guard<std::mutex> lock(destMutex);
 		dests.clear();
 	}
-	stop();
+	stopIfIdle();
+}
+
+void UdpAudio::stopIfIdle()
+{
+	if (destinationCount() == 0 && !tapOn)
+		stop();
+}
+
+void UdpAudio::setTap(TapFn fn)
+{
+	std::lock_guard<std::mutex> lock(tapMutex);
+	tap = std::move(fn);
+}
+
+void UdpAudio::setTapEnabled(bool on)
+{
+	tapOn = on;
+	if (on)
+		start();
+	else
+		stopIfIdle();
 }
 
 size_t UdpAudio::destinationCount()
@@ -199,6 +220,12 @@ void UdpAudio::sendPacket(const int16_t *pcm)
 	uint8_t *out = buf + 24;
 	for (size_t i = 0; i < size_t(kFramesPerPacket) * kChannels; i++)
 		put16(out + i * 2, uint16_t(pcm[i]));
+
+	if (tapOn) {
+		std::lock_guard<std::mutex> lock(tapMutex);
+		if (tap)
+			tap(buf, sizeof(buf));
+	}
 
 	std::vector<Dest> copy;
 	{

@@ -4,7 +4,7 @@
 ;   C:\ProgramData\obs-studio\plugins\obs-director\obs-director.dll
 ;   C:\ProgramData\obs-studio\plugins\obs-director\data\...
 ; removes any copy left in the legacy locations, which OBS stops loading in 34, and (a ticked
-; option) opens TCP 4466/4468 and UDP 4467 in Windows Firewall for local networks only, removing
+; option) opens TCP 4466/4468/4470 and UDP 4467 in Windows Firewall for local networks only, removing
 ; any rule Windows made that blocks OBS (firewall.ps1).
 ;
 ; Built by .github/scripts/Package-Windows.ps1, which passes:
@@ -93,12 +93,12 @@ Source: "{#SourceDir}\data\*"; DestDir: "{app}\data"; Flags: ignoreversion recur
 Source: "firewall.ps1"; DestDir: "{tmp}"; Flags: deleteafterinstall
 
 [Tasks]
-Name: "firewall"; Description: "Allow phones on this network through Windows Firewall (recommended)"; GroupDescription: "Windows Firewall:"
+Name: "firewall"; Description: "Allow phones and browsers on this network through Windows Firewall (recommended)"; GroupDescription: "Windows Firewall:"
 
 [Run]
-; Opens TCP 4466/4468 and UDP 4467 for local networks only, on Private and Public networks, and
+; Opens TCP 4466/4468/4470 and UDP 4467 for local networks only, on Private and Public networks, and
 ; removes any rule Windows made that blocks OBS (a block rule beats every allow rule).
-Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{tmp}\firewall.ps1"""; Flags: runhidden waituntilterminated; StatusMsg: "Allowing phones on this network through Windows Firewall..."; Tasks: firewall
+Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{tmp}\firewall.ps1"""; Flags: runhidden waituntilterminated; StatusMsg: "Allowing phones and browsers on this network through Windows Firewall..."; Tasks: firewall
 ; Open OBS at the end if the person wants, as themselves rather than as administrator.
 Filename: "{code:ObsExe}"; WorkingDir: "{code:ObsBinDir}"; Description: "Start OBS Studio"; Flags: postinstall nowait skipifsilent runasoriginaluser; Check: ObsInstalled
 

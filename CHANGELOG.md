@@ -5,6 +5,28 @@ All notable changes to OBS Director (plugin and Android app). The project follow
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-24
+
+OBS Director in a browser: open the address OBS shows, on any computer on the network, and do everything the phone does.
+
+### Browser version
+- Served by the plugin itself on TCP 4470; nothing to install. Works in Chrome, Edge and Firefox, on another computer or on the OBS PC.
+- Pairs like a phone: OBS asks **Allow** once, then the browser connects by itself.
+- **Monitor:** the recording and its timecode, the Clip button with its length inside (or press Space), Pause and Hold to stop, and listening through the computer's sound output (OBS-style meters, volume to 300% with a soft limiter, a network line). Also the live picture, chips for the stream and disk, and the desk.
+- **Stream and PC:** the Stream, Computer and Network tabs.
+- **Stage mode:** a black screen with the time and a big Clip button; Space clips and Esc leaves.
+- **Recordings:** each clip has Play, Adjust start and end, Edit note, Download audio (WAV) and Delete with undo. Export downloads as Resolve EDL, CSV or text, or copies it. The clip list is saved next to the recording on the PC too.
+- **Alerts:** silent mix, clipping, recording stopped by someone else, low disk, dropped frames, connection lost.
+- **Settings:** saved in the browser.
+
+### Plugin
+- A small web server on TCP 4470: the page, and a WebSocket carrying the same messages, the mix and the live output.
+- It only answers under the PC's own addresses and names, and the WebSocket only accepts its own page.
+- **Tools, OBS Director** shows the browser address, and lists browsers with the phones.
+
+### Windows installer
+- The firewall option also opens TCP 4470 for the local network.
+
 ## [0.5.1] - 2026-11-23
 
 Fixes from the design audit of 0.5.0.
@@ -131,7 +153,8 @@ First release of the plugin and the Android app.
 - The browser version (WebRTC and WebSocket modes) is not built yet; the app uses Direct UDP.
 - Audio missing from the phone's copy during a Wi-Fi drop is not yet refilled from the PC.
 
-[Unreleased]: https://github.com/SharpTalons/OBS-Director/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/SharpTalons/OBS-Director/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/SharpTalons/OBS-Director/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/SharpTalons/OBS-Director/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/SharpTalons/OBS-Director/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/SharpTalons/OBS-Director/compare/v0.4.0...v0.4.1

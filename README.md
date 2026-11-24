@@ -1,11 +1,12 @@
 # OBS Director
 
-Monitor and direct an OBS session from your phone while volunteers run the PC.
+Monitor and direct an OBS session from your phone, or from a browser on any computer, while volunteers run the PC.
 
-OBS Director is two parts:
+OBS Director has three parts:
 
 - **The OBS plugin** (this repository's root): runs inside OBS on the Windows streaming PC. It sends the recording and stream status, the program mix and a small live picture to your phone over the local network, takes start/stop/pause commands, writes your clips into the recording as chapter markers, and adds a dock where volunteers see your messages.
 - **The Android app** ([`android/`](android)): listen to the mix, watch record and stream health, start and stop the recording, and mark clips with notes for cutting short videos later.
+- **The browser version** ([`src/web/`](src/web)): the same app in Chrome, Edge or Firefox, served by the plugin itself. Open the address OBS shows under **Tools, OBS Director**, on a laptop, the OBS PC or any computer on the same network. Nothing to install.
 
 ## What the app does
 
@@ -41,15 +42,15 @@ The plugin is for Windows only.
 
 To update, run the newer installer the same way. To remove the plugin, use **Settings, Apps, Installed apps, OBS Director, Uninstall**. Phones you've allowed are remembered, so they still connect after an update.
 
-On the **Windows Firewall** page, keep **Allow phones on this network through Windows Firewall** ticked. On the last page you can tick **Start OBS Studio**.
+On the **Windows Firewall** page, keep **Allow phones and browsers on this network through Windows Firewall** ticked. On the last page you can tick **Start OBS Studio**.
 
 If the release notes say the installer isn't code-signed, Windows may show "Windows protected your PC". Choose **More info**, then **Run anyway**.
 
 ### 2. Let the phone reach the PC
 
-The plugin uses TCP 4466 (control), UDP 4467 (finding the PC) and TCP 4468 (live picture).
+The plugin uses TCP 4466 (control), UDP 4467 (finding the PC), TCP 4468 (live picture) and TCP 4470 (the browser version).
 
-With **Allow phones on this network through Windows Firewall** ticked, the installer allows these from local networks only, whether Windows calls the network Private or Public.
+With **Allow phones and browsers on this network through Windows Firewall** ticked, the installer allows these from local networks only, whether Windows calls the network Private or Public.
 
 It also removes any rule Windows made that **blocks** OBS. Windows makes one when it asks "allow OBS on this network?" and someone presses **Cancel**, or ticks only Private while the network is Public, and a block rule beats every allow rule. If phones still can't connect, run the installer again with that option ticked.
 
@@ -65,7 +66,7 @@ For clips to be written into the recording as chapters, set OBS to record in **H
 2. Open it. The first time, Android asks you to allow installs from your browser or file manager; allow it, then install.
 3. After that, the app updates itself.
 
-### 5. Connect the phone
+### 5. Connect the phone (or a browser)
 
 1. Open OBS on the PC.
 2. In the app, tap the **connect icon** at the top right. (The first time you open the app, this pop-up opens by itself.) It scans the network and lists the PCs that answer, by name with each one's IP address. A **yellow dot** means the PC is ready to connect. The list is fresh every time you open it; press **Search** to scan again.
@@ -76,18 +77,31 @@ After that, the phone connects with one tap, and OBS doesn't ask again. When the
 
 Volunteers see your phone's name in the OBS dock while you're connected. To change that name, open **Settings, Connection** in the app.
 
-**Tools, OBS Director** in OBS shows the PC's address and lists the phones you've allowed. Select one and press **Remove** to stop it connecting; it would have to be allowed again.
+**In a browser instead:** open the address under **In a browser** in **Tools, OBS Director** (it looks like `http://192.168.1.24:4470`) in Chrome, Edge or Firefox on any computer on the same network, the OBS PC included. OBS asks **Allow "Chrome on Windows" to connect?** once, the same as for a phone. Everything the app does works there:
+
+- listening through that computer's sound output, with the same meters and volume up to 300%
+- the live picture
+- Start clip (or press **Space**), and Stage mode (**Esc** leaves it)
+- recordings, with Play, Adjust, Note, Download audio and Delete for each clip
+- Export as a download
+- alerts, the desk, and Settings
+
+What a browser keeps (settings, clips and the session audio for playing clips back) stays in that browser. The page comes from the plugin, so it updates when you update the plugin.
+
+**Tools, OBS Director** in OBS shows the PC's address and lists the phones and browsers you've allowed. Select one and press **Remove** to stop it connecting; it would have to be allowed again.
 
 ### Troubleshooting
 
 - **The PC doesn't appear in the app**: check that both are on the same network and press **Search** in the connect pop-up. If it still isn't listed, tap **Enter the IP address yourself** and type the address from **Tools, OBS Director**. Some guest or office networks block devices from seeing each other; use a different network if so.
-- **"The PC didn't answer"**: Windows Firewall is blocking OBS. Run the installer again with **Allow phones on this network through Windows Firewall** ticked (step 2).
+- **"The PC didn't answer"**: Windows Firewall is blocking OBS. Run the installer again with **Allow phones and browsers on this network through Windows Firewall** ticked (step 2).
 - **"OBS isn't accepting phones"**: the phone reached the PC, but the plugin isn't running. Check OBS is open and **Tools, OBS Director** is in its menu (OBS 33 or later).
 - **"This phone can't reach…"**: the phone and the PC are on different networks. Some guest or venue Wi-Fi keeps devices apart; use another network or a phone hotspot if so.
 - **"OBS on this PC said no"**: someone pressed **Deny**. Wait a minute, tap the PC again, and press **Allow** in OBS this time.
 - **Nothing appears in OBS when you tap the PC**: the Allow question may be behind the OBS window; check the taskbar.
 - **The IP in the app differs from OBS**: your PC is on more than one network (for example Wi-Fi and Ethernet). The app shows the address your phone can actually reach; once the phone has searched or connected, OBS shows that same address.
 - **Connects, but no sound or picture**: the firewall is letting the control channel through but not TCP 4468 or the audio. Check step 2.
+- **The browser page doesn't open**: use the exact address from **Tools, OBS Director**, starting with `http://` and ending in `:4470`. If it still doesn't open from another computer, run the installer again with the firewall option ticked (step 2); this adds TCP 4470.
+- **No sound in the browser**: browsers only play sound after a click. Switch **Listen in this browser** on.
 - **No chapters in the recording**: the recording format isn't Hybrid MP4 (step 3).
 - **The plugin doesn't appear in OBS**: check that OBS is version 33 or later (**Help, About**), then run the installer again.
 

@@ -12,6 +12,7 @@ the Free Software Foundation; either version 2 of the License, or
 
 #include <atomic>
 #include <cstdint>
+#include <functional>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -45,6 +46,12 @@ public:
 	void clearDestinations();
 	size_t destinationCount();
 
+	/* Browsers get the same packets over their WebSocket: the tap is called on the audio
+	 * thread with each packet while at least one browser listens. */
+	using TapFn = std::function<void(const uint8_t *packet, size_t size)>;
+	void setTap(TapFn fn);
+	void setTapEnabled(bool on);
+
 	/* Recording clock, set from frontend events on the UI thread, read on the audio thread. */
 	void recordingStarted();
 	void recordingStopped();
@@ -64,6 +71,11 @@ private:
 	void sendPacket(const int16_t *pcm);
 	void start();
 	void stop();
+	void stopIfIdle();
+
+	std::mutex tapMutex;
+	TapFn tap;
+	std::atomic<bool> tapOn{false};
 
 	std::mutex destMutex;
 	std::vector<Dest> dests;

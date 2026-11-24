@@ -39,6 +39,8 @@ class VideoPreview;
  *   - UDP 4467: discovery beacon, broadcast every 2 s, and answers to probes
  *   - UDP to the device: program mix as PCM (UdpAudio)
  *   - TCP 4468: H.264 live output frames, opened with a token from video.start
+ *   - TCP 4470: the browser version: the page itself over HTTP, then a WebSocket on /ws that
+ *     carries the same JSON messages, and the mix and live output as binary frames
  */
 class DirectorServer : public QObject {
 	Q_OBJECT
@@ -47,6 +49,7 @@ public:
 	static constexpr quint16 kControlPort = 4466;
 	static constexpr quint16 kBeaconPort = 4467;
 	static constexpr quint16 kVideoPort = 4468;
+	static constexpr quint16 kWebPort = 4470;
 	static constexpr int kProtocol = 2; /* 2: approve-once pairing (deviceId), no PIN */
 
 	explicit DirectorServer(DeskDock *dock, QObject *parent = nullptr);
@@ -68,6 +71,8 @@ public:
 	QString advertisedAddress() const;
 	QString primaryAddress() const;
 	QString pcName() const;
+	/* where to open the browser version, e.g. http://192.168.1.24:4470 */
+	QString webAddress() const;
 
 signals:
 	void devicesChanged();
@@ -77,6 +82,7 @@ private slots:
 	void onNewConnection();
 	void onBeaconReadyRead();
 	void onVideoConnection();
+	void onWebConnection();
 	void sendStatus();
 	void sendBeacon();
 
@@ -94,6 +100,13 @@ private:
 		QString videoToken;
 		QTcpSocket *videoSock = nullptr;
 		qint64 connectedAt = 0;
+		/* a browser: messages are WebSocket frames, and the mix and live output come over
+		 * the same connection instead of UDP and TCP 4468 */
+		bool ws = false;
+		QByteArray wsBuf;
+		bool wsAudio = false;
+		bool wsVideo = false;
+		bool wsVideoNeedKey = true;
 	};
 
 	void onReadyRead(QTcpSocket *sock);
@@ -111,6 +124,20 @@ private:
 	void sendVideoFrame(const QByteArray &frame);
 	void loadConfig();
 	void saveConfig();
+
+	/* the browser version (web-server.cpp) */
+	void acceptClient(QTcpSocket *sock, bool ws);
+	void onHttpReadyRead(QTcpSocket *sock);
+	void serveFile(QTcpSocket *sock, const QByteArray &path, const QByteArray &host);
+	void upgradeToWebSocket(QTcpSocket *sock, const QByteArray &key, const QByteArray &rest);
+	void readWebSocket(QTcpSocket *sock);
+	void wsWrite(QTcpSocket *sock, quint8 opcode, const QByteArray &payload);
+	void sendAudioToBrowsers(const QByteArray &packet);
+	void sendVideoToBrowsers(const QByteArray &frame);
+	void updateBrowserAudio();
+	bool allowedHost(const QByteArray &host) const;
+	QTcpServer *webServer = nullptr;
+	QHash<QTcpSocket *, QByteArray> httpPending;
 
 	DeskDock *dock;
 	QTcpServer *server;

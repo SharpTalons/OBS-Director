@@ -122,6 +122,17 @@ DirectorServer::DirectorServer(DeskDock *d, QObject *parent)
 		obs_log(LOG_ERROR, "could not listen on TCP %d: %s", kControlPort,
 			server->errorString().toUtf8().constData());
 
+	/* Browsers get the mix over their WebSocket; the tap runs on the audio thread. */
+	audio->setTap([this](const uint8_t *packet, size_t size) {
+		QByteArray p(reinterpret_cast<const char *>(packet), int(size));
+		QMetaObject::invokeMethod(this, [this, p]() { sendAudioToBrowsers(p); }, Qt::QueuedConnection);
+	});
+
+	webServer = new QTcpServer(this);
+	connect(webServer, &QTcpServer::newConnection, this, &DirectorServer::onWebConnection);
+	if (!webServer->listen(QHostAddress::AnyIPv4, kWebPort))
+		obs_log(LOG_WARNING, "could not listen on TCP %d for the browser version", kWebPort);
+
 	connect(videoServer, &QTcpServer::newConnection, this, &DirectorServer::onVideoConnection);
 	if (!videoServer->listen(QHostAddress::AnyIPv4, kVideoPort))
 		obs_log(LOG_WARNING, "could not listen on TCP %d for video", kVideoPort);
@@ -155,8 +166,8 @@ DirectorServer::DirectorServer(DeskDock *d, QObject *parent)
 		event("desk.reply", data);
 	});
 
-	obs_log(LOG_INFO, "listening on TCP %d (control), %d (video); beacon on UDP %d", kControlPort, kVideoPort,
-		kBeaconPort);
+	obs_log(LOG_INFO, "listening on TCP %d (control), %d (video), %d (browser); beacon on UDP %d", kControlPort,
+		kVideoPort, kWebPort, kBeaconPort);
 }
 
 DirectorServer::~DirectorServer()
@@ -164,6 +175,8 @@ DirectorServer::~DirectorServer()
 	statusTimer.stop();
 	beaconTimer.stop();
 	preview->stop();
+	audio->setTapEnabled(false);
+	audio->setTap(nullptr);
 	audio->clearDestinations();
 	for (auto it = clients.begin(); it != clients.end(); ++it) {
 		if (it->videoSock)
@@ -441,10 +454,11 @@ void DirectorServer::askApproval(Client &c)
 	box->setTextFormat(Qt::PlainText); /* the name comes from the phone */
 	box->setText(tr("Allow \"%1\" to connect?").arg(c.device));
 	box->setInformativeText(
-		tr("A phone at %1 wants to connect. It will be able to start and stop the recording, "
-		   "listen to the mix and send messages to this dock. Once allowed, it connects by itself "
-		   "next time; you can remove it under Tools, OBS Director.")
-			.arg(c.ip));
+		(c.ws ? tr("A web browser at %1 wants to connect.") : tr("A phone at %1 wants to connect.")).arg(c.ip) +
+		QLatin1Char(' ') +
+		tr("It will be able to start and stop the recording, listen to the mix and send messages to "
+		   "this dock. Once allowed, it connects by itself next time; you can remove it under Tools, "
+		   "OBS Director."));
 	QPushButton *allow = box->addButton(tr("Allow"), QMessageBox::AcceptRole);
 	QPushButton *deny = box->addButton(tr("Deny"), QMessageBox::RejectRole);
 	box->setDefaultButton(deny);
@@ -524,29 +538,34 @@ int DirectorServer::unpairedCount() const
 
 void DirectorServer::onNewConnection()
 {
-	while (QTcpSocket *sock = server->nextPendingConnection()) {
-		/* too many half-open pairings at once: refuse, so nobody can tie up the server */
-		if (unpairedCount() >= kMaxUnpaired) {
-			sock->abort();
-			sock->deleteLater();
-			continue;
-		}
-		sock->setSocketOption(QAbstractSocket::LowDelayOption, 1);
-		Client c;
-		c.sock = sock;
-		c.ip = ipv4Of(sock->peerAddress());
-		notePhoneSeen(sock->peerAddress(), sock->localAddress());
-		c.connectedAt = QDateTime::currentMSecsSinceEpoch();
-		clients.insert(sock, c);
-		connect(sock, &QTcpSocket::readyRead, this, [this, sock]() { onReadyRead(sock); });
-		connect(sock, &QTcpSocket::disconnected, this, [this, sock]() { onDisconnected(sock); });
-		/* unpaired sockets get 10 s to say hello (a phone waiting for Allow has its own timer) */
-		QTimer::singleShot(10000, this, [this, sock]() {
-			auto it = clients.find(sock);
-			if (it != clients.end() && !it->authed && !it->pending)
-				sock->disconnectFromHost();
-		});
+	while (QTcpSocket *sock = server->nextPendingConnection())
+		acceptClient(sock, false);
+}
+
+void DirectorServer::acceptClient(QTcpSocket *sock, bool ws)
+{
+	/* too many half-open pairings at once: refuse, so nobody can tie up the server */
+	if (unpairedCount() >= kMaxUnpaired) {
+		sock->abort();
+		sock->deleteLater();
+		return;
 	}
+	sock->setSocketOption(QAbstractSocket::LowDelayOption, 1);
+	Client c;
+	c.sock = sock;
+	c.ws = ws;
+	c.ip = ipv4Of(sock->peerAddress());
+	notePhoneSeen(sock->peerAddress(), sock->localAddress());
+	c.connectedAt = QDateTime::currentMSecsSinceEpoch();
+	clients.insert(sock, c);
+	connect(sock, &QTcpSocket::readyRead, this, [this, sock]() { onReadyRead(sock); });
+	connect(sock, &QTcpSocket::disconnected, this, [this, sock]() { onDisconnected(sock); });
+	/* unpaired sockets get 10 s to say hello (a device waiting for Allow has its own timer) */
+	QTimer::singleShot(10000, this, [this, sock]() {
+		auto it = clients.find(sock);
+		if (it != clients.end() && !it->authed && !it->pending)
+			sock->disconnectFromHost();
+	});
 }
 
 void DirectorServer::onDisconnected(QTcpSocket *sock)
@@ -554,7 +573,7 @@ void DirectorServer::onDisconnected(QTcpSocket *sock)
 	auto it = clients.find(sock);
 	if (it == clients.end())
 		return;
-	if (it->listening)
+	if (it->listening && !it->wsAudio)
 		audio->removeDestination(it->ip.toStdString(), it->audioPort);
 	if (it->videoSock)
 		it->videoSock->close();
@@ -570,6 +589,7 @@ void DirectorServer::onDisconnected(QTcpSocket *sock)
 	clients.erase(it);
 	sock->deleteLater();
 	updateVideo();
+	updateBrowserAudio();
 	updatePresence();
 	if (authed)
 		dock->addFeed(tr("%1 disconnected").arg(device));
@@ -580,6 +600,8 @@ void DirectorServer::onReadyRead(QTcpSocket *sock)
 	auto it = clients.find(sock);
 	if (it == clients.end())
 		return;
+	if (it->ws)
+		return readWebSocket(sock);
 	while (sock->canReadLine()) {
 		QByteArray line = sock->readLine(64 * 1024).trimmed();
 		if (line.isEmpty())
@@ -602,6 +624,9 @@ void DirectorServer::send(QTcpSocket *sock, const QJsonObject &msg)
 	if (!sock || sock->state() != QAbstractSocket::ConnectedState)
 		return;
 	QByteArray out = QJsonDocument(msg).toJson(QJsonDocument::Compact);
+	auto it = clients.constFind(sock);
+	if (it != clients.constEnd() && it->ws)
+		return wsWrite(sock, 0x1, out);
 	out.append('\n');
 	sock->write(out);
 }
@@ -698,6 +723,20 @@ void DirectorServer::handleCommand(Client &c, int id, const QString &cmd, const 
 		dock->addFeed(tr("%1 ended the stream").arg(c.device));
 		return result(c, id, true);
 	}
+	if (cmd == "audio.start" && c.ws) {
+		/* a browser: the mix comes over this connection */
+		if (c.listening && !c.wsAudio)
+			audio->removeDestination(c.ip.toStdString(), c.audioPort);
+		c.listening = true;
+		c.wsAudio = true;
+		updateBrowserAudio();
+		updatePresence();
+		QJsonObject d;
+		d["rate"] = int(UdpAudio::kSampleRate);
+		d["channels"] = int(UdpAudio::kChannels);
+		d["frames"] = int(UdpAudio::kFramesPerPacket);
+		return result(c, id, true, d);
+	}
 	if (cmd == "audio.start") {
 		int port = args.value("port").toInt();
 		if (port <= 0 || port > 65535)
@@ -715,11 +754,23 @@ void DirectorServer::handleCommand(Client &c, int id, const QString &cmd, const 
 		return result(c, id, true, d);
 	}
 	if (cmd == "audio.stop") {
-		if (c.listening)
+		if (c.listening && !c.wsAudio)
 			audio->removeDestination(c.ip.toStdString(), c.audioPort);
 		c.listening = false;
+		c.wsAudio = false;
+		updateBrowserAudio();
 		updatePresence();
 		return result(c, id, true);
+	}
+	if (cmd == "video.start" && c.ws) {
+		/* a browser: frames come over this connection, starting from the next keyframe */
+		c.wsVideo = true;
+		c.wsVideoNeedKey = true;
+		updateVideo();
+		QJsonObject d;
+		d["width"] = 640;
+		d["height"] = 360;
+		return result(c, id, true, d);
 	}
 	if (cmd == "video.start") {
 		c.videoToken = QString::number(QRandomGenerator::global()->generate64(), 16);
@@ -731,6 +782,7 @@ void DirectorServer::handleCommand(Client &c, int id, const QString &cmd, const 
 		return result(c, id, true, d);
 	}
 	if (cmd == "video.stop") {
+		c.wsVideo = false;
 		c.videoToken.clear();
 		if (c.videoSock)
 			c.videoSock->close();
@@ -838,7 +890,7 @@ void DirectorServer::updateVideo()
 {
 	bool want = false;
 	for (auto it = clients.begin(); it != clients.end(); ++it)
-		if (it->videoSock)
+		if (it->videoSock || (it->authed && it->wsVideo))
 			want = true;
 	if (want && !preview->active())
 		preview->start();
@@ -848,6 +900,7 @@ void DirectorServer::updateVideo()
 
 void DirectorServer::sendVideoFrame(const QByteArray &frame)
 {
+	sendVideoToBrowsers(frame);
 	for (auto it = clients.begin(); it != clients.end(); ++it) {
 		QTcpSocket *vs = it->videoSock;
 		if (!vs || vs->state() != QAbstractSocket::ConnectedState)

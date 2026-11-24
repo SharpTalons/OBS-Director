@@ -1,0 +1,10 @@
+<!DOCTYPE RCC>
+<RCC version="1.0">
+  <!-- The browser version, served by the plugin on TCP 4470 (src/web-server.cpp). -->
+  <qresource prefix="/web">
+    <file>index.html</file>
+    <file>app.js</file>
+    <file>app.css</file>
+    <file>icon.svg</file>
+  </qresource>
+</RCC>

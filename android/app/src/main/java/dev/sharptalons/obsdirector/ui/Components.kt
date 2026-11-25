@@ -159,6 +159,7 @@ fun HoldButton(text: String, icon: ImageVector?, holdMs: Int, modifier: Modifier
                     val job = scope.launch {
                         progress.snapTo(0f)
                         progress.animateTo(1f, tween(holdMs, easing = LinearEasing))
+                        dev.sharptalons.obsdirector.core.Feedback.tap()
                         onDone()
                         progress.snapTo(0f)
                     }

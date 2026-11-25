@@ -107,7 +107,6 @@ fun MonitorScreen(onOpenRecording: (String) -> Unit, onOpenStream: () -> Unit) {
     val clips = recordings.firstOrNull { it.file == status.file }?.clips?.size ?: 0
 
     Column(Modifier.semantics { paneTitle = "Monitor" }, verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        BatteryBanner()
 
         // ---------------- Recording ----------------
         Section {

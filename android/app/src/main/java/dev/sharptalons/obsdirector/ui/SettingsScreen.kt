@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.BatteryAlert
+import androidx.compose.material.icons.outlined.TouchApp
 import androidx.compose.material.icons.outlined.Vibration
 import androidx.compose.material.icons.automirrored.outlined.VolumeUp
 import androidx.compose.material.icons.outlined.DeleteSweep
@@ -159,6 +160,9 @@ fun SettingsScreen(onConnect: () -> Unit) {
             },
             Row.Switch(Icons.Outlined.PowerSettingsNew, "Allow ending the stream", s.allowStreamStop) { x, v -> x.copy(allowStreamStop = v) },
             Row.Switch(Icons.Outlined.LightMode, "Keep the screen on", s.keepScreenOn) { x, v -> x.copy(keepScreenOn = v) },
+            Row.Choice(Icons.Outlined.TouchApp, "Touch sound", if (s.touchSound == 0) "Off" else "${s.touchSound}%", listOf("Off", "25%", "50%", "75%", "100%")) { x, v ->
+                x.copy(touchSound = if (v == "Off") 0 else v.removeSuffix("%").toInt())
+            },
             Row.Choice(Icons.Outlined.Vibration, "Vibration", listOf("Off", "Light", "Medium", "Strong")[s.haptics.coerceIn(0, 3)], listOf("Off", "Light", "Medium", "Strong")) { x, v ->
                 x.copy(haptics = listOf("Off", "Light", "Medium", "Strong").indexOf(v).coerceAtLeast(0))
             },
@@ -207,7 +211,8 @@ fun SettingsScreen(onConnect: () -> Unit) {
             if (open.label == "Delay") Director.setBuffer(if (v == "Auto") 0 else v.removeSuffix(" ms").toInt())
             else Prefs.update { x -> open.pick(x, v) }
             // feel the new strength straight away
-            if (open.label == "Vibration") Director.vibrate(longArrayOf(0, 40, 80, 40))
+            if (open.label == "Vibration") Director.vibrate(FeedbackTokens.PREVIEW)
+            if (open.label == "Touch sound") dev.sharptalons.obsdirector.core.Feedback.playTap(Prefs.settings.value.touchSound)
             sheet = null
         }, onDismiss = { sheet = null })
     }

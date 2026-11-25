@@ -18,9 +18,9 @@ OBS Director has three parts:
 - **Stream**: tap the Stream chip on Monitor for the stream, the PC (processor, frame rate, lag, disk) and the network, each on its own tab.
 - **Stage mode**: the masks icon in the top bar. A black, dim screen with the time, the meter and a big Clip button, for a phone propped up during a service or a show.
 - **Outside the app**: a floating bubble while connected; tap it to open the app, drag it anywhere, or drop it on the ✕ to put it away. Long-press the app icon for **Start clip**, **Stage mode** and **Close OBS Director**. Press Back three times to close the app too.
-- **Alerts**: silent mix, recording stopped by someone else, disk nearly full, dropped frames, connection lost, and the phone's own battery running low. The phone buzzes even when locked, and most alerts can be sent to the desk with one tap.
+- **Alerts**: silent mix, clipping, recording stopped by someone else, disk nearly full, dropped frames, connection lost, and the phone's own battery running low. Each one notifies (the phone buzzes even when locked) and shows up as a card in the Desk chat, most with a **Tell the desk** button.
 - **Desk**: a group chat with the volunteers at the OBS dock and everyone else connected, laid out like WhatsApp: names, times, and ticks that turn blue when the desk has read your message. Enter starts a new line; Ctrl+Enter or the send button sends.
-- **Vibration**: choose how strongly the phone buzzes (Off, Light, Medium, Strong) in **Settings, Controls**.
+- **Touch sound and vibration**: every tap clicks softly and ticks. Set the **Touch sound** volume and **Vibration** strength in **Settings, Controls**.
 - **Drops**: if Wi-Fi drops, a running clip is saved at the drop, listening pauses, and the app reconnects by itself. OBS keeps recording on the PC throughout.
 - **Updates**: each time the app opens it checks this repository's releases. When a newer version is out it asks once, with **Update** and **Ignore**; Update downloads it and hands it to Android's installer, keeping your clips and settings. To check yourself at any time, open **Settings**, scroll to **About**, and press **Check for updates**.
 
@@ -125,6 +125,10 @@ cmake --preset windows-x64 && cmake --build --preset windows-x64
 To build the installer as well, install [Inno Setup 6](https://jrsoftware.org/isinfo.php), then run `.github/scripts/Build-Windows.ps1` and `.github/scripts/Package-Windows.ps1` with the `CI` environment variable set. The installer lands in `release/`.
 
 CI builds both on every push and pull request. Maintainers: releasing and signing are described in [docs/RELEASING.md](docs/RELEASING.md).
+
+## Design
+
+The colours, type, sizes, touch sound and vibration patterns are in [docs/DESIGN.md](docs/DESIGN.md).
 
 ## Protocol
 

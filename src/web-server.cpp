@@ -57,6 +57,7 @@ const WebFile kFiles[] = {
 	{"/app.js", ":/web/app.js", "text/javascript; charset=utf-8"},
 	{"/app.css", ":/web/app.css", "text/css; charset=utf-8"},
 	{"/icon.svg", ":/web/icon.svg", "image/svg+xml"},
+	{"/tap.wav", ":/web/tap.wav", "audio/wav"},
 };
 
 QByteArray statusLine(int code)

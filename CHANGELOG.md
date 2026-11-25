@@ -18,8 +18,16 @@ The desk is now a group chat, everywhere.
 - **Browser version:** a Desk tab of its own, with an unread count.
 - **OBS dock:** rebuilt as the same chat, with "Got it", "On it" and "Fixed" quick replies. Connections and recording events show as small notes. A phone or browser that connects later gets the conversation so far.
 
+### Alerts live in the chat
+- Alerts no longer sit as banners on top of the screens. Each one sends a notification, vibrates, and shows up in the Desk chat as a centred card (red for a severe one) with its action, **Start recording** or **Tell the desk**.
+- Tapping an alert notification opens the chat. Connection lost and reconnected show there too. The phone's low-battery warning is now an alert like the others.
+
+### Touch sound and vibration
+- **Touch sound:** a tap sound on every button, tile, row, switch and tab, with its volume under Settings, Controls (Off, 25, 50, 75 or 100%). It's one clean tap cut from the supplied recording, which has ten. The app stays quiet while the phone is on silent or vibrate. The browser version plays it too, from the plugin.
+- **Vibration:** a new strength setting (Off, Light, Medium or Strong) under Controls, for taps, clips, alerts and messages. Picking one buzzes so you can feel it. The browser version vibrates on phones whose browser can.
+- **Design constants:** both are now design tokens (`FeedbackTokens` in the app's theme), and are written up with the colours, type and sizes in [docs/DESIGN.md](docs/DESIGN.md).
+
 ### Android app
-- **Vibration:** a new setting (Off, Light, Medium or Strong) under Controls, for clips, alerts and messages. Picking one buzzes so you can feel it.
 - **Stage mode:** comedy and tragedy masks replace the moon, which looked like a dark-mode switch. This applies to the top bar, the long-press shortcut and the browser version.
 
 

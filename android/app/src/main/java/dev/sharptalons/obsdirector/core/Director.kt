@@ -16,6 +16,7 @@ import dev.sharptalons.obsdirector.net.Protocol
 import dev.sharptalons.obsdirector.net.data
 import dev.sharptalons.obsdirector.net.ok
 import dev.sharptalons.obsdirector.service.MonitorService
+import dev.sharptalons.obsdirector.ui.FeedbackTokens
 import dev.sharptalons.obsdirector.service.Notifier
 import dev.sharptalons.obsdirector.video.VideoClient
 import kotlinx.coroutines.CoroutineScope
@@ -238,6 +239,8 @@ object Director {
             scope.launch { delay(5000); reconnectedGap.value = 0 }
             if (Prefs.settings.value.resumeListen && listenWasOn) listenState.value = true
             clearAlert("net")
+            val gap = reconnectedGap.value / 1000
+            chatNote(DeskMessage("note-${System.currentTimeMillis()}", false, "Reconnected after ${gap / 60}:${"%02d".format(gap % 60)}. Listening again.", kind = "note"))
         }
         linkState.value = LinkState.CONNECTED
         retries.value = 0
@@ -259,7 +262,7 @@ object Director {
         endClipIfRunning("net")
         stopVideo()
         stopAudio()
-        vibrate(longArrayOf(0, 200, 100, 200))
+        vibrate(FeedbackTokens.LINK_LOST)
         raise(Alert("net", true, "Connection to ${pcState.value?.name ?: "the PC"} lost.",
             "Listening paused. The recording carries on at the PC. " +
                 if (Prefs.settings.value.autoReconnect) "Reconnecting…" else "Reconnect from Settings."))
@@ -315,7 +318,7 @@ object Director {
                     deskState.value = (list + m).takeLast(500)
                     if (!m.mine) {
                         if (!deskOpen) deskUnread.value = deskUnread.value + 1
-                        vibrate(longArrayOf(0, 40, 70, 40))
+                        vibrate(FeedbackTokens.MESSAGE)
                         if (!deskOpen) Notifier.desk(app, "${m.from}: ${m.text}")
                     }
                 }
@@ -453,7 +456,7 @@ object Director {
         runningClip.value = (nowFileTimeMs() - lead).coerceAtLeast(0)
         pendingNote.value = null
         lastSaved.value = null
-        vibrate(longArrayOf(0, 20))
+        vibrate(FeedbackTokens.CLIP_START)
         if (Prefs.settings.value.chapters) scope.launch {
             val n = (ClipStore.recordings.value.firstOrNull { it.file == s.file }?.clips?.size ?: 0) + 1
             connection?.command("chapter.add", mapOf("name" to JsonPrimitive("Clip $n")))
@@ -480,7 +483,7 @@ object Director {
         val clip = Clip(ClipStore.newId(), start, end, chapterWritten = Prefs.settings.value.chapters && statusState.value.container == "mp4")
         ClipStore.ensure(file, live = statusState.value.recActive)
         ClipStore.addClip(file, clip)
-        vibrate(longArrayOf(0, 20, 60, 20))
+        vibrate(FeedbackTokens.CLIP_SAVED)
         val n = ClipStore.recordings.value.firstOrNull { it.file == file }?.clips?.indexOfFirst { it.id == clip.id }?.plus(1) ?: 0
         val why = when (auto) {
             "net" -> ", ended when the connection dropped"
@@ -564,7 +567,9 @@ object Director {
             ?.mapNotNull { (it as? JsonObject)?.let(::chatMessage) } ?: return
         val ids = msgs.map { it.id }.toSet()
         val pending = deskState.value.filter { it.mine && it.state != "sent" && it.state != "seen" && it.id !in ids }
-        deskState.value = (msgs + pending).takeLast(500)
+        // this phone's own alert cards and notes stay, in time order
+        val local = deskState.value.filter { it.kind != "message" }
+        deskState.value = (msgs + pending + local).sortedBy { it.at }.takeLast(500)
         pending.filter { it.state == "failed" || it.state == "sending" }.forEach { postDesk(it) }
     }
 
@@ -618,11 +623,20 @@ object Director {
 
     fun dismissAlert(id: String) = clearAlert(id)
 
+    /** An alert: a notification, and a card in the Desk chat (on this phone only) with its actions. */
     private fun raise(a: Alert) {
         if (alertState.value.any { it.id == a.id }) return
         alertState.value = listOf(a) + alertState.value
-        vibrate(if (a.severe) longArrayOf(0, 300, 120, 300, 120, 300) else longArrayOf(0, 200, 100, 200))
+        vibrate(if (a.severe) FeedbackTokens.ALERT_SEVERE else FeedbackTokens.ALERT)
         Notifier.alert(app, a)
+        chatNote(DeskMessage("alert-${a.id}-${System.currentTimeMillis()}", false, a.body, from = a.title, kind = "alert",
+            severe = a.severe, deskText = a.deskText, offerStart = a.offerStartRecording))
+    }
+
+    /** A line in this phone's chat that isn't a message: an alert card, or a connection note. */
+    fun chatNote(m: DeskMessage) {
+        deskState.value = (deskState.value + m).takeLast(500)
+        if (!deskOpen) deskUnread.value = deskUnread.value + 1
     }
 
     private fun clearAlert(id: String) {
@@ -630,6 +644,8 @@ object Director {
         alertState.value = alertState.value.filterNot { it.id == id }
         Notifier.cancelAlert(app, id)
     }
+
+    private var batteryWarnedAt = -1
 
     private suspend fun alertLoop() {
         while (scope.isActive) {
@@ -675,6 +691,16 @@ object Director {
                 }
             }
 
+            // the phone's own battery: once each time it drops another 5% below the warning level
+            val b = PhoneBattery.battery.value
+            if (st.batteryWarn > 0 && !b.charging && b.percent in 1..st.batteryWarn) {
+                if (batteryWarnedAt < 0 || b.percent <= batteryWarnedAt - 5) {
+                    batteryWarnedAt = b.percent
+                    clearAlert("battery")
+                    raise(Alert("battery", b.percent <= 5, "Phone at ${b.percent}%.", "Plug it in: the session audio is still saving."))
+                }
+            } else if (b.charging || b.percent > st.batteryWarn) { batteryWarnedAt = -1; clearAlert("battery") }
+
             // dropped frames in the last minute
             if (s.streamActive && dropHistory.size > 2) {
                 val minuteAgo = dropHistory.firstOrNull { it.first >= now - 60_000 } ?: dropHistory.first()
@@ -704,11 +730,11 @@ object Director {
         val v = ContextCompat.getSystemService(app, Vibrator::class.java) ?: return
         runCatching {
             if (v.hasAmplitudeControl()) {
-                val strength = intArrayOf(0, 70, 150, 255)[level]
+                val strength = FeedbackTokens.BUZZ_AMPLITUDE[level - 1]
                 val amps = IntArray(pattern.size) { i -> if (i % 2 == 1) strength else 0 }
                 v.vibrate(VibrationEffect.createWaveform(pattern, amps, -1))
             } else {
-                val scale = floatArrayOf(0f, 0.5f, 1f, 1.4f)[level]
+                val scale = FeedbackTokens.BUZZ_LENGTH_SCALE[level - 1]
                 v.vibrate(VibrationEffect.createWaveform(LongArray(pattern.size) { i -> if (i % 2 == 1) (pattern[i] * scale).toLong().coerceAtLeast(10) else pattern[i] }, -1))
             }
         }

@@ -120,7 +120,11 @@ fun DeskScreen(modifier: Modifier) {
                     val older = rows.getOrNull(i + 1)
                     Column {
                         if (older == null || dayLabel(older.at) != dayLabel(m.at)) DayChip(dayLabel(m.at))
-                        Bubble(m, showName = !m.mine && (older == null || older.from != m.from || older.mine || dayLabel(older.at) != dayLabel(m.at)))
+                        when (m.kind) {
+                            "alert" -> AlertCard(m)
+                            "note" -> NoteChip(m)
+                            else -> Bubble(m, showName = !m.mine && (older == null || older.kind != "message" || older.from != m.from || older.mine || dayLabel(older.at) != dayLabel(m.at)))
+                        }
                     }
                 }
             }
@@ -198,5 +202,38 @@ private fun Bubble(m: DeskMessage, showName: Boolean) {
             }
         }
         if (!m.mine) Spacer(Modifier.width(48.dp))
+    }
+}
+
+/** An alert, on this phone only: centred like a chat's system message, with its actions. */
+@Composable
+private fun AlertCard(m: DeskMessage) {
+    val tint = if (m.severe) Tints.rec else Tints.amber
+    val time = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(m.at))
+    Box(Modifier.fillMaxWidth().padding(vertical = 6.dp), contentAlignment = Alignment.Center) {
+        Column(Modifier.widthIn(max = 340.dp).fillMaxWidth(0.88f).clip(RoundedCornerShape(14.dp)).background(tint.bg).padding(horizontal = 14.dp, vertical = 10.dp)
+            .semantics(mergeDescendants = true) { contentDescription = "Alert at $time: ${m.from} ${m.text}" },
+            verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Icon(Icons.Outlined.ErrorOutline, null, tint = tint.ink, modifier = Modifier.size(18.dp))
+                Text(m.from, style = Type.body.copy(fontSize = 14.sp, fontWeight = FontWeight.Bold, color = T.text), modifier = Modifier.weight(1f))
+                Text(time, style = Type.small.copy(fontSize = 11.sp, color = tint.ink))
+            }
+            Text(m.text, style = Type.body.copy(fontSize = 14.sp, color = tint.ink))
+            if (m.deskText != null || m.offerStart) Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 4.dp)) {
+                if (m.offerStart) PrimaryButton("Start recording") { Director.recordStart() }
+                m.deskText?.let { t -> OutlineButton("Tell the desk") { Director.sendDesk(t) } }
+            }
+        }
+    }
+}
+
+/** A connection note: a small centred line, like a chat's "joined" message. */
+@Composable
+private fun NoteChip(m: DeskMessage) {
+    val time = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(m.at))
+    Box(Modifier.fillMaxWidth().padding(vertical = 4.dp), contentAlignment = Alignment.Center) {
+        Text("$time  ${m.text}", style = Type.small.copy(fontSize = 12.sp, color = T.text2),
+            modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(T.surface).padding(horizontal = 12.dp, vertical = 5.dp))
     }
 }

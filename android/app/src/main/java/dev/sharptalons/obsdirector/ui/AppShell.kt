@@ -140,27 +140,8 @@ fun AppShell() {
     Column(Modifier.fillMaxSize().background(T.ground).windowInsetsPadding(WindowInsets.statusBars)) {
         HeadBar(link, pc, latency, awaiting, onStage = { screen = "stage" }, onConnect = { connectOpen = true })
         // banners for the link and alerts, shown above every screen
-        // Only there when there's something to show, so an empty banner area adds no gap.
-        val hasBanners = link == LinkState.LOST || reconnected > 0 || alerts.any { it.id != "net" }
-        val topBanners: @Composable () -> Unit = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                if (link == LinkState.LOST) {
-                    val ago = (now - lostAt) / 1000
-                    Banner(PillKind.WARN, Icons.Outlined.WifiOff, "Connection to ${pc?.name ?: "the PC"} lost",
-                        "· ${ago / 60}:${"%02d".format(ago % 60)} ago. Listening paused. The recording carries on at the PC. Reconnecting, try ${retry.coerceAtLeast(1)}.")
-                } else if (reconnected > 0) {
-                    val s = reconnected / 1000
-                    Banner(PillKind.OK, Icons.Outlined.Wifi, "Reconnected", "after ${s / 60}:${"%02d".format(s % 60)}. Listening again.")
-                }
-                alerts.filter { it.id != "net" }.forEach { a ->
-                    Banner(if (a.severe) PillKind.REC else PillKind.WARN, Icons.Outlined.Warning, a.title, a.body, onDismiss = { Director.dismissAlert(a.id) }) {
-                        if (a.offerStartRecording) PrimaryButton("Start recording", Icons.Outlined.FiberManualRecord) { Director.recordStart(); Director.dismissAlert(a.id) }
-                        if (a.deskText != null) OutlineButton("Tell the desk", Icons.AutoMirrored.Outlined.Send) { Director.deskAboutAlert(a) }
-                    }
-                }
-            }
-        }
-        val top: (@Composable () -> Unit)? = if (hasBanners) topBanners else null
+        // Alerts don't sit on top of the screens any more: they notify, and show up in the Desk chat.
+        val top: (@Composable () -> Unit)? = null
         Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
             // on tablets, in landscape and on unfolded phones the content keeps a phone's reading width
             val content = Modifier.fillMaxHeight().widthIn(max = 640.dp).fillMaxWidth()
@@ -198,7 +179,7 @@ fun AppShell() {
         Row(Modifier.fillMaxWidth().background(T.ground).windowInsetsPadding(WindowInsets.navigationBars).padding(vertical = 6.dp).selectableGroup()) {
             val tab = when (screen) { "recordings", "recording" -> "recordings"; "config" -> "config"; "desk" -> "desk"; else -> "monitor" }
             val unread by Director.deskUnreadCount.collectAsState()
-            NavItem("Monitor", Icons.Outlined.Headphones, tab == "monitor", badge = if (alerts.any { it.id != "net" }) "!" else null, Modifier.weight(1f)) { screen = "monitor" }
+            NavItem("Monitor", Icons.Outlined.Headphones, tab == "monitor", null, Modifier.weight(1f)) { screen = "monitor" }
             NavItem("Recordings", Icons.Outlined.VideoLibrary, tab == "recordings", badge = if (recordings.any { it.live }) "•" else null, Modifier.weight(1f)) { screen = "recordings" }
             NavItem("Desk", Icons.AutoMirrored.Outlined.Chat, tab == "desk", badge = if (unread > 0) (if (unread > 99) "99+" else "$unread") else null, Modifier.weight(1f)) { screen = "desk" }
             NavItem("Settings", Icons.Outlined.Settings, tab == "config", null, Modifier.weight(1f)) { screen = "config" }

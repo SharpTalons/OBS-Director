@@ -107,6 +107,8 @@ function icon(name, size = 20) {
 		mic: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/>',
 		calendar: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/>',
 		timer: '<circle cx="12" cy="13" r="8"/><path d="M12 9v4l2 2M9 2h6"/>',
+		tap: '<path d="M9 11V5a2 2 0 0 1 4 0v6M13 10a2 2 0 0 1 4 0v4a6 6 0 0 1-6 6h-1a6 6 0 0 1-5-3l-1.5-3a1.6 1.6 0 0 1 2.8-1.6L9 15"/>',
+		vibrate: '<rect x="8" y="4" width="8" height="16" rx="2"/><path d="M4 8v8M20 8v8"/>',
 	};
 	return h('span', { 'aria-hidden': 'true', style: { display: 'inline-flex' }, html: `<svg width="${size}" height="${size}" viewBox="0 0 24 24">${paths[name] || ''}</svg>` });
 }
@@ -154,6 +156,8 @@ const settings = Object.assign({
 	diskHours: 2,
 	dropsPerMinute: 100,
 	holdMs: 1000,
+	touchSound: 50,
+	haptics: 2,
 	allowStreamStop: false,
 	spaceForClip: true,
 }, store.get('settings', {}));
@@ -299,6 +303,8 @@ function connect() {
 		if (state.link === 'connected') {
 			state.link = 'lost';
 			state.lostAt = Date.now();
+			chatNote({ kind: 'alert', severe: true, from: 'Connection to ' + (state.pc || 'the PC') + ' lost.', text: 'Listening paused. The recording carries on at the PC. Reconnecting…' });
+			feedback.buzz([200, 100, 200]);
 			endClipIfRunning(', ended when the connection dropped');
 			audio.pause();
 			video.reset();
@@ -360,7 +366,7 @@ function onMessage(m) {
 		state.error = '';
 		clearInterval(pingTimer);
 		pingTimer = setInterval(() => send({ type: 'ping', t: performance.now() }), 2000);
-		if (wasLost) toast('Reconnected after ' + len(Date.now() - state.lostAt) + '.');
+		if (wasLost) chatNote({ kind: 'note', text: 'Reconnected after ' + len(Date.now() - state.lostAt) + '. Listening again.' });
 		if (state.listening || (settings.autoListen && audio.unlocked)) audio.start();
 		if (state.video) video.start();
 		loadDesk();
@@ -1078,10 +1084,30 @@ async function writeClipLists() {
 const dropHistory = [];
 let silentSince = 0, lastClipAlertAt = 0, minuteTicks = 0, minuteStartDropped = -1;
 
+/** An alert: a notification where the browser allows one, a buzz, and a card in the Desk chat. */
 function raise(a) {
 	const had = state.alerts.find((x) => x.id === a.id);
 	state.alerts = state.alerts.filter((x) => x.id !== a.id).concat([a]);
-	if (!had) render();
+	if (had) return;
+	chatNote({ kind: 'alert', from: a.title, text: a.body, severe: !!a.severe, deskText: a.desk || null, offerStart: !!a.offerStart });
+	feedback.buzz(a.severe ? [300, 120, 300, 120, 300] : [200, 100, 200]);
+	notify(a.title, a.body);
+	render();
+}
+
+/** A line in this browser's chat that isn't a message: an alert card or a connection note. */
+function chatNote(n) {
+	state.desk.push(Object.assign({ id: 'local-' + newId(), at: Date.now(), mine: false, desk: false, state: 'sent' }, n));
+	if (view.name !== 'desk') state.deskUnread++;
+}
+
+/** A system notification, when the browser allows it (it does on the OBS PC itself, at localhost). */
+function notify(title, body) {
+	try {
+		if (!('Notification' in window) || !window.isSecureContext) return toast(title + ' ' + body);
+		if (Notification.permission === 'granted') new Notification(title, { body, icon: 'icon.svg', tag: title });
+		else { toast(title + ' ' + body); if (Notification.permission === 'default') Notification.requestPermission(); }
+	} catch { toast(title + ' ' + body); }
 }
 function clearAlert(id) {
 	if (!state.alerts.some((x) => x.id === id)) return;
@@ -1130,6 +1156,43 @@ setInterval(() => {
 	}
 }, 1000);
 
+/* =============================================================== touch feedback */
+
+/*
+ * The same tap as the phone app (tap.wav: one tap cut from the supplied recording, 60 ms),
+ * at the Touch sound volume, and a short vibration on phones whose browser can vibrate.
+ */
+const feedback = {
+	buffer: null,
+	loading: false,
+	async load() {
+		if (this.buffer || this.loading || !audio.ensure()) return;
+		this.loading = true;
+		try { this.buffer = await audio.ctx.decodeAudioData(await (await fetch('tap.wav')).arrayBuffer()); } catch { /* no tap sound */ }
+		this.loading = false;
+	},
+	tap() {
+		const vol = settings.touchSound || 0;
+		if (vol > 0) {
+			this.load();
+			if (this.buffer && audio.ctx) {
+				const src = audio.ctx.createBufferSource(), g = audio.ctx.createGain();
+				g.gain.value = (vol / 100) * 0.6; /* same ceiling as the app: under the mix, not over it */
+				src.buffer = this.buffer; src.connect(g); g.connect(audio.ctx.destination); src.start();
+			}
+		}
+		if (settings.haptics > 0) this.buzz([[8, 14, 22][settings.haptics - 1]]);
+	},
+	buzz(pattern) {
+		if (!settings.haptics || !navigator.vibrate) return;
+		const scale = [0.5, 1, 1.4][settings.haptics - 1];
+		try { navigator.vibrate(pattern.map((v, i) => (i % 2 === 0 ? Math.max(5, Math.round(v * scale)) : v))); } catch { /* not allowed */ }
+	},
+};
+document.addEventListener('click', (e) => {
+	if (e.target.closest && e.target.closest('button, [role=switch], [role=tab], a, select')) feedback.tap();
+}, { capture: true });
+
 /* =============================================================== desk */
 
 function chatMessage(d) {
@@ -1143,7 +1206,9 @@ async function loadDesk() {
 	const msgs = (r.data.messages || []).map(chatMessage);
 	const ids = new Set(msgs.map((m) => m.id));
 	const pending = state.desk.filter((m) => m.mine && (m.state === 'sending' || m.state === 'failed') && !ids.has(m.id));
-	state.desk = msgs.concat(pending);
+	/* this browser's own alert cards and notes stay, in time order */
+	const local = state.desk.filter((m) => m.kind === 'alert' || m.kind === 'note');
+	state.desk = msgs.concat(pending, local).sort((a, b) => a.at - b.at);
 	pending.forEach(postDesk);
 	render();
 }
@@ -1252,36 +1317,9 @@ function renderHead() {
  * showing is kept as it is: only a new one is announced, once.
  */
 const bannerNodes = new Map();
+/* Alerts don't sit on top of the screens: they notify, and show up in the Desk chat. */
 function renderBanners() {
-	const box = $('#banners');
-	const wanted = [];
-	if (state.link === 'lost') wanted.push(['lost:' + state.lostAt, () => {
-		/* the seconds tick visibly only, so a screen reader hears the banner once */
-		const ago = h('span', { 'aria-hidden': 'true' });
-		const node = h('div.banner', h('div.body', h('b', 'Connection to ' + (state.pc || 'the PC') + ' lost. '), ago,
-			' Listening paused. The recording carries on at the PC. Reconnecting…'));
-		node.tickers = [[ago, () => len(Date.now() - state.lostAt) + ' ago.']];
-		return node;
-	}]);
-	for (const a of state.alerts) wanted.push(['alert:' + a.id, () => {
-		const body = h('span');
-		const node = h('div.banner' + (a.severe ? '.severe' : ''),
-		h('div.body', h('b', a.title + ' '), body,
-			h('div.actions',
-				a.offerStart && h('button.btn.primary.small-btn', { type: 'button', onclick: () => { act('record.start'); clearAlert(a.id); } }, icon('rec', 16), 'Start recording'),
-				a.desk && h('button.btn.outline.small-btn', { type: 'button', onclick: () => { sendDesk(a.desk); toast('Sent to the desk'); } }, icon('send', 16), 'Tell the desk'))),
-		h('button.round.plain', { type: 'button', 'aria-label': 'Dismiss: ' + a.title, onclick: () => clearAlert(a.id) }, icon('close', 18)));
-		/* the latest wording (the disk alert's hours, say) without rebuilding the banner */
-		node.tickers = [[body, () => (state.alerts.find((x) => x.id === a.id) || a).body]];
-		return node;
-	}]);
-	const keys = new Set(wanted.map((w) => w[0]));
-	for (const [key, node] of bannerNodes) if (!keys.has(key)) { node.remove(); bannerNodes.delete(key); }
-	for (const [key, build] of wanted) {
-		let node = bannerNodes.get(key);
-		if (!node) { node = build(); bannerNodes.set(key, node); box.append(node); }
-		for (const [el, fn] of node.tickers || []) bind(el, fn);
-	}
+	$('#banners').replaceChildren();
 }
 
 /* ---------- waiting for Allow ---------- */
@@ -1501,6 +1539,18 @@ function deskPage() {
 	for (const m of state.desk) {
 		const day = chatDay(m.at);
 		if (day !== lastDay) { list.append(h('div.chat-day', h('span', day))); lastDay = day; lastFrom = null; }
+		const hhmm = pad2(new Date(m.at).getHours()) + ':' + pad2(new Date(m.at).getMinutes());
+		if (m.kind === 'note') { list.append(h('div.chat-day.chat-note', h('span', hhmm + '  ' + m.text))); lastFrom = null; continue; }
+		if (m.kind === 'alert') {
+			list.append(h('div.chat-alert' + (m.severe ? '.severe' : ''), { role: 'note' },
+				h('div.row', icon('alert', 18), h('b.grow', m.from), h('span.small', hhmm)),
+				h('div', m.text),
+				(m.offerStart || m.deskText) && h('div.row',
+					m.offerStart && h('button.btn.primary.small-btn', { type: 'button', onclick: () => act('record.start') }, icon('rec', 16), 'Start recording'),
+					m.deskText && h('button.btn.outline.small-btn', { type: 'button', onclick: () => sendDesk(m.deskText) }, icon('send', 16), 'Tell the desk'))));
+			lastFrom = null;
+			continue;
+		}
 		const showName = !m.mine && lastFrom !== (m.desk ? '\u0000desk' : m.from);
 		lastFrom = m.mine ? null : (m.desk ? '\u0000desk' : m.from);
 		const time = pad2(new Date(m.at).getHours()) + ':' + pad2(new Date(m.at).getMinutes());
@@ -1769,6 +1819,8 @@ function settingsPage() {
 		['Controls', 'amber', [
 			['choice', 'timer', 'Hold to stop recording', 'holdMs', [[500, '0.5 s'], [1000, '1 s'], [2000, '2 s']]],
 			['switch', 'power', 'Allow ending the stream', 'allowStreamStop'],
+			['choice', 'tap', 'Touch sound', 'touchSound', [[0, 'Off'], [25, '25%'], [50, '50%'], [75, '75%'], [100, '100%']]],
+			['choice', 'vibrate', 'Vibration (phones only)', 'haptics', [[0, 'Off'], [1, 'Light'], [2, 'Medium'], [3, 'Strong']]],
 		]],
 	];
 	const item = ([kind, ic, label, key, options], t, first) => {
@@ -1780,7 +1832,7 @@ function settingsPage() {
 				tile, h('span.grow', label), h('span.switch', { 'aria-checked': String(on), 'aria-hidden': 'true' }));
 		}
 		if (kind === 'choice') {
-			const sel = h('select.choice', { 'aria-label': label, onchange: (e) => { const o = options[e.target.selectedIndex]; settings[key] = o[0]; saveSettings(); render(); } },
+			const sel = h('select.choice', { 'aria-label': label, onchange: (e) => { const o = options[e.target.selectedIndex]; settings[key] = o[0]; saveSettings(); if (key === 'touchSound' || key === 'haptics') feedback.tap(); if (key === 'haptics') feedback.buzz([40, 80, 40]); render(); } },
 				options.map(([v, l]) => h('option', { selected: settings[key] === v }, l)));
 			return h('label.setting', base, tile, h('span.grow', label), sel);
 		}

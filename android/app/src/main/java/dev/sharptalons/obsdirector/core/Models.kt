@@ -54,6 +54,12 @@ data class DeskMessage(
     val mine: Boolean = false,
     /** for this phone's own messages: sending, sent (OBS has it), seen (the desk read it), failed */
     val state: String = "sent",
+    /** "message"; "alert" (shown on this phone only, with its actions); "note" (connection events) */
+    val kind: String = "message",
+    val severe: Boolean = false,
+    /** alerts: what "Tell the desk" sends, and whether to offer Start recording */
+    val deskText: String? = null,
+    val offerStart: Boolean = false,
 )
 
 enum class Tag(val id: String, val label: String, val color: Long, val resolve: String) {

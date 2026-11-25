@@ -57,7 +57,10 @@ object Notifier {
             .setStyle(NotificationCompat.BigTextStyle().bigText(a.body))
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_ALARM)
-            .setContentIntent(openApp(context))
+            // alerts live in the Desk chat: tapping opens it
+            .setContentIntent(PendingIntent.getActivity(context, 8,
+                Intent(context, MainActivity::class.java).setAction(MainIntents.ACTION_DESK).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT))
             .setAutoCancel(true)
             .build()
         runCatching { NotificationManagerCompat.from(context).notify(a.id.hashCode(), n) }

@@ -109,6 +109,11 @@ svg { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; 
 .chat-day { display: flex; justify-content: center; margin: 10px 0 6px; }
 .chat-day span { background: var(--surface); color: var(--text-2); font-size: 12px; border-radius: 8px; padding: 4px 12px; }
 .chat-row { display: flex; }
+.chat-note span { color: var(--text-2); }
+.chat-alert { align-self: center; width: min(420px, 100%); margin: 8px 0; padding: 10px 14px; border-radius: 14px; background: var(--amber-tint); color: var(--amber-ink); display: flex; flex-direction: column; gap: 6px; }
+.chat-alert.severe { background: var(--rec-tint); color: var(--rec-ink); }
+.chat-alert b { color: var(--text); font-weight: 600; }
+.chat-alert .small { color: inherit; }
 .chat-row.first { margin-top: 6px; }
 .chat-row.mine { justify-content: flex-end; }
 .bubble { max-width: min(560px, 78%); padding: 6px 10px 5px 12px; border-radius: 14px; background: var(--chat-in); }

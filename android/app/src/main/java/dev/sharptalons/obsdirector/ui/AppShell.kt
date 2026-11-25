@@ -1,5 +1,11 @@
 package dev.sharptalons.obsdirector.ui
 
+import androidx.compose.foundation.layout.offset
+
+import androidx.compose.foundation.layout.isImeVisible
+
+import androidx.compose.material.icons.automirrored.outlined.Chat
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -161,6 +167,7 @@ fun AppShell() {
             when (screen) {
                 "recording" -> RecordingScreen(openFile, content, top, onBack = { screen = "recordings" })
                 "recordings" -> RecordingsScreen(content, top, onOpen = { openFile = it; screen = "recording" })
+                "desk" -> DeskScreen(content)
                 else -> Column(content.verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     top?.invoke()
                     when {
@@ -183,12 +190,19 @@ fun AppShell() {
             }
         }
 
+        // the tabs step aside while the keyboard is up, as in a chat app
+        @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+        val keyboard = WindowInsets.isImeVisible
+        if (!keyboard) {
         HorizontalDivider(color = T.rule)
         Row(Modifier.fillMaxWidth().background(T.ground).windowInsetsPadding(WindowInsets.navigationBars).padding(vertical = 6.dp).selectableGroup()) {
-            val tab = when (screen) { "recordings", "recording" -> "recordings"; "config" -> "config"; else -> "monitor" }
+            val tab = when (screen) { "recordings", "recording" -> "recordings"; "config" -> "config"; "desk" -> "desk"; else -> "monitor" }
+            val unread by Director.deskUnreadCount.collectAsState()
             NavItem("Monitor", Icons.Outlined.Headphones, tab == "monitor", badge = if (alerts.any { it.id != "net" }) "!" else null, Modifier.weight(1f)) { screen = "monitor" }
             NavItem("Recordings", Icons.Outlined.VideoLibrary, tab == "recordings", badge = if (recordings.any { it.live }) "•" else null, Modifier.weight(1f)) { screen = "recordings" }
+            NavItem("Desk", Icons.AutoMirrored.Outlined.Chat, tab == "desk", badge = if (unread > 0) (if (unread > 99) "99+" else "$unread") else null, Modifier.weight(1f)) { screen = "desk" }
             NavItem("Settings", Icons.Outlined.Settings, tab == "config", null, Modifier.weight(1f)) { screen = "config" }
+        }
         }
     }
 }
@@ -199,15 +213,19 @@ private fun NavItem(label: String, icon: ImageVector, selected: Boolean, badge: 
         modifier
             .height(56.dp)
             .selectable(selected = selected, role = Role.Tab, onClick = onClick)
-            .semantics { if (badge != null) stateDescription = if (badge == "!") "Needs attention" else "Recording now" }
+            .semantics { if (badge != null) stateDescription = when (badge) { "!" -> "Needs attention"; "•" -> "Recording now"; else -> "$badge unread" } }
             .drawBehind { if (selected) drawLine(T.accent, Offset(size.width / 2 - 40f, 0f), Offset(size.width / 2 + 40f, 0f), 4f) },
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
         Box {
             Icon(icon, null, tint = if (selected) T.text else T.muted, modifier = Modifier.size(22.dp))
-            if (badge != null) Text(badge, style = Type.mono.copy(fontSize = 10.sp, color = if (badge == "!") T.warning else T.text),
+            if (badge == "!" || badge == "•") Text(badge, style = Type.mono.copy(fontSize = 10.sp, color = if (badge == "!") T.warning else T.text),
                 modifier = Modifier.align(Alignment.TopEnd).padding(start = 24.dp).clearAndSetSemantics { })
+            else if (badge != null) Text(badge, style = Type.label.copy(fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0B1A12)),
+                // an unread count, like a chat app's
+                modifier = Modifier.align(Alignment.TopEnd).offset(x = 14.dp, y = (-6).dp).clip(CircleShape).background(T.positive)
+                    .padding(horizontal = 5.dp, vertical = 1.dp).clearAndSetSemantics { })
         }
         Text(label, style = Type.small.copy(fontSize = 11.sp, color = if (selected) T.text else T.muted))
     }

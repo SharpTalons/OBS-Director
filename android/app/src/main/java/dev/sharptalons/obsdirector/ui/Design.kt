@@ -20,7 +20,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
-import androidx.compose.material.icons.outlined.Bedtime
+import androidx.compose.material.icons.outlined.TheaterComedy
 import androidx.compose.material.icons.outlined.Cast
 import androidx.compose.material.icons.outlined.CastConnected
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -144,7 +144,7 @@ fun HeadBar(link: LinkState, pc: FoundPc?, latencyMs: Int, waiting: String?, onS
                 )
             }
         }
-        RoundIcon(Icons.Outlined.Bedtime, "Stage mode", T.warning, onStage)
+        RoundIcon(Icons.Outlined.TheaterComedy, "Stage mode", T.warning, onStage)
         val (icon, tint, label) = when (link) {
             LinkState.CONNECTED -> Triple(Icons.Outlined.CastConnected, T.positive, "Connected. Change or disconnect")
             LinkState.CONNECTING, LinkState.LOST -> Triple(Icons.Outlined.Cast, T.warning, "Connecting")

@@ -16,6 +16,10 @@ import dev.sharptalons.obsdirector.R
  * is used in dark rooms. Text colours meet WCAG AA on [ground] and [surface].
  */
 object T {
+    // the desk chat: this phone's bubbles in green, everyone else's in grey, like a messaging app
+    val chatOut = Color(0xFF005C4B)
+    val chatOutMuted = Color(0xFFA5D6C9)
+    val chatIn = Color(0xFF2A2A30)
     // the Adjust waveform and the dropped-frames chart
     val waveform = Color(0xFF55555C)
     val waveGap = Color(0x40D9A441)

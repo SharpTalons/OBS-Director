@@ -185,7 +185,6 @@ fun MonitorScreen(onOpenRecording: (String) -> Unit, onOpenStream: () -> Unit) {
         }
 
         LivePicture(lost)
-        DeskSection()
     }
 }
 

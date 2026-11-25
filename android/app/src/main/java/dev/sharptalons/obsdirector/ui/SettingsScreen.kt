@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.BatteryAlert
+import androidx.compose.material.icons.outlined.Vibration
 import androidx.compose.material.icons.automirrored.outlined.VolumeUp
 import androidx.compose.material.icons.outlined.DeleteSweep
 import androidx.compose.material.icons.outlined.GraphicEq
@@ -158,6 +159,9 @@ fun SettingsScreen(onConnect: () -> Unit) {
             },
             Row.Switch(Icons.Outlined.PowerSettingsNew, "Allow ending the stream", s.allowStreamStop) { x, v -> x.copy(allowStreamStop = v) },
             Row.Switch(Icons.Outlined.LightMode, "Keep the screen on", s.keepScreenOn) { x, v -> x.copy(keepScreenOn = v) },
+            Row.Choice(Icons.Outlined.Vibration, "Vibration", listOf("Off", "Light", "Medium", "Strong")[s.haptics.coerceIn(0, 3)], listOf("Off", "Light", "Medium", "Strong")) { x, v ->
+                x.copy(haptics = listOf("Off", "Light", "Medium", "Strong").indexOf(v).coerceAtLeast(0))
+            },
         )),
     )
 
@@ -202,6 +206,8 @@ fun SettingsScreen(onConnect: () -> Unit) {
         ChoiceSheet(open.label, open.options, open.value, onPick = { v ->
             if (open.label == "Delay") Director.setBuffer(if (v == "Auto") 0 else v.removeSuffix(" ms").toInt())
             else Prefs.update { x -> open.pick(x, v) }
+            // feel the new strength straight away
+            if (open.label == "Vibration") Director.vibrate(longArrayOf(0, 40, 80, 40))
             sheet = null
         }, onDismiss = { sheet = null })
     }

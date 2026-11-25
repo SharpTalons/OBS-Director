@@ -5,7 +5,23 @@ All notable changes to OBS Director (plugin and Android app). The project follow
 
 ## [Unreleased]
 
-## [0.6.2] - 2026-11-25
+## [0.7.0] - 2026-11-26
+
+The desk is now a group chat, everywhere.
+
+### Desk chat
+- **Group chat:** the OBS dock, every phone and every browser see every message.
+- **Layout:** like WhatsApp. Others on the left with their names in colour, your own messages on the right in green, and day separators.
+- **Ticks:** a clock while sending, grey ticks once OBS has the message, blue once the desk has seen it. A message that didn't go shows in red; tap to try again.
+- **Typing:** Enter starts a new line, and Ctrl+Enter or the send button sends. Messages go up to 1000 characters.
+- **Android app:** a Desk tab of its own, with an unread count, and notifications that open the chat. The tabs step aside while the keyboard is up. The desk card is gone from Monitor.
+- **Browser version:** a Desk tab of its own, with an unread count.
+- **OBS dock:** rebuilt as the same chat, with "Got it", "On it" and "Fixed" quick replies. Connections and recording events show as small notes. A phone or browser that connects later gets the conversation so far.
+
+### Android app
+- **Vibration:** a new setting (Off, Light, Medium or Strong) under Controls, for clips, alerts and messages. Picking one buzzes so you can feel it.
+- **Stage mode:** comedy and tragedy masks replace the moon, which looked like a dark-mode switch. This applies to the top bar, the long-press shortcut and the browser version.
+
 
 ### Android app
 - **Sound on every output:** the mix now plays on Bluetooth, USB sound cards and headsets that stayed silent before. Android only starts an ordinary audio track once its buffer has been filled, and the app's 200 ms buffer was never filled; it now uses a small buffer, starts at 20 ms, and remakes a track that doesn't start.
@@ -179,7 +195,6 @@ First release of the plugin and the Android app.
 - Audio missing from the phone's copy during a Wi-Fi drop is not yet refilled from the PC.
 
 [Unreleased]: https://github.com/SharpTalons/OBS-Director/compare/v0.6.2...HEAD
-[0.6.2]: https://github.com/SharpTalons/OBS-Director/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/SharpTalons/OBS-Director/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/SharpTalons/OBS-Director/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/SharpTalons/OBS-Director/compare/v0.5.0...v0.5.1

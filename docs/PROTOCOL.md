@@ -86,8 +86,13 @@ The status carries the recording's file name only, never its full path.
 | `video.stop` | | Closes this device's video channel |
 | `chapter.add` | `name` | Adds a chapter marker at the current position (OBS 30.2+, Hybrid MP4 only); `ok:false, error:"chapters_unsupported"` otherwise |
 | `clips.write` | `file`, `edl`, `csv` | Saves the clip list next to the recording as `<name>.edl` and `<name>.csv`. `file` is the recording's file name only, and must be a recording OBS made while the plugin was running (`error:"unknown_recording"` otherwise). At most 1 MB each. Result has `files` (the names written) and `pc`. Added in 0.5.0; older plugins answer `unknown_command` |
-| `desk.send` | `id`, `text` | Shows a message in the volunteers' dock |
+| `desk.send` | `id`, `text` | Posts a message in the desk chat (up to 1000 characters, line breaks kept). `id` is the app's own message ID (letters, digits, dashes, up to 64); sending the same `id` again doesn't post twice. Result has `id` and `at` |
+| `desk.history` | | Result has `messages`: the chat so far in this OBS session (up to 500), each as in `desk.message` |
 | `desk.feed` | `text` | Adds a line to the dock's activity feed |
+
+### Desk chat
+
+Since 0.7.0 the desk is a group chat. The OBS dock, every phone and every browser see every message. The plugin keeps the conversation for the OBS session and tells each device which messages are its own (`mine`), without ever sending out a device's ID. The desk writes from the dock, and its messages have `desk: true`. Quick replies in the dock ("Got it", "On it", "Fixed") are ordinary messages.
 
 A ping keeps the line warm: `{"type":"ping","t":…}` gets `{"type":"pong","t":…}`.
 
@@ -104,7 +109,8 @@ A ping keeps the line warm: `{"type":"ping","t":…}` gets `{"type":"pong","t":�
 | `record.paused`, `record.resumed` | |
 | `stream.started`, `stream.stopped` | |
 | `scene.changed` | `scene` |
-| `desk.reply` | `id` of the message answered, `text` ("Got it", "On it", "Fixed") |
+| `desk.message` | A new chat message, to everyone connected: `id`, `from` (the sender's name, or "Desk"), `text`, `at` (ms), `desk` (written in OBS), `mine` (sent by this device), `seen` (read at the desk) |
+| `desk.seen` | `ids`: messages the desk has now read (the dock was showing with OBS in front). The sender's ticks turn blue |
 
 The app raises "Recording stopped on the OBS PC" when `by` is not this device.
 

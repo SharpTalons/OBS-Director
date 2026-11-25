@@ -4,7 +4,7 @@ Monitor and direct an OBS session from your phone, or from a browser on any comp
 
 OBS Director has three parts:
 
-- **The OBS plugin** (this repository's root): runs inside OBS on the Windows streaming PC. It sends the recording and stream status, the program mix and a small live picture to your phone over the local network, takes start/stop/pause commands, writes your clips into the recording as chapter markers, and adds a dock where volunteers see your messages.
+- **The OBS plugin** (this repository's root): runs inside OBS on the Windows streaming PC. It sends the recording and stream status, the program mix and a small live picture to your phone over the local network, takes start/stop/pause commands, writes your clips into the recording as chapter markers, and adds a dock in OBS: a group chat between the desk and every phone and browser.
 - **The Android app** ([`android/`](android)): listen to the mix, watch record and stream health, start and stop the recording, and mark clips with notes for cutting short videos later.
 - **The browser version** ([`src/web/`](src/web)): the same app in Chrome, Edge or Firefox, served by the plugin itself. Open the address OBS shows under **Tools, OBS Director**, on a laptop, the OBS PC or any computer on the same network. Nothing to install.
 
@@ -16,10 +16,11 @@ OBS Director has three parts:
 - **Recordings**: one row per recording, with its clips. Each clip has a **+** for its actions: play, adjust the edges on a waveform, edit the note, share its audio as .m4a, or delete it (with undo). Delete a whole recording from its page, or all of them from the end of the list or Settings; the files on the PC aren't touched.
 - **Export**: from inside a recording, as a DaVinci Resolve marker EDL, CSV or a plain list, to share or save on the phone. The plugin also saves the EDL and CSV next to the recording on the PC, so the editor finds them there (you can turn this off in Settings).
 - **Stream**: tap the Stream chip on Monitor for the stream, the PC (processor, frame rate, lag, disk) and the network, each on its own tab.
-- **Stage mode**: the moon icon in the top bar. A black, dim screen with the time, the meter and a big Clip button, for a phone propped up during a service or a show.
+- **Stage mode**: the masks icon in the top bar. A black, dim screen with the time, the meter and a big Clip button, for a phone propped up during a service or a show.
 - **Outside the app**: a floating bubble while connected; tap it to open the app, drag it anywhere, or drop it on the ✕ to put it away. Long-press the app icon for **Start clip**, **Stage mode** and **Close OBS Director**. Press Back three times to close the app too.
 - **Alerts**: silent mix, recording stopped by someone else, disk nearly full, dropped frames, connection lost, and the phone's own battery running low. The phone buzzes even when locked, and most alerts can be sent to the desk with one tap.
-- **Desk**: typed messages to the volunteers' dock in OBS; they answer with one tap.
+- **Desk**: a group chat with the volunteers at the OBS dock and everyone else connected, laid out like WhatsApp: names, times, and ticks that turn blue when the desk has read your message. Enter starts a new line; Ctrl+Enter or the send button sends.
+- **Vibration**: choose how strongly the phone buzzes (Off, Light, Medium, Strong) in **Settings, Controls**.
 - **Drops**: if Wi-Fi drops, a running clip is saved at the drop, listening pauses, and the app reconnects by itself. OBS keeps recording on the PC throughout.
 - **Updates**: each time the app opens it checks this repository's releases. When a newer version is out it asks once, with **Update** and **Ignore**; Update downloads it and hands it to Android's installer, keeping your clips and settings. To check yourself at any time, open **Settings**, scroll to **About**, and press **Check for updates**.
 

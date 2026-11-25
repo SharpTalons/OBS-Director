@@ -94,6 +94,12 @@ object Director {
     val alerts: StateFlow<List<Alert>> get() = alertState
     private val deskState = MutableStateFlow<List<DeskMessage>>(emptyList())
     val desk: StateFlow<List<DeskMessage>> get() = deskState
+    private val deskUnread = MutableStateFlow(0)
+    /** Messages from others since the Desk tab was last open. */
+    val deskUnreadCount: StateFlow<Int> get() = deskUnread
+    @Volatile private var deskOpen = false
+    /** The Desk tab is on screen: new messages count as read. */
+    fun setDeskOpen(open: Boolean) { deskOpen = open; if (open) deskUnread.value = 0 }
     private val toastState = MutableStateFlow<String?>(null)
     val toast: StateFlow<String?> get() = toastState
 
@@ -238,7 +244,8 @@ object Director {
         MonitorService.start(app)
         startAudio()
         scope.launch {
-            if (Prefs.settings.value.deskPresence) deskFeed("${Prefs.settings.value.deviceName} is listening")
+            loadDeskHistory()
+            if (Prefs.settings.value.deskPresence) deskFeed("${Prefs.settings.value.deviceName} connected")
         }
     }
 
@@ -298,14 +305,24 @@ object Director {
                 }
             }
             "record.started" -> clearAlert("rec")
-            "desk.reply" -> {
-                val id = d["id"]?.jsonPrimitive?.content ?: ""
-                val text = d["text"]?.jsonPrimitive?.content ?: ""
-                val now = System.currentTimeMillis()
-                deskState.value = deskState.value.map { if (it.id == id && it.seenAt == null) it.copy(seenAt = now) else it } +
-                    DeskMessage(ClipStore.newId(), true, text)
-                vibrate(longArrayOf(0, 60))
-                Notifier.desk(app, text)
+            "desk.message" -> {
+                val m = chatMessage(d) ?: return
+                val list = deskState.value
+                if (list.any { it.id == m.id }) {
+                    // our own message coming back: it reached OBS
+                    deskState.value = list.map { if (it.id == m.id) it.copy(at = m.at, state = if (m.state == "seen") "seen" else "sent") else it }
+                } else {
+                    deskState.value = (list + m).takeLast(500)
+                    if (!m.mine) {
+                        if (!deskOpen) deskUnread.value = deskUnread.value + 1
+                        vibrate(longArrayOf(0, 40, 70, 40))
+                        if (!deskOpen) Notifier.desk(app, "${m.from}: ${m.text}")
+                    }
+                }
+            }
+            "desk.seen" -> {
+                val ids = (d["ids"] as? kotlinx.serialization.json.JsonArray)?.mapNotNull { it.jsonPrimitive.content }?.toSet() ?: return
+                deskState.value = deskState.value.map { if (it.mine && it.id in ids) it.copy(state = "seen", seenAt = System.currentTimeMillis()) else it }
             }
         }
     }
@@ -502,11 +519,53 @@ object Director {
     // =============================================================== desk
 
     fun sendDesk(text: String) {
-        val t = text.trim().take(200)
+        val t = text.trim().take(1000)
         if (t.isEmpty()) return
-        val m = DeskMessage(ClipStore.newId(), false, t)
+        val m = DeskMessage(java.util.UUID.randomUUID().toString(), false, t, from = Prefs.settings.value.deviceName, mine = true, state = "sending")
         deskState.value = deskState.value + m
-        command("desk.send", mapOf("id" to JsonPrimitive(m.id), "text" to JsonPrimitive(t)))
+        postDesk(m)
+    }
+
+    /** Send again a message that didn't go. */
+    fun retryDesk(id: String) {
+        val m = deskState.value.firstOrNull { it.id == id && it.state == "failed" } ?: return
+        deskState.value = deskState.value.map { if (it.id == id) it.copy(state = "sending") else it }
+        postDesk(m)
+    }
+
+    private fun postDesk(m: DeskMessage) {
+        scope.launch {
+            val r = connection?.command("desk.send", mapOf("id" to JsonPrimitive(m.id), "text" to JsonPrimitive(m.text)))
+            val ok = r?.ok() == true
+            deskState.value = deskState.value.map {
+                if (it.id != m.id) it
+                else if (ok) it.copy(state = if (it.state == "seen") "seen" else "sent") else it.copy(state = "failed")
+            }
+        }
+    }
+
+    private fun chatMessage(o: JsonObject): DeskMessage? {
+        val id = o["id"]?.jsonPrimitive?.content ?: return null
+        val text = o["text"]?.jsonPrimitive?.content ?: return null
+        val prim = { k: String -> o[k]?.jsonPrimitive?.content }
+        val seen = prim("seen") == "true"
+        return DeskMessage(
+            id = id, fromDesk = prim("desk") == "true", text = text,
+            at = prim("at")?.toDoubleOrNull()?.toLong() ?: System.currentTimeMillis(),
+            from = prim("from") ?: "", mine = prim("mine") == "true", state = if (seen) "seen" else "sent",
+        )
+    }
+
+    /** After connecting: the chat so far, from OBS, plus anything of ours that didn't go. */
+    private suspend fun loadDeskHistory() {
+        val r = connection?.command("desk.history") ?: return
+        if (!r.ok()) return
+        val msgs = (r.data()?.get("messages") as? kotlinx.serialization.json.JsonArray)
+            ?.mapNotNull { (it as? JsonObject)?.let(::chatMessage) } ?: return
+        val ids = msgs.map { it.id }.toSet()
+        val pending = deskState.value.filter { it.mine && it.state != "sent" && it.state != "seen" && it.id !in ids }
+        deskState.value = (msgs + pending).takeLast(500)
+        pending.filter { it.state == "failed" || it.state == "sending" }.forEach { postDesk(it) }
     }
 
     private suspend fun deskFeed(text: String) {
@@ -634,10 +693,25 @@ object Director {
 
     // =============================================================== helpers
 
-    private fun vibrate(pattern: LongArray) {
+    /**
+     * Vibrates at the strength chosen in Settings (off, light, medium, strong). Patterns are
+     * off/on pairs; phones that can't vary the strength get shorter buzzes for light.
+     */
+    fun vibrate(pattern: LongArray) {
         if (!::app.isInitialized) return
+        val level = Prefs.settings.value.haptics.coerceIn(0, 3)
+        if (level == 0) return
         val v = ContextCompat.getSystemService(app, Vibrator::class.java) ?: return
-        runCatching { v.vibrate(VibrationEffect.createWaveform(pattern, -1)) }
+        runCatching {
+            if (v.hasAmplitudeControl()) {
+                val strength = intArrayOf(0, 70, 150, 255)[level]
+                val amps = IntArray(pattern.size) { i -> if (i % 2 == 1) strength else 0 }
+                v.vibrate(VibrationEffect.createWaveform(pattern, amps, -1))
+            } else {
+                val scale = floatArrayOf(0f, 0.5f, 1f, 1.4f)[level]
+                v.vibrate(VibrationEffect.createWaveform(LongArray(pattern.size) { i -> if (i % 2 == 1) (pattern[i] * scale).toLong().coerceAtLeast(10) else pattern[i] }, -1))
+            }
+        }
     }
 
     private fun writeSidecar(file: String) {

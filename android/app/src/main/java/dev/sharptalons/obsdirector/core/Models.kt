@@ -39,13 +39,21 @@ data class Recording(
     val savedOnPc: String? = null,
 )
 
+/** One message in the desk chat, a group chat with the OBS desk and every connected device. */
 @Serializable
 data class DeskMessage(
     val id: String,
+    /** written at the desk in OBS */
     val fromDesk: Boolean,
     val text: String,
     val at: Long = System.currentTimeMillis(),
     val seenAt: Long? = null,
+    /** the sender's name: "Desk", or the phone or browser's name in OBS */
+    val from: String = "",
+    /** sent from this phone */
+    val mine: Boolean = false,
+    /** for this phone's own messages: sending, sent (OBS has it), seen (the desk read it), failed */
+    val state: String = "sent",
 )
 
 enum class Tag(val id: String, val label: String, val color: Long, val resolve: String) {

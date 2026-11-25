@@ -89,6 +89,9 @@ function icon(name, size = 20) {
 		check: '<path d="M5 12l5 5 9-10"/>',
 		undo: '<path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/>',
 		close: '<path d="M6 6l12 12M18 6L6 18"/>',
+		clock: '<circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/>',
+		ticks: '<path d="M2 13l4 4 9-10M10 16l1 1 11-11"/>',
+		stage: '<path d="M3 4h9v5a4.5 4.5 0 0 1-9 0z"/><path d="M5.5 7h.01M9.5 7h.01M6 10.3c1 .8 2 .8 3 0"/><path d="M12 10h9v5a4.5 4.5 0 0 1-9 0z"/><path d="M14.5 13h.01M18.5 13h.01M15 17.2c1-.8 2-.8 3 0"/>',
 		alert: '<path d="M12 8v5M12 17h.01"/><circle cx="12" cy="12" r="9"/>',
 		info: '<path d="M12 11v6M12 7h.01"/><circle cx="12" cy="12" r="9"/>',
 		name: '<rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 10h6M7 14h10"/>',
@@ -254,7 +257,8 @@ const state = {
 	clipStart: null,
 	lastSaved: '',
 	alerts: [],
-	desk: store.get('desk', []),
+	desk: [], // the desk chat, from OBS: {id, from, text, at, desk, mine, state}
+	deskUnread: 0,
 	health: [], // dropped frames per minute, last 30
 	listening: false,
 	video: false,
@@ -359,6 +363,7 @@ function onMessage(m) {
 		if (wasLost) toast('Reconnected after ' + len(Date.now() - state.lostAt) + '.');
 		if (state.listening || (settings.autoListen && audio.unlocked)) audio.start();
 		if (state.video) video.start();
+		loadDesk();
 		sentClipLists.clear();
 		scheduleClipLists();
 		if (view.name === 'connect') view.name = 'monitor';
@@ -424,10 +429,19 @@ function onEvent(name, d) {
 		stopRequestedHere = false;
 	} else if (name === 'record.started') {
 		clearAlert('recstop');
-	} else if (name === 'desk.reply') {
-		const msg = state.desk.find((x) => x.id === d.id);
-		if (msg) { msg.reply = d.text; store.set('desk', state.desk.slice(-50)); }
-		toast('Desk: ' + d.text);
+	} else if (name === 'desk.message') {
+		const m = chatMessage(d);
+		const known = state.desk.find((x) => x.id === m.id);
+		if (known) { known.at = m.at; if (known.state !== 'seen') known.state = m.state; }
+		else {
+			state.desk.push(m);
+			if (state.desk.length > 500) state.desk.splice(0, state.desk.length - 500);
+			if (!m.mine && view.name !== 'desk') { state.deskUnread++; toast(m.from + ': ' + m.text.slice(0, 80)); }
+		}
+		render();
+	} else if (name === 'desk.seen') {
+		const ids = new Set(d.ids || []);
+		for (const m of state.desk) if (m.mine && ids.has(m.id)) m.state = 'seen';
 		render();
 	}
 }
@@ -512,7 +526,7 @@ const audio = {
 	lastPacketAt: 0,
 	dropouts: [],
 	peak: [-Infinity, -Infinity],
-	clippedAt: 0,
+	clippedAt: -Infinity,
 	recorder: null,
 	segment: null,
 
@@ -1118,13 +1132,36 @@ setInterval(() => {
 
 /* =============================================================== desk */
 
+function chatMessage(d) {
+	return { id: String(d.id), from: d.from || '', text: String(d.text || ''), at: Number(d.at) || Date.now(), desk: !!d.desk, mine: !!d.mine, state: d.seen ? 'seen' : 'sent' };
+}
+
+/** After connecting: the chat so far, from OBS, plus anything of ours that hadn't gone. */
+async function loadDesk() {
+	const r = await command('desk.history');
+	if (!r.ok || !r.data) return;
+	const msgs = (r.data.messages || []).map(chatMessage);
+	const ids = new Set(msgs.map((m) => m.id));
+	const pending = state.desk.filter((m) => m.mine && (m.state === 'sending' || m.state === 'failed') && !ids.has(m.id));
+	state.desk = msgs.concat(pending);
+	pending.forEach(postDesk);
+	render();
+}
+
 function sendDesk(text) {
-	const t = text.trim().slice(0, 200);
+	const t = text.trim().slice(0, 1000);
 	if (!t) return;
-	const id = newId().slice(0, 8);
-	state.desk.push({ id, text: t, at: Date.now() });
-	store.set('desk', state.desk.slice(-50));
-	act('desk.send', { id, text: t });
+	const m = { id: newId(), from: settings.deviceName, text: t, at: Date.now(), desk: false, mine: true, state: 'sending' };
+	state.desk.push(m);
+	postDesk(m);
+	render();
+}
+
+async function postDesk(m) {
+	m.state = 'sending';
+	const r = await command('desk.send', { id: m.id, text: m.text });
+	if (r.ok) { if (m.state !== 'seen') m.state = 'sent'; if (r.data && r.data.at) m.at = r.data.at; }
+	else m.state = 'failed';
 	render();
 }
 
@@ -1151,7 +1188,7 @@ const tint = (name) => ({ bg: `var(--${name}-tint)`, ink: `var(--${name}-ink)` }
 function structureKey() {
 	const s = state.status || {};
 	return [state.link, view.name, view.recording, view.open, view.mode, view.streamTab, view.exporting, s.recActive, s.recPaused, s.streamActive,
-		state.clipStart !== null, state.listening, state.video, state.alerts.map((a) => a.id).join(), !!state.lastSaved, settings.allowStreamStop,
+		state.clipStart !== null, state.listening, state.video, state.desk.length, state.desk.map((m) => m.state).join(''), state.deskUnread, state.alerts.map((a) => a.id).join(), !!state.lastSaved, settings.allowStreamStop,
 		player.key, recordings.length].join('|');
 }
 
@@ -1160,6 +1197,13 @@ function render() {
 	const a = document.activeElement;
 	const keep = a && /^(INPUT|TEXTAREA)$/.test(a.tagName) && a.type !== 'range' && $('#view').contains(a) && a.getAttribute('aria-label')
 		? { label: a.getAttribute('aria-label'), value: a.value, start: a.selectionStart, end: a.selectionEnd } : null;
+	/* keep where each scrolling area was (the chat stays at the newest message if it was there) */
+	const mainEl = $('.main'), chatEl = $('#chat-list');
+	const mainTop = mainEl ? mainEl.scrollTop : 0;
+	const chatAtEnd = !chatEl || chatEl.scrollHeight - chatEl.scrollTop - chatEl.clientHeight < 60;
+	const chatTop = chatEl ? chatEl.scrollTop : 0;
+	const sameView = render.lastView === view.name + ':' + view.recording;
+	render.lastView = view.name + ':' + view.recording;
 	signature = structureKey();
 	live = [];
 	meterCanvases = [];
@@ -1177,8 +1221,12 @@ function render() {
 			el.value = keep.value;
 			el.focus();
 			try { el.setSelectionRange(keep.start, keep.end); } catch { /* not a text field */ }
+			el.dispatchEvent(new Event('input'));
 		}
 	}
+	const newMain = $('.main'), newChat = $('#chat-list');
+	if (newMain && sameView) newMain.scrollTop = mainTop;
+	if (newChat) newChat.scrollTop = chatAtEnd || !sameView ? newChat.scrollHeight : chatTop;
 	tick();
 }
 
@@ -1270,16 +1318,18 @@ function connectView() {
 
 /* ---------- the app: navigation and pages ---------- */
 function appView() {
-	const nav = [['monitor', 'Monitor', 'teal'], ['stream', 'Stream and PC', 'rec'], ['recordings', 'Recordings', 'amber'], ['settings', 'Settings', 'purple']];
+	const nav = [['monitor', 'Monitor', 'teal'], ['stream', 'Stream and PC', 'rec'], ['recordings', 'Recordings', 'amber'], ['desk', 'Desk', 'ok'], ['settings', 'Settings', 'purple']];
 	const current = view.name === 'recording' ? 'recordings' : view.name;
 	const page = { monitor: monitorPage, stream: streamPage, recordings: recordingsPage, recording: recordingPage, settings: settingsPage }[view.name] || monitorPage;
+	if (view.name === 'desk') state.deskUnread = 0;
 	return h('div.app',
 		h('nav.nav', { 'aria-label': 'Main' },
 			nav.map(([id, label, sw]) => h('button', { type: 'button', 'aria-current': current === id ? 'page' : 'false', onclick: () => { view.name = id; view.open = null; render(); } },
 				h('span.swatch', { style: { background: `var(--${sw}-ink)` } }), label,
-				id === 'recordings' && recordings.some((r) => r.live) ? h('span.badge', h('span.dot', { style: { background: 'var(--rec)' } }), h('span.sr', ', recording now')) : null)),
+				id === 'recordings' && recordings.some((r) => r.live) ? h('span.badge', h('span.dot', { style: { background: 'var(--rec)' } }), h('span.sr', ', recording now')) : null,
+				id === 'desk' && state.deskUnread ? h('span.count', { 'aria-label': state.deskUnread + ' unread' }, state.deskUnread > 99 ? '99+' : state.deskUnread) : null)),
 			h('div.nav-foot', 'Plugin ' + (state.plugin || '–') + ' · page ' + VERSION)),
-		h('main.main', h('div.page', page())));
+		view.name === 'desk' ? h('main.main.chat-main', deskPage()) : h('main.main', h('div.page', page())));
 }
 
 function recordingSection() {
@@ -1430,24 +1480,57 @@ function pictureSection() {
 		box);
 }
 
-function deskSection() {
-	const input = h('input', { type: 'text', maxlength: 200, placeholder: 'A message for the desk', 'aria-label': 'Message the desk' });
-	const go = () => { const text = input.value; input.value = ''; sendDesk(text); };
-	input.addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); });
-	return h('section.section', { 'aria-label': 'Message the desk' },
-		h('h2.card-title', 'Message the desk'),
-		h('div.row', h('div.grow', input), h('button.btn.primary', { type: 'button', onclick: go }, icon('send', 18), 'Send')),
-		state.desk.length ? h('div.desk-list', state.desk.slice(-3).reverse().map((m) => {
-			const d = new Date(m.at);
-			return h('div.desk-msg', h('span.when', pad2(d.getHours()) + ':' + pad2(d.getMinutes())), h('span.grow', m.text), m.reply && h('span.reply', m.reply));
-		})) : null);
+/* ---------- the desk chat, laid out like a messaging app ---------- */
+const nameInks = ['blue', 'amber', 'ok', 'rec', 'purple', 'teal', 'orange'];
+function nameInk(name) {
+	let x = 0;
+	for (const ch of name) x = (x * 31 + ch.charCodeAt(0)) >>> 0;
+	return `var(--${nameInks[x % nameInks.length]}-ink)`;
+}
+function chatDay(at) {
+	const d = new Date(at), t = new Date();
+	const days = Math.round((new Date(t.toDateString()) - new Date(d.toDateString())) / 86400000);
+	return days === 0 ? 'Today' : days === 1 ? 'Yesterday' : d.toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' });
+}
+
+function deskPage() {
+	const connected = state.link === 'connected';
+	const list = h('div.chat-list#chat-list', { role: 'log', 'aria-label': 'Desk chat' });
+	let lastDay = '', lastFrom = null;
+	if (!state.desk.length) list.append(h('div.chat-empty', 'No messages yet. Write to the volunteers at the OBS desk; everyone connected sees it.'));
+	for (const m of state.desk) {
+		const day = chatDay(m.at);
+		if (day !== lastDay) { list.append(h('div.chat-day', h('span', day))); lastDay = day; lastFrom = null; }
+		const showName = !m.mine && lastFrom !== (m.desk ? '\u0000desk' : m.from);
+		lastFrom = m.mine ? null : (m.desk ? '\u0000desk' : m.from);
+		const time = pad2(new Date(m.at).getHours()) + ':' + pad2(new Date(m.at).getMinutes());
+		const tick = m.mine ? ({ sending: ['clock', 'Sending'], failed: ['alert', 'Not sent, click to try again'], seen: ['ticks', 'Seen at the desk'] }[m.state] || ['ticks', 'Sent']) : null;
+		const bubble = h('div.bubble' + (m.mine ? '.out' : '.in') + (m.state === 'failed' ? '.failed' : ''),
+			{ onclick: m.state === 'failed' ? () => postDesk(m) : null, title: m.state === 'failed' ? 'Not sent: click to try again' : null },
+			showName && h('div.who', { style: { color: m.desk ? 'var(--ok-ink)' : nameInk(m.from) } }, m.from || 'Someone'),
+			h('div.text', m.text),
+			h('div.meta', m.state === 'failed' && h('span.fail', 'Not sent · click to try again'), h('span', time),
+				tick && h('span.tick' + (m.state === 'seen' ? '.seen' : ''), { 'aria-label': tick[1], title: tick[1] }, icon(tick[0], 15))));
+		list.append(h('div.chat-row' + (m.mine ? '.mine' : '') + (showName ? '.first' : ''), bubble));
+	}
+	const box = h('textarea', { rows: 1, maxlength: 1000, placeholder: connected ? 'Message  (Ctrl+Enter to send)' : 'Not connected', 'aria-label': 'Message', disabled: !connected });
+	const sendBtn = h('button.send', { type: 'button', 'aria-label': 'Send', disabled: true }, icon('send', 20));
+	const grow = () => { box.style.height = 'auto'; box.style.height = Math.min(box.scrollHeight, 140) + 'px'; sendBtn.disabled = !connected || !box.value.trim(); };
+	const go = () => { const t = box.value; if (!t.trim() || !connected) return; box.value = ''; grow(); sendDesk(t); };
+	box.addEventListener('input', grow);
+	/* Enter is a new line; Ctrl+Enter (or Cmd+Enter on a Mac) sends */
+	box.addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); go(); } });
+	sendBtn.addEventListener('click', go);
+	setTimeout(grow, 0);
+	return [h('div.chat-head', h('h1.title', 'Desk'), h('div.sub', connected ? 'Everyone connected to OBS sees these' : 'Connect to OBS to chat')),
+		list, h('div.composer', box, sendBtn)];
 }
 
 function monitorPage() {
 	return [h('h1.sr', 'Monitor'),
 		h('div.cols', h('div', { style: { display: 'flex', flexDirection: 'column', gap: '16px' } }, recordingSection()),
 			h('div', { style: { display: 'flex', flexDirection: 'column', gap: '16px' } }, listenSection(), chipsRow())),
-		h('div.cols', pictureSection(), deskSection())];
+		pictureSection()];
 }
 
 /* ---------- stream and PC ---------- */

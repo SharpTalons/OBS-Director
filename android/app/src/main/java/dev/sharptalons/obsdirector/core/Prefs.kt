@@ -49,6 +49,8 @@ data class Settings(
     val pcClipLists: Boolean = true,
     /** Where the mix plays: "auto" (whatever the phone uses) or one output's key. */
     val outputPref: String = "auto",
+    /** How strongly the phone vibrates: 0 off, 1 light, 2 medium, 3 strong. */
+    val haptics: Int = 2,
     val deskPresence: Boolean = true,
 )
 
@@ -96,6 +98,7 @@ object Prefs {
             batteryWarn = sp.getInt("batteryWarn", d.batteryWarn),
             pcClipLists = sp.getBoolean("pcClipLists", d.pcClipLists),
             outputPref = sp.getString("outputPref", d.outputPref) ?: d.outputPref,
+            haptics = sp.getInt("haptics", d.haptics),
             deskPresence = sp.getBoolean("deskPresence", d.deskPresence),
         )
     }
@@ -134,6 +137,7 @@ object Prefs {
             putInt("batteryWarn", s.batteryWarn)
             putBoolean("pcClipLists", s.pcClipLists)
             putString("outputPref", s.outputPref)
+            putInt("haptics", s.haptics)
             putBoolean("deskPresence", s.deskPresence)
         }.apply()
     }

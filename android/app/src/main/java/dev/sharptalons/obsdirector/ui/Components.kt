@@ -148,7 +148,7 @@ fun HoldButton(text: String, icon: ImageVector?, holdMs: Int, modifier: Modifier
     val scope = rememberCoroutineScope()
     Box(
         modifier
-            .height(44.dp)
+            .height(48.dp)
             .clip(CircleShape)
             .border(1.dp, T.control, CircleShape)
             .drawBehind { drawRect(T.negative, size = size.copy(width = size.width * progress.value)) }

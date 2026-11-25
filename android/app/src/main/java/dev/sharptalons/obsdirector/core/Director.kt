@@ -126,6 +126,8 @@ object Director {
     fun init(context: Context) {
         app = context.applicationContext
         router = dev.sharptalons.obsdirector.audio.OutputRouter(app).also { it.start() }
+        // the output chosen in Settings follows the setting as it changes
+        scope.launch { Prefs.settings.collect { router.preferredKey = it.outputPref } }
         scope.launch { alertLoop() }
         scope.launch { clipListLoop() }
     }

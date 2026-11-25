@@ -7,6 +7,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.BatteryAlert
+import androidx.compose.material.icons.automirrored.outlined.VolumeUp
+import androidx.compose.material.icons.outlined.DeleteSweep
+import androidx.compose.material.icons.outlined.GraphicEq
 import androidx.compose.material.icons.outlined.Bookmark
 import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.DesktopWindows
@@ -76,6 +79,16 @@ fun SettingsScreen(onConnect: () -> Unit) {
     val output by Director.router.outputName.collectAsState()
     var sheet by rememberSaveable { mutableStateOf<String?>(null) }
     var renaming by rememberSaveable { mutableStateOf(false) }
+    var choosingOutput by rememberSaveable { mutableStateOf(false) }
+    var confirmClear by rememberSaveable { mutableStateOf(false) }
+    val outputs by Director.router.available.collectAsState()
+    val recordings by dev.sharptalons.obsdirector.core.ClipStore.recordings.collectAsState()
+    val chosen = outputs.firstOrNull { it.key == s.outputPref }
+    val playThrough = when {
+        s.outputPref == "auto" -> "Automatic"
+        chosen != null -> chosen.label
+        else -> "Not connected · automatic for now"
+    }
     val context = androidx.compose.ui.platform.LocalContext.current
     // checked again each time Settings comes back to the front, after the person visits Android's page
     var canBubble by remember { mutableStateOf(dev.sharptalons.obsdirector.service.BubbleService.canShow(context)) }
@@ -90,8 +103,10 @@ fun SettingsScreen(onConnect: () -> Unit) {
                 if (link == LinkState.DISCONNECTED) "Find PCs" else pc?.name ?: pc?.ip ?: "OBS PC", onConnect),
             Row.Action(Icons.Outlined.PhoneAndroid, "This phone in OBS", s.deviceName) { renaming = true },
         )),
-        Group("Listening · plays through whatever your phone is using", Tints.teal, listOf(
-            Row.Info(Icons.Outlined.Headphones, "Playing through", output),
+        Group("Listening", Tints.teal, listOf(
+            Row.Action(Icons.Outlined.Headphones, "Play through", playThrough) { choosingOutput = true },
+            Row.Info(Icons.Outlined.GraphicEq, "Playing now", output),
+            Row.Action(Icons.AutoMirrored.Outlined.VolumeUp, "Play a test sound", "Play") { dev.sharptalons.obsdirector.audio.TestSound.play(Director.router) },
             Row.Switch(Icons.Outlined.PlayArrow, "Start listening when connected", s.autoListen) { x, v -> x.copy(autoListen = v) },
             Row.Choice(Icons.Outlined.Schedule, "Delay", if (s.bufferMs == 0) "Auto" else "${s.bufferMs} ms", listOf("Auto", "10 ms", "20 ms", "40 ms")) { x, v ->
                 x.copy(bufferMs = if (v == "Auto") 0 else v.removeSuffix(" ms").toInt())
@@ -123,11 +138,13 @@ fun SettingsScreen(onConnect: () -> Unit) {
             Row.Choice(Icons.Outlined.CalendarMonth, "Keep it for", when (s.keepDays) { 0 -> "Forever"; 7 -> "7 days"; else -> "30 days" }, listOf("7 days", "30 days", "Forever")) { x, v ->
                 x.copy(keepDays = when (v) { "7 days" -> 7; "Forever" -> 0; else -> 30 })
             },
+            Row.Action(Icons.Outlined.DeleteSweep, "Delete all recordings and clips",
+                if (recordings.isEmpty()) "None stored" else "${recordings.size} stored") { if (recordings.isNotEmpty()) confirmClear = true },
         )),
         Group("Outside the app", Tints.teal, listOf(
             Row.Switch(Icons.Outlined.PictureInPictureAlt, "Floating bubble when you leave", s.bubble) { x, v -> x.copy(bubble = v) },
         ) + (if (s.bubble && !canBubble) listOf(
-            Row.Action(Icons.Outlined.PictureInPictureAlt, "Let the bubble show over other apps", "Allow") {
+            Row.Action(Icons.Outlined.PictureInPictureAlt, "Allow the bubble over other apps", "Allow") {
                 context.startActivity(android.content.Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION, android.net.Uri.parse("package:" + context.packageName)))
             },
         ) else emptyList()) + listOf(
@@ -189,6 +206,23 @@ fun SettingsScreen(onConnect: () -> Unit) {
         }, onDismiss = { sheet = null })
     }
     if (renaming) RenameDialog(s.deviceName) { renaming = false }
+    if (choosingOutput) {
+        // "Automatic" first, then every output connected now, by name.
+        val labels = listOf("Automatic (what the phone uses)") + outputs.map { it.label }
+        val current = if (chosen == null) labels[0] else chosen.label
+        ChoiceSheet("Play through", labels, current, onPick = { v ->
+            val key = outputs.firstOrNull { it.label == v }?.key ?: "auto"
+            Prefs.update { it.copy(outputPref = key) }
+            choosingOutput = false
+        }, onDismiss = { choosingOutput = false })
+    }
+    if (confirmClear) ConfirmDelete(
+        title = "Delete all recordings and clips?",
+        body = "Removes every recording, clip, note and saved audio from this phone. The recordings on the PC aren't touched. " +
+            "A recording OBS is making now keeps going, without its clips.",
+        onConfirm = { val n = dev.sharptalons.obsdirector.core.ClipStore.clearAll(); Director.toast(if (n == 1) "1 recording deleted" else "$n recordings deleted") },
+        onDone = { confirmClear = false },
+    )
 }
 
 @Composable
@@ -206,6 +240,19 @@ private fun RenameDialog(current: String, onDone: () -> Unit) {
             }
         },
         confirmButton = { TextButton(onClick = { if (name.isNotBlank()) Prefs.update { it.copy(deviceName = name.trim()) }; onDone() }) { Text("Save", color = T.accent) } },
+        dismissButton = { TextButton(onClick = onDone) { Text("Cancel", color = T.text2) } },
+    )
+}
+
+/** Asks once before deleting something that can't come back. */
+@Composable
+fun ConfirmDelete(title: String, body: String, confirmLabel: String = "Delete", onConfirm: () -> Unit, onDone: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDone,
+        containerColor = T.surface,
+        title = { Text(title, style = Type.cardTitle) },
+        text = { Text(body, style = Type.body.copy(color = T.text2)) },
+        confirmButton = { TextButton(onClick = { onConfirm(); onDone() }) { Text(confirmLabel, color = T.negative) } },
         dismissButton = { TextButton(onClick = onDone) { Text("Cancel", color = T.text2) } },
     )
 }

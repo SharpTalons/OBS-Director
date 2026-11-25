@@ -47,6 +47,8 @@ data class Settings(
     val batteryWarn: Int = 15,
     /** Have the plugin save each recording's clip list (EDL and CSV) next to the recording. */
     val pcClipLists: Boolean = true,
+    /** Where the mix plays: "auto" (whatever the phone uses) or one output's key. */
+    val outputPref: String = "auto",
     val deskPresence: Boolean = true,
 )
 
@@ -93,6 +95,7 @@ object Prefs {
             bubble = sp.getBoolean("bubble", d.bubble),
             batteryWarn = sp.getInt("batteryWarn", d.batteryWarn),
             pcClipLists = sp.getBoolean("pcClipLists", d.pcClipLists),
+            outputPref = sp.getString("outputPref", d.outputPref) ?: d.outputPref,
             deskPresence = sp.getBoolean("deskPresence", d.deskPresence),
         )
     }
@@ -130,6 +133,7 @@ object Prefs {
             putBoolean("bubble", s.bubble)
             putInt("batteryWarn", s.batteryWarn)
             putBoolean("pcClipLists", s.pcClipLists)
+            putString("outputPref", s.outputPref)
             putBoolean("deskPresence", s.deskPresence)
         }.apply()
     }

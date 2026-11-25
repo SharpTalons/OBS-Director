@@ -11,8 +11,10 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
 /**
- * The mix plays through whatever output the phone is using: Bluetooth, a wired headset, a USB
- * sound card, the headphone jack or the speaker. Android picks; this follows it. When outputs
+ * Where the mix plays. By default, whatever output the phone is using: Bluetooth, a wired headset,
+ * a USB sound card, the headphone jack or the speaker. Android picks; this follows it. In
+ * Settings the person can pin one output instead ([preferredKey]); while it's connected the mix
+ * goes there, and when it isn't, back to automatic. When outputs
  * come or go it tells the audio engine to make a fresh track (a track made before a headset
  * connected can stay where it was, a low-latency one especially), and it reports the device
  * the sound is actually going to.
@@ -28,7 +30,7 @@ class OutputRouter(context: Context) {
         val callChannel: Boolean,
         /** Ask for a low-latency track: only when no Bluetooth is connected. */
         val lowLatency: Boolean,
-        /** Only for the call channel: the call-only headset. Otherwise Android chooses. */
+        /** The output chosen in Settings, or the call-only headset. Null: Android chooses. */
         val device: AudioDeviceInfo?,
     )
 
@@ -40,6 +42,16 @@ class OutputRouter(context: Context) {
     /** What the mix is playing through, for the Listen card and Settings. */
     val outputName: StateFlow<String> get() = nameState
     @Volatile private var callRouteOn = false
+
+    /** One output the person can choose in Settings. [key] survives the device reconnecting. */
+    data class Output(val key: String, val label: String)
+    private val outputsState = MutableStateFlow<List<Output>>(emptyList())
+    /** The outputs connected now, for the Play through choice. */
+    val available: StateFlow<List<Output>> get() = outputsState
+
+    /** "auto", or the [Output.key] of the output the mix should go to. */
+    @Volatile var preferredKey: String = "auto"
+        set(v) { if (field != v) { field = v; changed() } }
 
     private val callback = object : AudioDeviceCallback() {
         override fun onAudioDevicesAdded(added: Array<out AudioDeviceInfo>?) = changed()
@@ -55,11 +67,35 @@ class OutputRouter(context: Context) {
 
     private fun changed() {
         dirty = true
-        // Until a track reports where it went, name what Android will most likely use.
-        nameState.value = describe(likelyDefault())
+        outputsState.value = choosable().map { Output(key(it), describe(it)) }
+        // Until a track reports where it went, name where it will most likely go.
+        nameState.value = describe(preferred() ?: likelyDefault())
     }
 
     private fun outputs() = am.getDevices(AudioManager.GET_DEVICES_OUTPUTS).toList()
+
+    /** A stable name for a device: its kind and product name (ids change when it reconnects). */
+    fun key(d: AudioDeviceInfo) = "${d.type}:${d.productName}"
+
+    /** Outputs that make sense for listening, one of each (some appear twice, e.g. USB). */
+    private fun choosable(): List<AudioDeviceInfo> {
+        val ok = mutableSetOf(
+            AudioDeviceInfo.TYPE_BUILTIN_SPEAKER, AudioDeviceInfo.TYPE_WIRED_HEADPHONES, AudioDeviceInfo.TYPE_WIRED_HEADSET,
+            AudioDeviceInfo.TYPE_BLUETOOTH_A2DP, AudioDeviceInfo.TYPE_BLUETOOTH_SCO, AudioDeviceInfo.TYPE_USB_HEADSET,
+            AudioDeviceInfo.TYPE_USB_DEVICE, AudioDeviceInfo.TYPE_USB_ACCESSORY, AudioDeviceInfo.TYPE_HDMI,
+            AudioDeviceInfo.TYPE_LINE_ANALOG, AudioDeviceInfo.TYPE_LINE_DIGITAL, AudioDeviceInfo.TYPE_AUX_LINE, AudioDeviceInfo.TYPE_DOCK,
+        )
+        if (Build.VERSION.SDK_INT >= 28) ok += AudioDeviceInfo.TYPE_HEARING_AID
+        if (Build.VERSION.SDK_INT >= 31) { ok += AudioDeviceInfo.TYPE_BLE_HEADSET; ok += AudioDeviceInfo.TYPE_BLE_SPEAKER }
+        return outputs().filter { it.isSink && it.type in ok }.distinctBy { key(it) }
+    }
+
+    /** The output chosen in Settings, if it's connected now. */
+    fun preferred(): AudioDeviceInfo? =
+        if (preferredKey == "auto") null else choosable().firstOrNull { key(it) == preferredKey }
+
+    /** Chosen in Settings but not connected right now. */
+    fun preferredMissing(): Boolean = preferredKey != "auto" && preferred() == null
 
     private fun isBtMedia(d: AudioDeviceInfo) = d.type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP ||
         (Build.VERSION.SDK_INT >= 31 && (d.type == AudioDeviceInfo.TYPE_BLE_HEADSET || d.type == AudioDeviceInfo.TYPE_BLE_SPEAKER))
@@ -86,6 +122,11 @@ class OutputRouter(context: Context) {
             d.type == AudioDeviceInfo.TYPE_USB_HEADSET || d.type == AudioDeviceInfo.TYPE_USB_DEVICE ||
                 d.type == AudioDeviceInfo.TYPE_USB_ACCESSORY -> "USB audio"
             d.type == AudioDeviceInfo.TYPE_BUILTIN_EARPIECE -> "Phone earpiece"
+            d.type == AudioDeviceInfo.TYPE_HDMI -> "HDMI"
+            d.type == AudioDeviceInfo.TYPE_LINE_ANALOG || d.type == AudioDeviceInfo.TYPE_LINE_DIGITAL ||
+                d.type == AudioDeviceInfo.TYPE_AUX_LINE -> "Line out"
+            d.type == AudioDeviceInfo.TYPE_DOCK -> "Dock"
+            Build.VERSION.SDK_INT >= 28 && d.type == AudioDeviceInfo.TYPE_HEARING_AID -> "Hearing aid"
             else -> "Phone speaker"
         }
         val n = d.productName?.toString()?.takeIf { it.isNotBlank() && it != Build.MODEL }
@@ -95,8 +136,13 @@ class OutputRouter(context: Context) {
     /** The engine reports the device its track actually plays through. */
     fun reportRouted(d: AudioDeviceInfo?) { if (d != null) nameState.value = describe(d) }
 
-    /** Work out how to make the track from what's connected. */
+    /** Work out how to make the track from what's chosen and what's connected. */
     fun current(): Route {
+        preferred()?.let { p ->
+            val call = p.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO
+            val bt = call || isBtMedia(p)
+            return Route(callChannel = call, lowLatency = !bt, device = p)
+        }
         val outs = outputs()
         val anyBt = outs.any { isBtMedia(it) || it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO }
         val callOnly = outs.firstOrNull { it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO }

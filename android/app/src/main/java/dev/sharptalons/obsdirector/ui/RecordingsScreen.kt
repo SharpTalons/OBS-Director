@@ -1,5 +1,13 @@
 package dev.sharptalons.obsdirector.ui
 
+import androidx.compose.ui.semantics.liveRegion
+
+import androidx.compose.foundation.layout.wrapContentHeight
+
+import androidx.compose.foundation.layout.fillMaxSize
+
+import androidx.compose.runtime.LaunchedEffect
+
 import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -97,12 +105,13 @@ private fun clipsText(n: Int) = when (n) { 0 -> "No clips"; 1 -> "1 clip"; else 
 
 /** The list: one plain row per recording; tap one to see its clips. */
 @Composable
-fun RecordingsScreen(modifier: Modifier, top: @Composable () -> Unit, onOpen: (String) -> Unit) {
+fun RecordingsScreen(modifier: Modifier, top: (@Composable () -> Unit)?, onOpen: (String) -> Unit) {
     val recordings by ClipStore.recordings.collectAsState()
     val live = recordings.filter { it.live }
     val past = recordings.filterNot { it.live }
+    var confirm by rememberSaveable { mutableStateOf(false) }
     LazyColumn(modifier, contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        item { top() }
+        top?.let { t -> item { t() } }
         item { ScreenTitle("Recordings", "Tap one to see its clips and export them") }
         if (recordings.isEmpty()) item {
             Section { Text("No recordings yet. Clips you mark while OBS records show up here, one row per recording.", style = Type.body.copy(color = T.muted)) }
@@ -111,8 +120,25 @@ fun RecordingsScreen(modifier: Modifier, top: @Composable () -> Unit, onOpen: (S
         items(live, key = { "live:" + it.file }) { r -> RecordingRow(r, null, onOpen) }
         if (past.isNotEmpty()) item { GroupLabel("Earlier", T.muted) }
         itemsIndexed(past, key = { _, r -> r.file }) { i, r -> RecordingRow(r, tileTints[i % tileTints.size], onOpen) }
+        if (recordings.isNotEmpty()) item { DangerLink("Delete all recordings and clips") { confirm = true } }
         item { Spacer(Modifier.height(16.dp)) }
     }
+    if (confirm) ConfirmDelete(
+        title = "Delete all recordings and clips?",
+        body = "Removes every recording, clip, note and saved audio from this phone. The recordings on the PC aren't touched. " +
+            "A recording OBS is making now keeps going, without its clips.",
+        onConfirm = { val n = ClipStore.clearAll(); Director.toast(if (n == 1) "1 recording deleted" else "$n recordings deleted") },
+        onDone = { confirm = false },
+    )
+}
+
+/** A quiet, full-width red text button at the end of a list, for deleting. */
+@Composable
+fun DangerLink(text: String, onClick: () -> Unit) {
+    Text(text, style = Type.body.copy(color = Tints.rec.ink, fontWeight = FontWeight.Medium),
+        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+        modifier = Modifier.fillMaxWidth().padding(top = 8.dp).height(48.dp).clip(RoundedCornerShape(14.dp))
+            .clickable(role = Role.Button, onClick = onClick).wrapContentHeight())
 }
 
 @Composable
@@ -144,7 +170,7 @@ private fun RecordingRow(r: Recording, tint: Tint?, onOpen: (String) -> Unit) {
 
 /** One recording: its clips, each with a + for its actions, and Export at the top. */
 @Composable
-fun RecordingScreen(file: String, modifier: Modifier, top: @Composable () -> Unit, onBack: () -> Unit) {
+fun RecordingScreen(file: String, modifier: Modifier, top: (@Composable () -> Unit)?, onBack: () -> Unit) {
     val recordings by ClipStore.recordings.collectAsState()
     val settings by Prefs.settings.collectAsState()
     val playback by ClipPlayer.playback.collectAsState()
@@ -156,8 +182,11 @@ fun RecordingScreen(file: String, modifier: Modifier, top: @Composable () -> Uni
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    LazyColumn(modifier, contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        item { top() }
+    var confirmDelete by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(removed) { if (removed != null) { kotlinx.coroutines.delay(8000); removed = null } }
+    Box(modifier) {
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 96.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        top?.let { t -> item { t() } }
         item { Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             RoundIcon(Icons.AutoMirrored.Outlined.ArrowBack, "Back to Recordings", T.text, onBack)
             Column(Modifier.weight(1f)) {
@@ -178,12 +207,6 @@ fun RecordingScreen(file: String, modifier: Modifier, top: @Composable () -> Uni
             }
         }
 
-        removed?.let { c -> item {
-            Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(T.raised).padding(start = 14.dp, end = 6.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("Clip at ${Director.tc(c.startMs)} deleted.", style = Type.body, modifier = Modifier.weight(1f))
-                OutlineButton("Undo", Icons.AutoMirrored.Outlined.Undo) { ClipStore.addClip(r.file, c); removed = null }
-            }
-        } }
         if (r.clips.isEmpty()) item { Section { Text("No clips in this recording.", style = Type.body.copy(color = T.muted)) } }
 
         itemsIndexed(r.clips, key = { _, c -> c.id }) { i, c ->
@@ -236,9 +259,25 @@ fun RecordingScreen(file: String, modifier: Modifier, top: @Composable () -> Uni
                 }
             }
         }
-        item { Spacer(Modifier.height(16.dp)) }
+        if (r != null) item { DangerLink("Delete this recording") { confirmDelete = true } }
+    }
+    // Undo floats over the bottom of the list, so deleting a clip doesn't shove the list around.
+    removed?.let { c ->
+        Row(Modifier.align(Alignment.BottomCenter).padding(16.dp).fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(T.raised)
+            .padding(start = 16.dp, end = 6.dp, top = 6.dp, bottom = 6.dp).semantics { liveRegion = androidx.compose.ui.semantics.LiveRegionMode.Polite },
+            verticalAlignment = Alignment.CenterVertically) {
+            Text("Clip at ${Director.tc(c.startMs)} deleted.", style = Type.body, modifier = Modifier.weight(1f))
+            OutlineButton("Undo", Icons.AutoMirrored.Outlined.Undo) { r?.let { ClipStore.addClip(it.file, c) }; removed = null }
+        }
+    }
     }
     if (exporting && r != null) ExportSheet(r) { exporting = false }
+    if (confirmDelete && r != null) ConfirmDelete(
+        title = "Delete this recording?",
+        body = "Removes its ${clipsText(r.clips.size).lowercase()}, notes and saved audio from this phone. The recording on the PC isn't touched.",
+        onConfirm = { ClipStore.removeRecording(r.file); Director.toast("Recording deleted"); onBack() },
+        onDone = { confirmDelete = false },
+    )
 }
 
 @Composable

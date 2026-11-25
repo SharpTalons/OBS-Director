@@ -134,7 +134,9 @@ fun AppShell() {
     Column(Modifier.fillMaxSize().background(T.ground).windowInsetsPadding(WindowInsets.statusBars)) {
         HeadBar(link, pc, latency, awaiting, onStage = { screen = "stage" }, onConnect = { connectOpen = true })
         // banners for the link and alerts, shown above every screen
-        val top: @Composable () -> Unit = {
+        // Only there when there's something to show, so an empty banner area adds no gap.
+        val hasBanners = link == LinkState.LOST || reconnected > 0 || alerts.any { it.id != "net" }
+        val topBanners: @Composable () -> Unit = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 if (link == LinkState.LOST) {
                     val ago = (now - lostAt) / 1000
@@ -152,6 +154,7 @@ fun AppShell() {
                 }
             }
         }
+        val top: (@Composable () -> Unit)? = if (hasBanners) topBanners else null
         Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
             // on tablets, in landscape and on unfolded phones the content keeps a phone's reading width
             val content = Modifier.fillMaxHeight().widthIn(max = 640.dp).fillMaxWidth()
@@ -159,7 +162,7 @@ fun AppShell() {
                 "recording" -> RecordingScreen(openFile, content, top, onBack = { screen = "recordings" })
                 "recordings" -> RecordingsScreen(content, top, onOpen = { openFile = it; screen = "recording" })
                 else -> Column(content.verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    top()
+                    top?.invoke()
                     when {
                         screen == "stream" -> {
                             RoundIcon(Icons.AutoMirrored.Outlined.ArrowBack, "Back to Monitor", T.text) { screen = "monitor" }

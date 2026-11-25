@@ -158,6 +158,16 @@ svg { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; 
 .clip.running { background: var(--rec); border-color: var(--rec); color: var(--on-rec); flex-direction: row; justify-content: space-between; padding: 0 24px; }
 .clip.running .hint { color: var(--on-rec); font-weight: 500; }
 .clip.running .len { font-size: 44px; font-weight: 700; letter-spacing: -1px; }
+.status-line { height: 48px; display: flex; align-items: center; gap: 4px; font-size: 14px; color: var(--text-2); }
+.status-line > .grow { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.status-line input[type=text] { min-height: 44px; padding: 8px 12px; }
+.line-action { min-height: 44px; padding: 0 12px; border: 0; border-radius: 10px; background: transparent; color: var(--blue-ink); font-weight: 500; flex: none; }
+.line-action:hover { background: var(--surface-2); }
+.controls > * { flex: 1 1 0; }
+.undo-bar { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); width: min(520px, calc(100% - 32px)); z-index: 20;
+	display: flex; align-items: center; gap: 12px; padding: 8px 8px 8px 16px; border-radius: 16px; background: var(--control);
+	box-shadow: 0 8px 24px rgba(0, 0, 0, .45); }
+@media (max-width: 760px) { .undo-bar { bottom: 84px; } }
 .clip-left { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
 
 .hold { position: relative; overflow: hidden; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }

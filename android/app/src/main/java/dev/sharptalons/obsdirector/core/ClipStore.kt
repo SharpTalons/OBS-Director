@@ -68,6 +68,27 @@ object ClipStore {
         r.copy(clips = r.clips.filterNot { it.id == clipId })
     }
 
+    /** Deletes one recording from this phone: its clips, notes and saved audio. The file on the PC stays. */
+    @Synchronized
+    fun removeRecording(fileName: String) {
+        val list = state.value
+        list.firstOrNull { it.file == fileName }?.audioFile?.let { File(sessionsDir, it).delete() }
+        save(list.filterNot { it.file == fileName })
+    }
+
+    /**
+     * Deletes every recording kept on this phone. The one OBS is recording now stays (its audio is
+     * still being saved) but loses its clips. Returns how many recordings were deleted.
+     */
+    @Synchronized
+    fun clearAll(): Int {
+        val list = state.value
+        val (live, done) = list.partition { it.live }
+        done.forEach { r -> r.audioFile?.let { File(sessionsDir, it).delete() } }
+        save(live.map { it.copy(clips = emptyList()) })
+        return done.size
+    }
+
     fun audioFileFor(rec: Recording): File? = rec.audioFile?.let { File(sessionsDir, it) }?.takeIf { it.exists() }
 
     /** Session audio older than the chosen number of days is deleted; clips and notes stay. */

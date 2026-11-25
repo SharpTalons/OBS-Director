@@ -1,5 +1,21 @@
 package dev.sharptalons.obsdirector.ui
 
+import androidx.compose.ui.semantics.paneTitle
+
+import androidx.compose.foundation.layout.height
+
+import androidx.compose.ui.semantics.liveRegion
+
+import androidx.compose.ui.semantics.LiveRegionMode
+
+import androidx.compose.foundation.layout.wrapContentHeight
+
+import androidx.compose.material3.rememberModalBottomSheetState
+
+import androidx.compose.material3.ModalBottomSheet
+
+import androidx.compose.material3.ExperimentalMaterial3Api
+
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import androidx.compose.foundation.background
@@ -90,8 +106,7 @@ fun MonitorScreen(onOpenRecording: (String) -> Unit, onOpenStream: () -> Unit) {
     val fileTime = if (status.recActive && !lost) Director.nowFileTimeMs() else status.fileTimeMs
     val clips = recordings.firstOrNull { it.file == status.file }?.clips?.size ?: 0
 
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("Monitor", style = Type.label, modifier = Modifier.size(1.dp).semantics { heading() })
+    Column(Modifier.semantics { paneTitle = "Monitor" }, verticalArrangement = Arrangement.spacedBy(12.dp)) {
         BatteryBanner()
 
         // ---------------- Recording ----------------
@@ -121,33 +136,52 @@ fun MonitorScreen(onOpenRecording: (String) -> Unit, onOpenStream: () -> Unit) {
                     else -> "starts ${settings.leadMinutes} min before your tap"
                 },
             ) { if (running) Director.endClip() else Director.startClip() }
-            if (running) Text("Cancel this clip", style = Type.body.copy(color = T.text2),
-                modifier = Modifier.heightIn(min = 44.dp).clip(RoundedCornerShape(8.dp)).clickable(role = Role.Button) { Director.cancelClip() }.padding(horizontal = 4.dp, vertical = 12.dp))
-            note?.let { (_, clip) -> NoteForm(clip.id) }
-            saved?.let { if (note == null) Text(it, style = Type.small) }
 
+            // One line under the Clip button, always the same height: what just happened and the
+            // one thing to do about it. Nothing appears or disappears, so nothing below moves.
+            var noteOpen by remember { mutableStateOf(false) }
+            LaunchedEffect(note) { noteOpen = note != null }
+            val clipsText = if (clips == 1) "1 clip in this recording" else if (clips == 0) "No clips yet" else "$clips clips in this recording"
+            val (lineText, action) = when {
+                running -> "Clip running from ${Director.tc(clipStart ?: 0)}" to ("Cancel" to { Director.cancelClip() })
+                note != null -> (saved ?: "Clip saved") to ("Add note" to { noteOpen = true })
+                saved != null -> saved!! to (if (clips > 0) "See all" to { onOpenRecording(status.file) } else null)
+                else -> clipsText to (if (status.file.isNotBlank() && clips > 0) "See all" to { onOpenRecording(status.file) } else null)
+            }
+            Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(lineText, style = Type.body.copy(fontSize = 14.sp, color = T.text2), maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f).semantics { liveRegion = LiveRegionMode.Polite })
+                action?.let { (label, onClick) ->
+                    Text(label, style = Type.body.copy(color = T.accent, fontWeight = FontWeight.Medium),
+                        modifier = Modifier.height(48.dp).clip(RoundedCornerShape(10.dp)).clickable(role = Role.Button, onClick = onClick)
+                            .padding(horizontal = 12.dp).wrapContentHeight())
+                }
+            }
+            if (noteOpen && note != null) NoteSheet(note!!.second.id) { noteOpen = false }
+
+            // Recording controls: two equal buttons, or one full-width one, always 48 dp tall.
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 if (status.recActive) {
                     OutlineButton(if (status.recPaused) "Resume" else "Pause", if (status.recPaused) Icons.Outlined.PlayArrow else Icons.Outlined.Pause,
-                        Modifier.weight(1f), enabled = !lost, height = 48.dp) { Director.recordPause(!status.recPaused) }
+                        Modifier.weight(1f), enabled = !lost) { Director.recordPause(!status.recPaused) }
                     HoldButton("Hold to stop", Icons.Outlined.Stop, settings.holdMs, Modifier.weight(1f), enabled = !lost) { Director.recordStop() }
                 } else {
-                    PrimaryButton("Start recording", Icons.Outlined.FiberManualRecord, Modifier.weight(1f), enabled = !lost, height = 48.dp) { Director.recordStart() }
+                    PrimaryButton("Start recording", Icons.Outlined.FiberManualRecord, Modifier.weight(1f), enabled = !lost) { Director.recordStart() }
                 }
             }
-            if (status.file.isNotBlank()) Text("${if (clips == 1) "1 clip" else "$clips clips"} in this recording · see all",
-                style = Type.body.copy(color = T.accent),
-                modifier = Modifier.heightIn(min = 44.dp).clip(RoundedCornerShape(8.dp)).clickable(role = Role.Button) { onOpenRecording(status.file) }.padding(vertical = 12.dp))
         }
 
         ListenSection(lost)
 
-        // ---------------- Status line ----------------
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (status.streamActive) TintChip("Stream live ${Director.tc(status.streamDurationMs)}", Tints.rec, dot = T.negative, onClick = onOpenStream)
-            else TintChip("Stream off air", Tints.neutral, onClick = onOpenStream)
-            if (status.streamActive) TintChip("${status.dropped} dropped", if (status.dropped == 0) Tints.ok else Tints.amber)
-            Director.diskHoursLeft(status)?.let { h -> TintChip("Disk ${if (h >= 10) "%.0f".format(h) else "%.1f".format(h)} h left", if (h < settings.diskHours) Tints.amber else Tints.purple) }
+        // ---------------- Status line: three equal chips, always the same three ----------------
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (status.streamActive) TintChip("Live ${clipLength(status.streamDurationMs)}", Tints.rec, dot = T.negative, modifier = Modifier.weight(1.3f), onClick = onOpenStream)
+            else TintChip("Off air", Tints.neutral, modifier = Modifier.weight(1.3f), onClick = onOpenStream)
+            TintChip(if (status.streamActive) "${status.dropped} dropped" else "– dropped",
+                if (!status.streamActive) Tints.neutral else if (status.dropped == 0) Tints.ok else Tints.amber, modifier = Modifier.weight(1f))
+            val h = Director.diskHoursLeft(status)
+            TintChip(if (h == null) "Disk –" else "Disk ${if (h >= 10) "%.0f".format(h) else "%.1f".format(h)} h",
+                if (h != null && h < settings.diskHours) Tints.amber else Tints.purple, modifier = Modifier.weight(1f))
         }
 
         LivePicture(lost)
@@ -190,7 +224,8 @@ private fun ListenSection(lost: Boolean) {
             TintTile(Icons.Outlined.Headphones, Tints.teal, size = 36.dp, iconSize = 20.dp)
             Column(Modifier.weight(1f)) {
                 Text("Listen", style = Type.body.copy(fontSize = 17.sp, fontWeight = FontWeight.Medium), modifier = Modifier.semantics { heading() })
-                Text(if (active) "Playing through $output" else if (lost) "Paused until the connection is back" else "Off", style = Type.small.copy(fontSize = 13.sp))
+                Text(if (active) "Playing through $output" else if (lost) "Paused until the connection is back" else "Off", style = Type.small.copy(fontSize = 13.sp),
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             DSwitch(listening, { Director.setListening(it) }, modifier = Modifier.semantics { contentDescription = "Listen" })
         }
@@ -208,10 +243,13 @@ private fun ListenSection(lost: Boolean) {
             )
             Text("${(vol * 100).toInt()}%", style = Type.mono.copy(fontSize = 14.sp, color = if (vol > 1f) T.warning else T.text), modifier = Modifier.width(48.dp))
         }
-        if (vol > 1f) Text("Boosted above 100%. Loud parts are softened, not clipped.", style = Type.small.copy(color = T.warning))
-        if (active) {
+        // Always shown, so moving the slider past 100% doesn't push anything down.
+        Text(if (vol > 1f) "Boosted above 100%. Loud parts are softened, not clipped." else "Up to 300% for quiet rooms.",
+            style = Type.small.copy(color = if (vol > 1f) T.warning else T.muted), maxLines = 1, overflow = TextOverflow.Ellipsis)
+        run {
             val drops = Director.dropoutsLastMinute()
             val (text, tint) = when {
+                !active -> "Wi-Fi quality shows here while you listen" to Tints.neutral
                 drops == 0 && latency < 150 -> "Wi-Fi good · no dropouts" to Tints.ok
                 drops <= 3 -> "Wi-Fi weak · $drops dropout${if (drops == 1) "" else "s"} in the last minute" to Tints.amber
                 else -> "Wi-Fi poor · audio keeps breaking up. Move closer to the router." to Tints.rec
@@ -219,7 +257,7 @@ private fun ListenSection(lost: Boolean) {
             Row(Modifier.fillMaxWidth().heightIn(min = 44.dp).clip(RoundedCornerShape(12.dp)).background(tint.bg).padding(horizontal = 12.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Icon(Icons.Outlined.Wifi, null, tint = tint.ink, modifier = Modifier.size(18.dp))
-                Text(text, style = Type.body.copy(fontSize = 13.sp, color = tint.ink))
+                Text(text, style = Type.body.copy(fontSize = 13.sp, color = tint.ink), maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
     }
@@ -287,21 +325,26 @@ private fun DeskSection() {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun NoteForm(key: String) {
+private fun NoteSheet(key: String, onClose: () -> Unit) {
     var text by remember(key) { mutableStateOf("") }
     var voiceStatus by remember(key) { mutableStateOf("") }
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            OutlinedTextField(text, { text = it.take(140) }, Modifier.weight(1f), placeholder = { Text("Add a note, or hold the mic") },
-                singleLine = true, colors = fieldColors(), textStyle = Type.body, label = { Text("Note for this clip") })
-            Spacer(Modifier.width(8.dp))
-            VoiceButton(onText = { text = if (text.isBlank()) it else "$text $it" }, onStatus = { voiceStatus = it })
-        }
-        if (voiceStatus.isNotEmpty()) Text(voiceStatus, style = Type.small)
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            PrimaryButton("Save note", modifier = Modifier.weight(1f)) { Director.saveNote(text, emptyList()) }
-            OutlineButton("Skip", modifier = Modifier.weight(1f)) { Director.skipNote() }
+    // Slides up over the screen, so writing a note doesn't push the Monitor around.
+    ModalBottomSheet(onDismissRequest = { Director.skipNote(); onClose() }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = T.surface) {
+        Column(Modifier.padding(start = 18.dp, end = 18.dp, bottom = 28.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("Note for this clip", style = Type.cardTitle.copy(fontSize = 18.sp, fontWeight = FontWeight.Bold), modifier = Modifier.semantics { heading() })
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                OutlinedTextField(text, { text = it.take(140) }, Modifier.weight(1f), placeholder = { Text("What was it? Or hold the mic") },
+                    singleLine = true, colors = fieldColors(), textStyle = Type.body)
+                Spacer(Modifier.width(8.dp))
+                VoiceButton(onText = { text = if (text.isBlank()) it else "$text $it" }, onStatus = { voiceStatus = it })
+            }
+            Text(voiceStatus.ifEmpty { " " }, style = Type.small, maxLines = 1)
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlineButton("Skip", modifier = Modifier.weight(1f)) { Director.skipNote(); onClose() }
+                PrimaryButton("Save note", modifier = Modifier.weight(1f)) { Director.saveNote(text, emptyList()); onClose() }
+            }
         }
     }
 }

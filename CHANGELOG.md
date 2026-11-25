@@ -5,6 +5,19 @@ All notable changes to OBS Director (plugin and Android app). The project follow
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-11-25
+
+### Android app
+- **Sound on every output:** the mix now plays on Bluetooth, USB sound cards and headsets that stayed silent before. Android only starts an ordinary audio track once its buffer has been filled, and the app's 200 ms buffer was never filled; it now uses a small buffer, starts at 20 ms, and remakes a track that doesn't start.
+- **Play through:** a new setting to pick the output (Automatic, or any connected speaker, Bluetooth, headphones, USB, HDMI or line out). When the chosen one isn't connected, the mix plays automatically until it is. **Playing now** shows where it actually goes, and **Play a test sound** checks the output without OBS.
+- **Delete recordings:** delete one recording from its page, or all of them from the end of the Recordings list or from Settings. Their clips, notes and saved audio go too; the files on the PC aren't touched.
+- **Floating bubble:** works like other floating bubbles. Tap it to open the app, drag it anywhere and it settles against the side, or drop it on the ✕ to put it away.
+- **Nothing jumps:** one fixed line under the Clip button replaces "Cancel this clip", the saved message and "see all". The note opens in a sheet over the screen. Pause and Hold to stop are the same size. The three status chips, the volume caption and the Wi-Fi line are always there. The undo bar floats over the list.
+
+### Browser version
+- Delete one recording, or all of them, from the Recordings pages.
+- The same fixed line under the Clip button (the note fits in it), an always-visible volume caption, and a floating undo bar.
+
 ## [0.6.1] - 2026-11-25
 
 Fixes from the design audit of the browser version.
@@ -165,7 +178,8 @@ First release of the plugin and the Android app.
 - The browser version (WebRTC and WebSocket modes) is not built yet; the app uses Direct UDP.
 - Audio missing from the phone's copy during a Wi-Fi drop is not yet refilled from the PC.
 
-[Unreleased]: https://github.com/SharpTalons/OBS-Director/compare/v0.6.1...HEAD
+[Unreleased]: https://github.com/SharpTalons/OBS-Director/compare/v0.6.2...HEAD
+[0.6.2]: https://github.com/SharpTalons/OBS-Director/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/SharpTalons/OBS-Director/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/SharpTalons/OBS-Director/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/SharpTalons/OBS-Director/compare/v0.5.0...v0.5.1

@@ -468,6 +468,18 @@ const idb = {
 			req.onerror = () => res([]);
 		});
 	},
+	/** Deletes the saved audio of one recording, or of all of them. */
+	async remove(file) {
+		const db = await this.open();
+		if (!db) return;
+		const tx = db.transaction('audio', 'readwrite');
+		tx.objectStore('audio').openCursor().onsuccess = (e) => {
+			const c = e.target.result;
+			if (!c) return;
+			if (file === undefined || c.value.file === file) c.delete();
+			c.continue();
+		};
+	},
 	async prune(days) {
 		const db = await this.open();
 		if (!db || !days) return;
@@ -799,7 +811,7 @@ const meters = {
 		g.globalAlpha = 1;
 	},
 	label() {
-		if (!state.listening) return 'Not listening';
+		if (!state.listening) return audio.unlocked ? 'Not listening' : 'Not listening · browsers play sound only after a click, so switch Listen on';
 		if (!audio.receiving()) return 'No sound arriving';
 		return 'Peak ' + Math.round(Math.max(this.db[0], this.db[1])) + ' dB';
 	},
@@ -1287,26 +1299,37 @@ function recordingSection() {
 		h('div.row', pill, h('span.small', s.file || 'No recording yet')),
 		bind(h('div.timecode' + (s.recActive ? '' : '.idle')), () => tc(nowFileTimeMs())),
 		clipBtn,
-		running && h('button.btn.outline', { type: 'button', onclick: cancelClip }, 'Cancel this clip'),
-		state.lastSaved && h('div.small', { role: 'status' }, state.lastSaved),
-		state.noteFor && noteForm(),
-		h('div.row',
+		statusLine(r, running),
+		h('div.row.controls',
 			s.recActive
 				? [h('button.btn.outline', { type: 'button', onclick: () => act(s.recPaused ? 'record.resume' : 'record.pause') }, icon(s.recPaused ? 'play' : 'pause', 18), s.recPaused ? 'Resume' : 'Pause'),
 					holdButton('Hold to stop', settings.holdMs, () => { stopRequestedHere = true; act('record.stop'); })]
-				: h('button.btn.primary', { type: 'button', onclick: () => act('record.start') }, icon('rec', 18), 'Start recording')),
-		r && r.clips.length ? h('button.btn.outline', { type: 'button', onclick: () => { view.name = 'recording'; view.recording = r.file; render(); } },
-			clipsText(r.clips.length) + ' in this recording · see all') : null);
+				: h('button.btn.primary', { type: 'button', onclick: () => act('record.start') }, icon('rec', 18), 'Start recording')));
 }
 
-function noteForm() {
-	const { file, id } = state.noteFor;
-	const r = recordings.find((x) => x.file === file), c = r && r.clips.find((x) => x.id === id);
-	if (!c) { state.noteFor = null; return null; }
-	const input = h('input', { type: 'text', maxlength: 140, placeholder: 'What was it? (optional)', 'aria-label': 'Note for this clip' });
-	const save = () => { c.note = input.value.trim(); state.noteFor = null; saveRecordings(); render(); };
-	input.addEventListener('keydown', (e) => { if (e.key === 'Enter') save(); if (e.key === 'Escape') { state.noteFor = null; render(); } });
-	return h('div.row', input, h('button.btn.primary', { type: 'button', onclick: save }, 'Save note'), h('button.btn.outline', { type: 'button', onclick: () => { state.noteFor = null; render(); } }, 'Skip'));
+/**
+ * One line under the Clip button, always the same height: what just happened and the one thing
+ * to do about it (cancel, add a note, see all). Nothing appears or disappears around it, so the
+ * buttons below never move.
+ */
+function statusLine(r, running) {
+	const seeAll = () => { view.name = 'recording'; view.recording = r.file; render(); };
+	const link = (label, onclick) => h('button.line-action', { type: 'button', onclick }, label);
+	if (running)
+		return h('div.status-line', h('span.grow', bind(h('span'), () => 'Clip running from ' + tc(state.clipStart))), link('Cancel', cancelClip));
+	if (state.noteFor) {
+		const { file, id } = state.noteFor;
+		const rec = recordings.find((x) => x.file === file), c = rec && rec.clips.find((x) => x.id === id);
+		if (c) {
+			const input = h('input', { type: 'text', maxlength: 140, placeholder: 'Note for this clip (optional)', 'aria-label': 'Note for this clip' });
+			const save = () => { c.note = input.value.trim(); state.noteFor = null; state.lastSaved = state.lastSaved + (c.note ? ' · ' + c.note : ''); saveRecordings(); render(); };
+			input.addEventListener('keydown', (e) => { if (e.key === 'Enter') save(); if (e.key === 'Escape') { state.noteFor = null; render(); } });
+			return h('div.status-line', h('div.grow', input), link('Save', save), link('Skip', () => { state.noteFor = null; render(); }));
+		}
+		state.noteFor = null;
+	}
+	const text = state.lastSaved || (r && r.clips.length ? clipsText(r.clips.length) + ' in this recording' : 'No clips yet');
+	return h('div.status-line', h('span.grow', { role: 'status' }, text), r && r.clips.length ? link('See all', seeAll) : null);
 }
 
 /** A button that only acts when held, so a stray click can't end the take. */
@@ -1350,16 +1373,18 @@ function listenSection() {
 		audio.setVolume(vol.value / 100);
 		volLabel.textContent = vol.value + '%';
 		vol.classList.toggle('boost', vol.value > 100);
-		boostHint.hidden = vol.value <= 100;
+		boostHint.textContent = vol.value > 100 ? boostText : baseText;
+		boostHint.style.color = vol.value > 100 ? 'var(--amber-ink)' : 'var(--muted)';
 	});
 	vol.addEventListener('change', saveSettings);
-	const boostHint = h('div.small', { style: { color: 'var(--amber-ink)' }, hidden: settings.volume <= 1 }, 'Above 100% is louder in this browser only. A soft limiter stops crackles.');
+	/* always there, so dragging past 100% changes the words, not the layout */
+	const boostText = 'Above 100% is louder in this browser only. A soft limiter stops crackles.', baseText = 'Up to 300% for quiet rooms.';
+	const boostHint = h('div.small', { style: { color: settings.volume > 1 ? 'var(--amber-ink)' : 'var(--muted)' } }, settings.volume > 1 ? boostText : baseText);
 	return h('section.section', { 'aria-label': 'Listening' },
 		h('div.row', h('span.tint-tile', { style: { background: 'var(--teal-tint)', color: 'var(--teal-ink)' } }, icon('head', 18)),
 			h('div.grow', h('h2.card-title', 'Listen in this browser'),
 				bind(h('div.small'), () => "This computer's sound output · about " + (audio.delayMs() + state.latencyMs || 120) + ' ms behind')),
 			sw),
-		!audio.unlocked && settings.autoListen && !state.listening && h('div.small', 'Browsers only play sound after a click: switch Listen on to start.'),
 		bind(h('div.small'), () => meters.label()),
 		meterBlock(false),
 		h('div.row', h('span.small', 'Volume'), h('div.grow', vol), volLabel),
@@ -1499,10 +1524,19 @@ function recordingsPage() {
 	return [h('div', h('h1.title', 'Recordings'), h('div.sub', 'Click one to see its clips and export them. Kept in this browser.')),
 		!recordings.length && h('section.section', h('div.small', 'No recordings yet. Clips you mark while OBS records show up here, one row per recording.')),
 		live_.length ? [h('div.group-label', { style: { color: 'var(--rec-ink)' } }, 'Now'), h('div.list', live_.map((r) => row(r, null)))] : null,
-		past.length ? [h('div.group-label', { style: { color: 'var(--muted)' } }, 'Earlier'), h('div.list', past.map((r, i) => row(r, tiles[i % 4])))] : null];
+		past.length ? [h('div.group-label', { style: { color: 'var(--muted)' } }, 'Earlier'), h('div.list', past.map((r, i) => row(r, tiles[i % 4])))] : null,
+		recordings.length ? h('button.btn.danger', { type: 'button', onclick: () => {
+			if (!confirm('Delete all recordings and clips in this browser? Their notes and saved audio go too. The recordings on the PC are not touched. A recording OBS is making now keeps going, without its clips.')) return;
+			const live = recordings.filter((r) => r.live);
+			for (const r of recordings) if (!r.live) idb.remove(r.file);
+			recordings = live.map((r) => Object.assign(r, { clips: [] }));
+			saveRecordings();
+			toast('Deleted');
+		} }, icon('trash', 18), 'Delete all recordings and clips') : null];
 }
 
 let removed = null;
+let undoTimer = 0;
 function recordingPage() {
 	const r = recordings.find((x) => x.file === view.recording);
 	const back = h('button.round.plain', { type: 'button', 'aria-label': 'Back to Recordings', onclick: () => { view.name = 'recordings'; render(); } }, icon('back'));
@@ -1513,8 +1547,9 @@ function recordingPage() {
 		h('button.btn.primary', { type: 'button', disabled: !r.clips.length, onclick: () => { view.exporting = true; render(); } }, icon('export', 18), 'Export'))];
 	if (settings.pcClipLists && r.savedOnPc)
 		out.push(h('div.note-ok', icon('pc', 20), 'Saved on ' + r.savedOnPc + ' too, next to the recording as ' + r.file.replace(/\.[^.]*$/, '') + '.edl and .csv.'));
+	/* Undo floats over the bottom of the page, so deleting a clip doesn't shove the list around. */
 	if (removed && removed.file === r.file)
-		out.push(h('div.row.section', { style: { padding: '8px 8px 8px 16px' } }, h('span.grow', 'Clip at ' + tc(removed.clip.startMs) + ' deleted.'),
+		out.push(h('div.undo-bar', { role: 'status' }, h('span.grow', 'Clip at ' + tc(removed.clip.startMs) + ' deleted.'),
 			h('button.btn.outline', { type: 'button', onclick: () => { r.clips.push(removed.clip); r.clips.sort((a, b) => a.startMs - b.startMs); removed = null; saveRecordings(); } }, icon('undo', 18), 'Undo')));
 	if (!r.clips.length) out.push(h('section.section', h('div.small', 'No clips in this recording.')));
 	const tints = ['rec', 'blue', 'amber', 'teal'];
@@ -1530,6 +1565,15 @@ function recordingPage() {
 		if (isOpen) card.append(h('div.clip-body', clipActions(r, c, key, playing)));
 		out.push(card);
 	});
+	out.push(h('button.btn.danger', { type: 'button', onclick: () => {
+		if (!confirm('Delete this recording from this browser? Its clips, notes and saved audio go too. The recording on the PC is not touched.')) return;
+		player.stop();
+		recordings = recordings.filter((x) => x.file !== r.file);
+		idb.remove(r.file);
+		view.name = 'recordings';
+		saveRecordings();
+		toast('Recording deleted');
+	} }, icon('trash', 18), 'Delete this recording'));
 	if (view.exporting) out.push(exportDialog(r));
 	return out;
 }
@@ -1549,7 +1593,8 @@ function clipActions(r, c, key, playing) {
 		action('Adjust start and end', 'tune', 'teal', () => { view.mode = 'adjust'; render(); }),
 		action('Edit note', 'edit', 'amber', () => { view.mode = 'note'; render(); }),
 		action('Download audio', 'down', 'purple', () => downloadClipAudio(r, c))),
-	h('button.btn.danger', { type: 'button', onclick: () => { player.stop(); r.clips = r.clips.filter((x) => x.id !== c.id); removed = { file: r.file, clip: c }; view.open = null; saveRecordings(); } }, icon('trash', 18), 'Delete clip')];
+	h('button.btn.danger', { type: 'button', onclick: () => { player.stop(); r.clips = r.clips.filter((x) => x.id !== c.id); removed = { file: r.file, clip: c }; view.open = null; saveRecordings();
+		clearTimeout(undoTimer); undoTimer = setTimeout(() => { removed = null; render(); }, 8000); } }, icon('trash', 18), 'Delete clip')];
 }
 
 function adjustPanel(r, c) {

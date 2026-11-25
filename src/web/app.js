@@ -88,6 +88,9 @@ function icon(name, size = 20) {
 		export: '<path d="M12 15V3M7 8l5-5 5 5M5 14v6h14v-6"/>',
 		check: '<path d="M5 12l5 5 9-10"/>',
 		undo: '<path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/>',
+		close: '<path d="M6 6l12 12M18 6L6 18"/>',
+		alert: '<path d="M12 8v5M12 17h.01"/><circle cx="12" cy="12" r="9"/>',
+		info: '<path d="M12 11v6M12 7h.01"/><circle cx="12" cy="12" r="9"/>',
 		name: '<rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 10h6M7 14h10"/>',
 		rewind: '<path d="M11 19l-8-7 8-7zM21 19l-8-7 8-7z"/>',
 		forward: '<path d="M13 19l8-7-8-7zM3 19l8-7-8-7z"/>',
@@ -733,6 +736,13 @@ async function downloadClipAudio(r, c) {
 	download(r.file.replace(/\.[^.]*$/, '') + ' clip ' + (r.clips.indexOf(c) + 1) + '.wav', new Blob([data], { type: 'audio/wav' }));
 }
 
+/** A colour token's value, read once: the tokens don't change while the page runs. */
+const tokenCache = new Map();
+function tokenColour(name) {
+	if (!tokenCache.has(name)) tokenCache.set(name, getComputedStyle(document.documentElement).getPropertyValue(name).trim());
+	return tokenCache.get(name);
+}
+
 /* ---------- meters, drawn the way OBS draws them ---------- */
 const meters = {
 	db: [-60, -60],
@@ -760,13 +770,16 @@ const meters = {
 	draw(canvas, dim) {
 		const dpr = window.devicePixelRatio || 1, w = canvas.clientWidth, hgt = canvas.clientHeight;
 		if (!w) return;
+		/* nothing moved since this canvas was last drawn: leave it (an idle meter costs nothing) */
+		const sig = this.db.map((d) => d.toFixed(1)).join() + '|' + this.hold.map((d) => d.toFixed(1)).join() + '|' + w + 'x' + hgt;
+		if (canvas.drawn === sig) return;
+		canvas.drawn = sig;
 		if (canvas.width !== Math.round(w * dpr)) { canvas.width = Math.round(w * dpr); canvas.height = Math.round(hgt * dpr); }
 		const g = canvas.getContext('2d');
 		g.setTransform(dpr, 0, 0, dpr, 0, 0);
 		g.clearRect(0, 0, w, hgt);
 		const bar = (hgt - 4) / 2, x = (db) => ((db + 60) / 60) * w;
-		const cs = getComputedStyle(document.documentElement);
-		const col = (n) => cs.getPropertyValue(n).trim();
+		const col = (n) => tokenColour(n);
 		const zones = [[-60, -20, '--meter-green'], [-20, -9, '--meter-yellow'], [-9, 0, '--meter-red']];
 		for (let i = 0; i < 2; i++) {
 			const y = i * (bar + 4);
@@ -1174,20 +1187,40 @@ function renderHead() {
 	stageBtn.onclick = () => { view.name = 'stage'; render(); };
 }
 
+/**
+ * The banners above every screen. They sit in a polite live region, so a banner that's already
+ * showing is kept as it is: only a new one is announced, once.
+ */
+const bannerNodes = new Map();
 function renderBanners() {
 	const box = $('#banners');
-	box.replaceChildren();
-	if (state.link === 'lost') {
-		box.append(h('div.banner', h('div.body', h('b', 'Connection to ' + (state.pc || 'the PC') + ' lost. '),
-			bind(h('span'), () => len(Date.now() - state.lostAt) + ' ago. Listening paused. The recording carries on at the PC. Reconnecting…'))));
-	}
-	for (const a of state.alerts) {
-		box.append(h('div.banner' + (a.severe ? '.severe' : ''),
-			h('div.body', h('b', a.title + ' '), a.body,
-				h('div.actions',
-					a.offerStart && h('button.btn.primary.small-btn', { type: 'button', onclick: () => { act('record.start'); clearAlert(a.id); } }, icon('rec', 16), 'Start recording'),
-					a.desk && h('button.btn.outline.small-btn', { type: 'button', onclick: () => { sendDesk(a.desk); toast('Sent to the desk'); } }, icon('send', 16), 'Tell the desk'))),
-			h('button.round.plain', { type: 'button', 'aria-label': 'Dismiss', onclick: () => clearAlert(a.id) }, '✕')));
+	const wanted = [];
+	if (state.link === 'lost') wanted.push(['lost:' + state.lostAt, () => {
+		/* the seconds tick visibly only, so a screen reader hears the banner once */
+		const ago = h('span', { 'aria-hidden': 'true' });
+		const node = h('div.banner', h('div.body', h('b', 'Connection to ' + (state.pc || 'the PC') + ' lost. '), ago,
+			' Listening paused. The recording carries on at the PC. Reconnecting…'));
+		node.tickers = [[ago, () => len(Date.now() - state.lostAt) + ' ago.']];
+		return node;
+	}]);
+	for (const a of state.alerts) wanted.push(['alert:' + a.id, () => {
+		const body = h('span');
+		const node = h('div.banner' + (a.severe ? '.severe' : ''),
+		h('div.body', h('b', a.title + ' '), body,
+			h('div.actions',
+				a.offerStart && h('button.btn.primary.small-btn', { type: 'button', onclick: () => { act('record.start'); clearAlert(a.id); } }, icon('rec', 16), 'Start recording'),
+				a.desk && h('button.btn.outline.small-btn', { type: 'button', onclick: () => { sendDesk(a.desk); toast('Sent to the desk'); } }, icon('send', 16), 'Tell the desk'))),
+		h('button.round.plain', { type: 'button', 'aria-label': 'Dismiss: ' + a.title, onclick: () => clearAlert(a.id) }, icon('close', 18)));
+		/* the latest wording (the disk alert's hours, say) without rebuilding the banner */
+		node.tickers = [[body, () => (state.alerts.find((x) => x.id === a.id) || a).body]];
+		return node;
+	}]);
+	const keys = new Set(wanted.map((w) => w[0]));
+	for (const [key, node] of bannerNodes) if (!keys.has(key)) { node.remove(); bannerNodes.delete(key); }
+	for (const [key, build] of wanted) {
+		let node = bannerNodes.get(key);
+		if (!node) { node = build(); bannerNodes.set(key, node); box.append(node); }
+		for (const [el, fn] of node.tickers || []) bind(el, fn);
 	}
 }
 
@@ -1200,18 +1233,18 @@ function connectView() {
 		headline = 'Waiting for Allow in OBS';
 		sub = state.pendingMessage || 'OBS is asking whether this browser may connect.';
 		steps = [
-			step('✓', tint('ok'), 'You opened ', h('b', 'http://' + host), ', the address in OBS under ', h('b', 'Tools, OBS Director'), '.'),
+			step(icon('check', 16), tint('ok'), 'You opened ', h('b', 'http://' + host), ', the address in OBS under ', h('b', 'Tools, OBS Director'), '.'),
 			step('2', tint('amber'), 'At the PC, press ', h('b', 'Allow'), ' on ', h('i', 'Allow "' + settings.deviceName + '" to connect?'), " Check the taskbar if you don't see it."),
 			step('3', { bg: 'var(--control)', ink: 'var(--muted)' }, 'This page opens Monitor by itself. Next time this browser connects straight away.'),
 		];
 	} else if (state.link === 'refused') {
 		headline = 'Not connected';
 		sub = state.error || 'OBS refused the connection.';
-		steps = [step('!', tint('rec'), state.errorCode === 'denied' ? 'This page asks again in a minute, or reload it after someone at the PC is ready to press Allow.' : 'This page tries again by itself in a moment.')];
+		steps = [step(icon('alert', 16), tint('rec'), state.errorCode === 'denied' ? 'This page asks again in a minute, or reload it after someone at the PC is ready to press Allow.' : 'This page tries again by itself in a moment.')];
 	} else {
 		headline = 'Connecting to OBS';
 		sub = 'Looking for the OBS Director plugin at ' + host + '.';
-		steps = [step('i', tint('blue'), 'OBS needs to be open on that PC with the OBS Director plugin. If this takes long, check the address under Tools, OBS Director in OBS.')];
+		steps = [step(icon('info', 16), tint('blue'), 'OBS needs to be open on that PC with the OBS Director plugin. If this takes long, check the address under Tools, OBS Director in OBS.')];
 	}
 	return h('main.center', h('section.connect', { 'aria-labelledby': 'connect-title' },
 		h('div.row', h('span.tint-tile', { style: { width: '48px', height: '48px', borderRadius: '16px', background: 'var(--amber-tint)', color: 'var(--amber-ink)' } }, icon('pc', 26)),
@@ -1232,7 +1265,7 @@ function appView() {
 		h('nav.nav', { 'aria-label': 'Main' },
 			nav.map(([id, label, sw]) => h('button', { type: 'button', 'aria-current': current === id ? 'page' : 'false', onclick: () => { view.name = id; view.open = null; render(); } },
 				h('span.swatch', { style: { background: `var(--${sw}-ink)` } }), label,
-				id === 'recordings' && recordings.some((r) => r.live) ? h('span.badge', { 'aria-label': 'recording now' }, '●') : null)),
+				id === 'recordings' && recordings.some((r) => r.live) ? h('span.badge', h('span.dot', { style: { background: 'var(--rec)' } }), h('span.sr', ', recording now')) : null)),
 			h('div.nav-foot', 'Plugin ' + (state.plugin || '–') + ' · page ' + VERSION)),
 		h('main.main', h('div.page', page())));
 }
@@ -1286,6 +1319,7 @@ function holdButton(text, ms, done) {
 		if (e.type === 'keydown' && e.key !== 'Enter' && e.key !== ' ') return;
 		if (e.repeat) return;
 		e.preventDefault();
+		if (e.pointerId !== undefined) { try { btn.setPointerCapture(e.pointerId); } catch { /* fine */ } }
 		started = performance.now();
 		const step = () => { fill.style.transform = 'scaleX(' + Math.min(1, (performance.now() - started) / ms) + ')'; raf = requestAnimationFrame(step); };
 		step();
@@ -1293,7 +1327,8 @@ function holdButton(text, ms, done) {
 	};
 	btn.addEventListener('pointerdown', go);
 	btn.addEventListener('keydown', go);
-	for (const ev of ['pointerup', 'pointerleave', 'pointercancel', 'keyup', 'blur']) btn.addEventListener(ev, reset);
+	for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture', 'keyup', 'blur']) btn.addEventListener(ev, reset);
+	btn.addEventListener('contextmenu', (e) => e.preventDefault()); /* a long press is the point, not a menu */
 	btn.setAttribute('aria-description', 'Press and hold for ' + (ms / 1000) + ' seconds');
 	return btn;
 }
@@ -1321,7 +1356,7 @@ function listenSection() {
 	const boostHint = h('div.small', { style: { color: 'var(--amber-ink)' }, hidden: settings.volume <= 1 }, 'Above 100% is louder in this browser only. A soft limiter stops crackles.');
 	return h('section.section', { 'aria-label': 'Listening' },
 		h('div.row', h('span.tint-tile', { style: { background: 'var(--teal-tint)', color: 'var(--teal-ink)' } }, icon('head', 18)),
-			h('div.grow', h('div.card-title', 'Listen in this browser'),
+			h('div.grow', h('h2.card-title', 'Listen in this browser'),
 				bind(h('div.small'), () => "This computer's sound output · about " + (audio.delayMs() + state.latencyMs || 120) + ' ms behind')),
 			sw),
 		!audio.unlocked && settings.autoListen && !state.listening && h('div.small', 'Browsers only play sound after a click: switch Listen on to start.'),
@@ -1366,7 +1401,7 @@ function pictureSection() {
 		box = h('div.video', video.supported ? 'Off. About 540 MB an hour while on.' : "This browser can't show the live picture.");
 	}
 	return h('section.section', { 'aria-label': 'Live picture' },
-		h('div.row', h('div.grow', h('div.card-title', 'Live picture'), h('div.small', '640×360, to check framing. It never delays the audio.')), sw),
+		h('div.row', h('div.grow', h('h2.card-title', 'Live picture'), h('div.small', '640×360, to check framing. It never delays the audio.')), sw),
 		box);
 }
 
@@ -1375,7 +1410,7 @@ function deskSection() {
 	const go = () => { const text = input.value; input.value = ''; sendDesk(text); };
 	input.addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); });
 	return h('section.section', { 'aria-label': 'Message the desk' },
-		h('div.card-title', 'Message the desk'),
+		h('h2.card-title', 'Message the desk'),
 		h('div.row', h('div.grow', input), h('button.btn.primary', { type: 'button', onclick: go }, icon('send', 18), 'Send')),
 		state.desk.length ? h('div.desk-list', state.desk.slice(-3).reverse().map((m) => {
 			const d = new Date(m.at);
@@ -1404,7 +1439,7 @@ function streamPage() {
 			stat('Bitrate', () => (S().streamActive ? Math.round(S().streamKbps).toLocaleString() + ' kb/s' : '–'), tint('blue')),
 			stat('Dropped frames', () => S().dropped + ' · ' + (S().totalFrames ? ((S().dropped * 100) / S().totalFrames).toFixed(1) : '0.0') + '%', S().dropped ? tint('amber') : tint('ok')),
 			stat('Congestion', () => (S().congestion < 0.1 ? 'Low' : S().congestion < 0.5 ? 'Some' : 'High'), tint('amber'))),
-		h('section.section', h('div.card-title', 'Dropped frames, last 30 minutes'),
+		h('section.section', h('h2.card-title', 'Dropped frames, last 30 minutes'),
 			h('div.small', 'One bar a minute. Amber means it crossed your alert level (' + settings.dropsPerMinute + ' a minute).'), chart),
 		settings.allowStreamStop && S().streamActive ? holdButton('Hold to end the stream', 2000, () => act('stream.stop'))
 			: h('div.small', 'Ending the stream from this browser is off. Turn it on in Settings, Controls.')];
@@ -1440,10 +1475,9 @@ function drawHealth(canvas) {
 	g.scale(dpr, dpr);
 	const bars = state.health.slice(-30), n = 30, gap = 3, bw = (w - gap * (n - 1)) / n;
 	const top = Math.max(1, settings.dropsPerMinute, ...bars);
-	const cs = getComputedStyle(document.documentElement);
 	bars.forEach((d, i) => {
 		const x = (n - bars.length + i) * (bw + gap), bh = Math.max(4, (hgt * d) / top);
-		g.fillStyle = d >= settings.dropsPerMinute ? cs.getPropertyValue('--amber-ink') : d > 0 ? cs.getPropertyValue('--ok-ink') : '#2e3a33';
+		g.fillStyle = tokenColour(d >= settings.dropsPerMinute ? '--amber-ink' : d > 0 ? '--ok-ink' : '--chart-empty');
 		g.fillRect(x, hgt - bh, bw, bh);
 	});
 	canvas.setAttribute('aria-label', bars.length ? 'Dropped frames per minute, most recent ' + bars[bars.length - 1] + ', highest ' + Math.max(...bars) : 'No stream data yet');

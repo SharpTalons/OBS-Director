@@ -5,6 +5,18 @@ All notable changes to OBS Director (plugin and Android app). The project follow
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-11-25
+
+Fixes from the design audit of the browser version.
+
+### Browser version
+- Screen readers hear each alert once: banners that are already showing are kept, the "lost … ago" seconds tick visibly only, and the disk alert's hours update in place.
+- Card titles are headings, so screen reader users can jump between sections.
+- Text fields show the same 2 px focus ring as everything else; the desk placeholder is easier to read.
+- Hold to stop works by touch: a press doesn't turn into a scroll or open the long-press menu.
+- The Listen and Live picture switches have a 44 px touch target.
+- Meters stop redrawing when nothing moves; the last hard-coded colours, text selection, the caret and the scrollbar come from the theme; icons instead of text symbols.
+
 ## [0.6.0] - 2026-11-24
 
 OBS Director in a browser: open the address OBS shows, on any computer on the network, and do everything the phone does.
@@ -153,7 +165,8 @@ First release of the plugin and the Android app.
 - The browser version (WebRTC and WebSocket modes) is not built yet; the app uses Direct UDP.
 - Audio missing from the phone's copy during a Wi-Fi drop is not yet refilled from the PC.
 
-[Unreleased]: https://github.com/SharpTalons/OBS-Director/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/SharpTalons/OBS-Director/compare/v0.6.1...HEAD
+[0.6.1]: https://github.com/SharpTalons/OBS-Director/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/SharpTalons/OBS-Director/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/SharpTalons/OBS-Director/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/SharpTalons/OBS-Director/compare/v0.4.1...v0.5.0

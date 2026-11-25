@@ -20,7 +20,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
-import androidx.compose.material.icons.outlined.Bedtime
+import androidx.compose.material.icons.outlined.TheaterComedy
 import androidx.compose.material.icons.outlined.Cast
 import androidx.compose.material.icons.outlined.CastConnected
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -53,6 +53,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.sharptalons.obsdirector.audio.Levels
@@ -96,15 +97,17 @@ fun TintTile(icon: ImageVector, tint: Tint, size: Dp = 32.dp, iconSize: Dp = 18.
 
 /** A tinted chip. With [onClick] it's a button and shows a chevron. */
 @Composable
-fun TintChip(text: String, tint: Tint, dot: Color? = null, onClick: (() -> Unit)? = null) {
+fun TintChip(text: String, tint: Tint, dot: Color? = null, modifier: Modifier = Modifier, onClick: (() -> Unit)? = null) {
     Row(
-        Modifier.heightIn(min = 44.dp).clip(RoundedCornerShape(12.dp)).background(tint.bg)
+        modifier.height(48.dp).clip(RoundedCornerShape(12.dp)).background(tint.bg)
             .then(if (onClick != null) Modifier.clickable(role = Role.Button, onClick = onClick) else Modifier)
-            .padding(horizontal = 12.dp),
+            .padding(horizontal = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center,
     ) {
-        if (dot != null) { Box(Modifier.size(8.dp).clip(CircleShape).background(dot)); Spacer(Modifier.width(8.dp)) }
-        Text(text, style = Type.body.copy(fontSize = 13.sp, color = tint.ink, fontWeight = if (onClick != null) FontWeight.Medium else FontWeight.Normal))
+        if (dot != null) { Box(Modifier.size(8.dp).clip(CircleShape).background(dot)); Spacer(Modifier.width(6.dp)) }
+        Text(text, style = Type.body.copy(fontSize = 13.sp, color = tint.ink, fontWeight = if (onClick != null) FontWeight.Medium else FontWeight.Normal),
+            maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
         if (onClick != null) Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, null, tint = tint.ink, modifier = Modifier.size(16.dp))
     }
 }
@@ -141,7 +144,7 @@ fun HeadBar(link: LinkState, pc: FoundPc?, latencyMs: Int, waiting: String?, onS
                 )
             }
         }
-        RoundIcon(Icons.Outlined.Bedtime, "Stage mode", T.warning, onStage)
+        RoundIcon(Icons.Outlined.TheaterComedy, "Stage mode", T.warning, onStage)
         val (icon, tint, label) = when (link) {
             LinkState.CONNECTED -> Triple(Icons.Outlined.CastConnected, T.positive, "Connected. Change or disconnect")
             LinkState.CONNECTING, LinkState.LOST -> Triple(Icons.Outlined.Cast, T.warning, "Connecting")
@@ -308,7 +311,9 @@ fun SettingItem(icon: ImageVector, tint: Tint, label: String, divider: Boolean, 
                 ) { Box(Modifier.size(24.dp).clip(CircleShape).background(Color.White)) }
                 value != null -> Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(value, style = Type.body.copy(color = tint.ink), maxLines = 1)
+                    // values line up whether or not they have an arrow
                     if (onClick != null) Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, null, tint = tint.ink, modifier = Modifier.size(18.dp))
+                    else Spacer(Modifier.width(18.dp))
                 }
             }
         }

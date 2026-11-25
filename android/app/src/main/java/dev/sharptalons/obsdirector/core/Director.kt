@@ -16,6 +16,7 @@ import dev.sharptalons.obsdirector.net.Protocol
 import dev.sharptalons.obsdirector.net.data
 import dev.sharptalons.obsdirector.net.ok
 import dev.sharptalons.obsdirector.service.MonitorService
+import dev.sharptalons.obsdirector.ui.FeedbackTokens
 import dev.sharptalons.obsdirector.service.Notifier
 import dev.sharptalons.obsdirector.video.VideoClient
 import kotlinx.coroutines.CoroutineScope
@@ -94,6 +95,12 @@ object Director {
     val alerts: StateFlow<List<Alert>> get() = alertState
     private val deskState = MutableStateFlow<List<DeskMessage>>(emptyList())
     val desk: StateFlow<List<DeskMessage>> get() = deskState
+    private val deskUnread = MutableStateFlow(0)
+    /** Messages from others since the Desk tab was last open. */
+    val deskUnreadCount: StateFlow<Int> get() = deskUnread
+    @Volatile private var deskOpen = false
+    /** The Desk tab is on screen: new messages count as read. */
+    fun setDeskOpen(open: Boolean) { deskOpen = open; if (open) deskUnread.value = 0 }
     private val toastState = MutableStateFlow<String?>(null)
     val toast: StateFlow<String?> get() = toastState
 
@@ -126,6 +133,8 @@ object Director {
     fun init(context: Context) {
         app = context.applicationContext
         router = dev.sharptalons.obsdirector.audio.OutputRouter(app).also { it.start() }
+        // the output chosen in Settings follows the setting as it changes
+        scope.launch { Prefs.settings.collect { router.preferredKey = it.outputPref } }
         scope.launch { alertLoop() }
         scope.launch { clipListLoop() }
     }
@@ -230,13 +239,16 @@ object Director {
             scope.launch { delay(5000); reconnectedGap.value = 0 }
             if (Prefs.settings.value.resumeListen && listenWasOn) listenState.value = true
             clearAlert("net")
+            val gap = reconnectedGap.value / 1000
+            chatNote(DeskMessage("note-${System.currentTimeMillis()}", false, "Reconnected after ${gap / 60}:${"%02d".format(gap % 60)}. Listening again.", kind = "note"))
         }
         linkState.value = LinkState.CONNECTED
         retries.value = 0
         MonitorService.start(app)
         startAudio()
         scope.launch {
-            if (Prefs.settings.value.deskPresence) deskFeed("${Prefs.settings.value.deviceName} is listening")
+            loadDeskHistory()
+            if (Prefs.settings.value.deskPresence) deskFeed("${Prefs.settings.value.deviceName} connected")
         }
     }
 
@@ -250,7 +262,7 @@ object Director {
         endClipIfRunning("net")
         stopVideo()
         stopAudio()
-        vibrate(longArrayOf(0, 200, 100, 200))
+        vibrate(FeedbackTokens.LINK_LOST)
         raise(Alert("net", true, "Connection to ${pcState.value?.name ?: "the PC"} lost.",
             "Listening paused. The recording carries on at the PC. " +
                 if (Prefs.settings.value.autoReconnect) "Reconnecting…" else "Reconnect from Settings."))
@@ -296,14 +308,24 @@ object Director {
                 }
             }
             "record.started" -> clearAlert("rec")
-            "desk.reply" -> {
-                val id = d["id"]?.jsonPrimitive?.content ?: ""
-                val text = d["text"]?.jsonPrimitive?.content ?: ""
-                val now = System.currentTimeMillis()
-                deskState.value = deskState.value.map { if (it.id == id && it.seenAt == null) it.copy(seenAt = now) else it } +
-                    DeskMessage(ClipStore.newId(), true, text)
-                vibrate(longArrayOf(0, 60))
-                Notifier.desk(app, text)
+            "desk.message" -> {
+                val m = chatMessage(d) ?: return
+                val list = deskState.value
+                if (list.any { it.id == m.id }) {
+                    // our own message coming back: it reached OBS
+                    deskState.value = list.map { if (it.id == m.id) it.copy(at = m.at, state = if (m.state == "seen") "seen" else "sent") else it }
+                } else {
+                    deskState.value = (list + m).takeLast(500)
+                    if (!m.mine) {
+                        if (!deskOpen) deskUnread.value = deskUnread.value + 1
+                        vibrate(FeedbackTokens.MESSAGE)
+                        if (!deskOpen) Notifier.desk(app, "${m.from}: ${m.text}")
+                    }
+                }
+            }
+            "desk.seen" -> {
+                val ids = (d["ids"] as? kotlinx.serialization.json.JsonArray)?.mapNotNull { it.jsonPrimitive.content }?.toSet() ?: return
+                deskState.value = deskState.value.map { if (it.mine && it.id in ids) it.copy(state = "seen", seenAt = System.currentTimeMillis()) else it }
             }
         }
     }
@@ -434,7 +456,7 @@ object Director {
         runningClip.value = (nowFileTimeMs() - lead).coerceAtLeast(0)
         pendingNote.value = null
         lastSaved.value = null
-        vibrate(longArrayOf(0, 20))
+        vibrate(FeedbackTokens.CLIP_START)
         if (Prefs.settings.value.chapters) scope.launch {
             val n = (ClipStore.recordings.value.firstOrNull { it.file == s.file }?.clips?.size ?: 0) + 1
             connection?.command("chapter.add", mapOf("name" to JsonPrimitive("Clip $n")))
@@ -461,7 +483,7 @@ object Director {
         val clip = Clip(ClipStore.newId(), start, end, chapterWritten = Prefs.settings.value.chapters && statusState.value.container == "mp4")
         ClipStore.ensure(file, live = statusState.value.recActive)
         ClipStore.addClip(file, clip)
-        vibrate(longArrayOf(0, 20, 60, 20))
+        vibrate(FeedbackTokens.CLIP_SAVED)
         val n = ClipStore.recordings.value.firstOrNull { it.file == file }?.clips?.indexOfFirst { it.id == clip.id }?.plus(1) ?: 0
         val why = when (auto) {
             "net" -> ", ended when the connection dropped"
@@ -500,11 +522,55 @@ object Director {
     // =============================================================== desk
 
     fun sendDesk(text: String) {
-        val t = text.trim().take(200)
+        val t = text.trim().take(1000)
         if (t.isEmpty()) return
-        val m = DeskMessage(ClipStore.newId(), false, t)
+        val m = DeskMessage(java.util.UUID.randomUUID().toString(), false, t, from = Prefs.settings.value.deviceName, mine = true, state = "sending")
         deskState.value = deskState.value + m
-        command("desk.send", mapOf("id" to JsonPrimitive(m.id), "text" to JsonPrimitive(t)))
+        postDesk(m)
+    }
+
+    /** Send again a message that didn't go. */
+    fun retryDesk(id: String) {
+        val m = deskState.value.firstOrNull { it.id == id && it.state == "failed" } ?: return
+        deskState.value = deskState.value.map { if (it.id == id) it.copy(state = "sending") else it }
+        postDesk(m)
+    }
+
+    private fun postDesk(m: DeskMessage) {
+        scope.launch {
+            val r = connection?.command("desk.send", mapOf("id" to JsonPrimitive(m.id), "text" to JsonPrimitive(m.text)))
+            val ok = r?.ok() == true
+            deskState.value = deskState.value.map {
+                if (it.id != m.id) it
+                else if (ok) it.copy(state = if (it.state == "seen") "seen" else "sent") else it.copy(state = "failed")
+            }
+        }
+    }
+
+    private fun chatMessage(o: JsonObject): DeskMessage? {
+        val id = o["id"]?.jsonPrimitive?.content ?: return null
+        val text = o["text"]?.jsonPrimitive?.content ?: return null
+        val prim = { k: String -> o[k]?.jsonPrimitive?.content }
+        val seen = prim("seen") == "true"
+        return DeskMessage(
+            id = id, fromDesk = prim("desk") == "true", text = text,
+            at = prim("at")?.toDoubleOrNull()?.toLong() ?: System.currentTimeMillis(),
+            from = prim("from") ?: "", mine = prim("mine") == "true", state = if (seen) "seen" else "sent",
+        )
+    }
+
+    /** After connecting: the chat so far, from OBS, plus anything of ours that didn't go. */
+    private suspend fun loadDeskHistory() {
+        val r = connection?.command("desk.history") ?: return
+        if (!r.ok()) return
+        val msgs = (r.data()?.get("messages") as? kotlinx.serialization.json.JsonArray)
+            ?.mapNotNull { (it as? JsonObject)?.let(::chatMessage) } ?: return
+        val ids = msgs.map { it.id }.toSet()
+        val pending = deskState.value.filter { it.mine && it.state != "sent" && it.state != "seen" && it.id !in ids }
+        // this phone's own alert cards and notes stay, in time order
+        val local = deskState.value.filter { it.kind != "message" }
+        deskState.value = (msgs + pending + local).sortedBy { it.at }.takeLast(500)
+        pending.filter { it.state == "failed" || it.state == "sending" }.forEach { postDesk(it) }
     }
 
     private suspend fun deskFeed(text: String) {
@@ -557,11 +623,20 @@ object Director {
 
     fun dismissAlert(id: String) = clearAlert(id)
 
+    /** An alert: a notification, and a card in the Desk chat (on this phone only) with its actions. */
     private fun raise(a: Alert) {
         if (alertState.value.any { it.id == a.id }) return
         alertState.value = listOf(a) + alertState.value
-        vibrate(if (a.severe) longArrayOf(0, 300, 120, 300, 120, 300) else longArrayOf(0, 200, 100, 200))
+        vibrate(if (a.severe) FeedbackTokens.ALERT_SEVERE else FeedbackTokens.ALERT)
         Notifier.alert(app, a)
+        chatNote(DeskMessage("alert-${a.id}-${System.currentTimeMillis()}", false, a.body, from = a.title, kind = "alert",
+            severe = a.severe, deskText = a.deskText, offerStart = a.offerStartRecording))
+    }
+
+    /** A line in this phone's chat that isn't a message: an alert card, or a connection note. */
+    fun chatNote(m: DeskMessage) {
+        deskState.value = (deskState.value + m).takeLast(500)
+        if (!deskOpen) deskUnread.value = deskUnread.value + 1
     }
 
     private fun clearAlert(id: String) {
@@ -569,6 +644,8 @@ object Director {
         alertState.value = alertState.value.filterNot { it.id == id }
         Notifier.cancelAlert(app, id)
     }
+
+    private var batteryWarnedAt = -1
 
     private suspend fun alertLoop() {
         while (scope.isActive) {
@@ -614,6 +691,16 @@ object Director {
                 }
             }
 
+            // the phone's own battery: once each time it drops another 5% below the warning level
+            val b = PhoneBattery.battery.value
+            if (st.batteryWarn > 0 && !b.charging && b.percent in 1..st.batteryWarn) {
+                if (batteryWarnedAt < 0 || b.percent <= batteryWarnedAt - 5) {
+                    batteryWarnedAt = b.percent
+                    clearAlert("battery")
+                    raise(Alert("battery", b.percent <= 5, "Phone at ${b.percent}%.", "Plug it in: the session audio is still saving."))
+                }
+            } else if (b.charging || b.percent > st.batteryWarn) { batteryWarnedAt = -1; clearAlert("battery") }
+
             // dropped frames in the last minute
             if (s.streamActive && dropHistory.size > 2) {
                 val minuteAgo = dropHistory.firstOrNull { it.first >= now - 60_000 } ?: dropHistory.first()
@@ -632,10 +719,25 @@ object Director {
 
     // =============================================================== helpers
 
-    private fun vibrate(pattern: LongArray) {
+    /**
+     * Vibrates at the strength chosen in Settings (off, light, medium, strong). Patterns are
+     * off/on pairs; phones that can't vary the strength get shorter buzzes for light.
+     */
+    fun vibrate(pattern: LongArray) {
         if (!::app.isInitialized) return
+        val level = Prefs.settings.value.haptics.coerceIn(0, 3)
+        if (level == 0) return
         val v = ContextCompat.getSystemService(app, Vibrator::class.java) ?: return
-        runCatching { v.vibrate(VibrationEffect.createWaveform(pattern, -1)) }
+        runCatching {
+            if (v.hasAmplitudeControl()) {
+                val strength = FeedbackTokens.BUZZ_AMPLITUDE[level - 1]
+                val amps = IntArray(pattern.size) { i -> if (i % 2 == 1) strength else 0 }
+                v.vibrate(VibrationEffect.createWaveform(pattern, amps, -1))
+            } else {
+                val scale = FeedbackTokens.BUZZ_LENGTH_SCALE[level - 1]
+                v.vibrate(VibrationEffect.createWaveform(LongArray(pattern.size) { i -> if (i % 2 == 1) (pattern[i] * scale).toLong().coerceAtLeast(10) else pattern[i] }, -1))
+            }
+        }
     }
 
     private fun writeSidecar(file: String) {

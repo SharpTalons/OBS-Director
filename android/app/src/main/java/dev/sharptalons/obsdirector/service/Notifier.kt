@@ -11,6 +11,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import dev.sharptalons.obsdirector.MainActivity
+import dev.sharptalons.obsdirector.MainIntents
 import dev.sharptalons.obsdirector.R
 import dev.sharptalons.obsdirector.core.Alert
 
@@ -56,7 +57,10 @@ object Notifier {
             .setStyle(NotificationCompat.BigTextStyle().bigText(a.body))
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_ALARM)
-            .setContentIntent(openApp(context))
+            // alerts live in the Desk chat: tapping opens it
+            .setContentIntent(PendingIntent.getActivity(context, 8,
+                Intent(context, MainActivity::class.java).setAction(MainIntents.ACTION_DESK).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT))
             .setAutoCancel(true)
             .build()
         runCatching { NotificationManagerCompat.from(context).notify(a.id.hashCode(), n) }
@@ -72,7 +76,11 @@ object Notifier {
             .setSmallIcon(R.drawable.ic_notify)
             .setContentTitle("Desk")
             .setContentText(text)
-            .setContentIntent(openApp(context))
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+            // tapping it opens the chat
+            .setContentIntent(PendingIntent.getActivity(context, 7,
+                Intent(context, MainActivity::class.java).setAction(MainIntents.ACTION_DESK).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT))
             .setAutoCancel(true)
             .build()
         runCatching { NotificationManagerCompat.from(context).notify(2, n) }

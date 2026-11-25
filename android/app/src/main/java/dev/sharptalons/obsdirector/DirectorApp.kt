@@ -15,6 +15,7 @@ class DirectorApp : Application() {
         Notifier.createChannels(this)
         Director.init(this)
         dev.sharptalons.obsdirector.core.PhoneBattery.init(this)
+        dev.sharptalons.obsdirector.core.Feedback.init(this)
         UpdateController.init(this)
     }
 }

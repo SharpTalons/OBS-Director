@@ -1,5 +1,7 @@
 package dev.sharptalons.obsdirector.ui
 
+import kotlinx.coroutines.launch
+
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
@@ -16,6 +18,10 @@ import dev.sharptalons.obsdirector.R
  * is used in dark rooms. Text colours meet WCAG AA on [ground] and [surface].
  */
 object T {
+    // the desk chat: this phone's bubbles in green, everyone else's in grey, like a messaging app
+    val chatOut = Color(0xFF005C4B)
+    val chatOutMuted = Color(0xFFA5D6C9)
+    val chatIn = Color(0xFF2A2A30)
     // the Adjust waveform and the dropped-frames chart
     val waveform = Color(0xFF55555C)
     val waveGap = Color(0x40D9A441)
@@ -132,6 +138,75 @@ fun DirectorTheme(content: @Composable () -> Unit) {
             error = T.negative,
             outline = T.control,
         ),
-        content = content,
+    ) {
+        // every tappable thing (buttons, tiles, rows, switches, tabs) sounds and ticks on release
+        androidx.compose.runtime.CompositionLocalProvider(
+            androidx.compose.foundation.LocalIndication provides FeedbackIndication,
+            content = content,
+        )
+    }
+}
+
+/**
+ * Touch feedback, part of the design system next to the colours and type: what a tap sounds
+ * like and how the phone vibrates. Volume and strength come from Settings; these are the fixed
+ * parts. Documented in docs/DESIGN.md.
+ */
+object FeedbackTokens {
+    /** The tap: one clean tap from the supplied recording (taps at 0.04, 0.30 … 2.44 s; the one at 0.60 s
+     *  rings for 31 ms), cut to 60 ms with a 15 ms fade, peak at -3 dBFS. res/raw/touch_tap.wav */
+    const val TAP_SOUND = "touch_tap"
+    /** Touch sound at 100% in Settings plays at this gain, so it sits under the mix, not over it. */
+    const val TAP_MAX_GAIN = 0.6f
+    /** Taps can overlap when tapping fast. */
+    const val TAP_STREAMS = 3
+    /** Default touch sound volume, percent (0 = off). */
+    const val TAP_DEFAULT_VOLUME = 50
+
+    /** The tap's vibration tick for light, medium and strong (Android's predefined effects). */
+    val TAP_HAPTIC = intArrayOf(
+        android.os.VibrationEffect.EFFECT_TICK,
+        android.os.VibrationEffect.EFFECT_CLICK,
+        android.os.VibrationEffect.EFFECT_HEAVY_CLICK,
     )
+    /** Strength of the longer buzzes (amplitude 1..255) for light, medium and strong. */
+    val BUZZ_AMPLITUDE = intArrayOf(70, 150, 255)
+    /** For phones that can't vary strength: buzz length scaled for light, medium and strong. */
+    val BUZZ_LENGTH_SCALE = floatArrayOf(0.5f, 1f, 1.4f)
+
+    // Vibration patterns: off/on pairs in ms, starting with a pause.
+    /** A clip starts: one short tap. */
+    val CLIP_START = longArrayOf(0, 20)
+    /** A clip is saved: two short taps. */
+    val CLIP_SAVED = longArrayOf(0, 20, 60, 20)
+    /** A message in the desk chat. */
+    val MESSAGE = longArrayOf(0, 40, 70, 40)
+    /** An alert. */
+    val ALERT = longArrayOf(0, 200, 100, 200)
+    /** A severe alert (recording stopped, disk nearly full). */
+    val ALERT_SEVERE = longArrayOf(0, 300, 120, 300, 120, 300)
+    /** The connection to the PC dropped. */
+    val LINK_LOST = longArrayOf(0, 200, 100, 200)
+    /** Preview when the strength is changed in Settings. */
+    val PREVIEW = longArrayOf(0, 40, 80, 40)
+}
+
+/** The app's tap: Material's ripple, plus the touch sound and vibration tick when a press lands. */
+object FeedbackIndication : androidx.compose.foundation.IndicationNodeFactory {
+    override fun create(interactionSource: androidx.compose.foundation.interaction.InteractionSource): androidx.compose.ui.node.DelegatableNode =
+        FeedbackNode(interactionSource, androidx.compose.material3.ripple().create(interactionSource))
+    override fun equals(other: Any?) = other === this
+    override fun hashCode() = 7
+}
+
+private class FeedbackNode(
+    private val source: androidx.compose.foundation.interaction.InteractionSource,
+    ripple: androidx.compose.ui.node.DelegatableNode,
+) : androidx.compose.ui.node.DelegatingNode() {
+    init { delegate(ripple) }
+    override fun onAttach() {
+        coroutineScope.launch {
+            source.interactions.collect { if (it is androidx.compose.foundation.interaction.PressInteraction.Release) dev.sharptalons.obsdirector.core.Feedback.tap() }
+        }
+    }
 }

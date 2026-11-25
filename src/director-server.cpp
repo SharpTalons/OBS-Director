@@ -159,11 +159,29 @@ DirectorServer::DirectorServer(DeskDock *d, QObject *parent)
 		streamStartMs = QDateTime::currentMSecsSinceEpoch();
 
 	updatePresence();
-	connect(dock, &DeskDock::replied, this, [this](const QString &id, const QString &text) {
-		QJsonObject data;
-		data["id"] = id;
-		data["text"] = text;
-		event("desk.reply", data);
+	/* the desk writes in the chat */
+	connect(dock, &DeskDock::sent, this, [this](const QString &text) {
+		ChatMessage m;
+		m.id = QString::number(QRandomGenerator::global()->generate64(), 16);
+		m.from = tr("Desk");
+		m.text = text;
+		m.at = QDateTime::currentMSecsSinceEpoch();
+		m.seen = true;
+		postChat(m);
+	});
+	/* the desk has read these: their senders' ticks turn blue */
+	connect(dock, &DeskDock::seen, this, [this](const QStringList &ids) {
+		QJsonArray seenIds;
+		for (ChatMessage &m : chat)
+			if (!m.seen && ids.contains(m.id)) {
+				m.seen = true;
+				seenIds.append(m.id);
+			}
+		if (seenIds.isEmpty())
+			return;
+		QJsonObject d;
+		d["ids"] = seenIds;
+		event("desk.seen", d);
 	});
 
 	obs_log(LOG_INFO, "listening on TCP %d (control), %d (video), %d (browser); beacon on UDP %d", kControlPort,
@@ -495,7 +513,6 @@ void DirectorServer::askApproval(Client &c)
 	box->raise();
 	box->activateWindow();
 	QApplication::alert(main);
-	dock->addFeed(tr("%1 asks to connect").arg(c.device));
 	obs_log(LOG_INFO, "a phone at %s asks to connect", c.ip.toUtf8().constData());
 }
 
@@ -825,12 +842,34 @@ void DirectorServer::handleCommand(Client &c, int id, const QString &cmd, const 
 		return result(c, id, true, d);
 	}
 	if (cmd == "desk.send") {
-		QString text = args.value("text").toString().left(200);
-		QString mid = args.value("id").toString().left(64);
+		/* a chat message from a phone or browser, up to 1000 characters, lines kept */
+		const QString text = args.value("text").toString().trimmed().left(1000);
+		static const QRegularExpression idPattern(QStringLiteral("^[A-Za-z0-9-]{1,64}$"));
+		QString mid = args.value("id").toString();
+		if (!idPattern.match(mid).hasMatch())
+			mid = QString::number(QRandomGenerator::global()->generate64(), 16);
 		if (text.isEmpty())
 			return result(c, id, false, {}, "empty");
-		dock->addMessage(mid, c.device, text);
-		return result(c, id, true);
+		for (const ChatMessage &m : chat)
+			if (m.id == mid) /* sent twice (a retry after a reconnect): already posted */
+				return result(c, id, true, QJsonObject{{"id", mid}, {"at", double(m.at)}});
+		ChatMessage m;
+		m.id = mid;
+		m.from = c.device;
+		m.fromDevice = c.deviceId;
+		m.text = text;
+		m.at = QDateTime::currentMSecsSinceEpoch();
+		postChat(m);
+		return result(c, id, true, QJsonObject{{"id", mid}, {"at", double(m.at)}});
+	}
+	if (cmd == "desk.history") {
+		/* the chat so far, for a phone or browser that just connected */
+		QJsonArray list;
+		for (const ChatMessage &m : chat)
+			list.append(chatJson(m, c));
+		QJsonObject d;
+		d["messages"] = list;
+		return result(c, id, true, d);
 	}
 	if (cmd == "desk.feed") {
 		dock->addFeed(args.value("text").toString().left(120));
@@ -840,6 +879,37 @@ void DirectorServer::handleCommand(Client &c, int id, const QString &cmd, const 
 }
 
 /* ---------------- video ---------------- */
+
+QJsonObject DirectorServer::chatJson(const ChatMessage &m, const Client &to) const
+{
+	QJsonObject o;
+	o["id"] = m.id;
+	o["from"] = m.from;
+	o["text"] = m.text;
+	o["at"] = double(m.at);
+	o["desk"] = m.fromDevice.isEmpty();
+	o["mine"] = !m.fromDevice.isEmpty() && m.fromDevice == to.deviceId;
+	o["seen"] = m.seen;
+	return o;
+}
+
+void DirectorServer::postChat(const ChatMessage &m)
+{
+	chat.append(m);
+	while (chat.size() > 500)
+		chat.removeFirst();
+	/* each device is told which messages are its own; then the dock, which may mark it seen */
+	for (auto it = clients.begin(); it != clients.end(); ++it) {
+		if (!it->authed)
+			continue;
+		QJsonObject msg;
+		msg["type"] = "event";
+		msg["event"] = "desk.message";
+		msg["data"] = chatJson(m, *it);
+		send(it->sock, msg);
+	}
+	dock->addMessage(m.id, m.from, m.text, m.at, m.fromDevice.isEmpty());
+}
 
 void DirectorServer::rememberRecording(const QString &path)
 {

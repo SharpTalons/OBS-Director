@@ -47,6 +47,12 @@ data class Settings(
     val batteryWarn: Int = 15,
     /** Have the plugin save each recording's clip list (EDL and CSV) next to the recording. */
     val pcClipLists: Boolean = true,
+    /** Where the mix plays: "auto" (whatever the phone uses) or one output's key. */
+    val outputPref: String = "auto",
+    /** How strongly the phone vibrates: 0 off, 1 light, 2 medium, 3 strong. */
+    val haptics: Int = 2,
+    /** Tap sound volume, percent; 0 = off. */
+    val touchSound: Int = 50,
     val deskPresence: Boolean = true,
 )
 
@@ -93,6 +99,9 @@ object Prefs {
             bubble = sp.getBoolean("bubble", d.bubble),
             batteryWarn = sp.getInt("batteryWarn", d.batteryWarn),
             pcClipLists = sp.getBoolean("pcClipLists", d.pcClipLists),
+            outputPref = sp.getString("outputPref", d.outputPref) ?: d.outputPref,
+            haptics = sp.getInt("haptics", d.haptics),
+            touchSound = sp.getInt("touchSound", d.touchSound),
             deskPresence = sp.getBoolean("deskPresence", d.deskPresence),
         )
     }
@@ -130,6 +139,9 @@ object Prefs {
             putBoolean("bubble", s.bubble)
             putInt("batteryWarn", s.batteryWarn)
             putBoolean("pcClipLists", s.pcClipLists)
+            putString("outputPref", s.outputPref)
+            putInt("haptics", s.haptics)
+            putInt("touchSound", s.touchSound)
             putBoolean("deskPresence", s.deskPresence)
         }.apply()
     }

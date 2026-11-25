@@ -24,6 +24,7 @@ object MainIntents {
     const val ACTION_CLIP = "dev.sharptalons.obsdirector.shortcut.CLIP"
     const val ACTION_STAGE = "dev.sharptalons.obsdirector.shortcut.STAGE"
     const val ACTION_EXIT = "dev.sharptalons.obsdirector.shortcut.EXIT"
+    const val ACTION_DESK = "dev.sharptalons.obsdirector.open.DESK"
     var startScreen by androidx.compose.runtime.mutableStateOf<String?>(null)
 }
 
@@ -67,6 +68,7 @@ class MainActivity : ComponentActivity() {
                 return true
             }
             MainIntents.ACTION_STAGE -> MainIntents.startScreen = "stage"
+            MainIntents.ACTION_DESK -> MainIntents.startScreen = "desk"
             MainIntents.ACTION_CLIP -> {
                 MainIntents.startScreen = "monitor"
                 if (Director.clipStart.value == null) {

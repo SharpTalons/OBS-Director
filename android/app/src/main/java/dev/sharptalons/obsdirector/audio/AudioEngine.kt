@@ -58,6 +58,11 @@ class AudioEngine(private val onPcm: (pcm: ShortArray, fileTimeUs: Long, recordi
     @Volatile private var lastFileTimeUs = 0L
     @Volatile private var lastPacketAt = 0L
     private var framesWritten = 0L
+    /** The track has begun playing (its play head moved). Until then it is filled, never trimmed. */
+    private var started = false
+    private var trackMadeAt = 0L
+    private var lastHead = 0L
+    private var headStillSince = 0L
     private var adaptiveMs = 10
     private var lateCount = 0
 
@@ -106,6 +111,10 @@ class AudioEngine(private val onPcm: (pcm: ShortArray, fileTimeUs: Long, recordi
         router?.dirty = false
         route?.let { router?.applyCallRoute(it) }
         val minBytes = AudioTrack.getMinBufferSize(RATE, AudioFormat.CHANNEL_OUT_STEREO, AudioFormat.ENCODING_PCM_16BIT)
+        // A small buffer: Android only starts an ordinary (not low-latency) track once its buffer
+        // has been filled, and we keep just a few tens of ms queued. A 200 ms buffer that we never
+        // fill meant Bluetooth, USB and some headsets stayed silent.
+        val bytes = max(minBytes, RATE * CHANNELS * 2 * 60 / 1000)
         val t = AudioTrack.Builder()
             .setAudioAttributes(
                 AudioAttributes.Builder()
@@ -121,13 +130,20 @@ class AudioEngine(private val onPcm: (pcm: ShortArray, fileTimeUs: Long, recordi
                     .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
                     .build()
             )
-            .setBufferSizeInBytes(max(minBytes, RATE * CHANNELS * 2 / 5)) // room for 200 ms, we keep far less
+            .setBufferSizeInBytes(bytes)
             .setTransferMode(AudioTrack.MODE_STREAM)
             // Low latency only to the phone or wired headphones: Bluetooth adds its own delay,
             // and on some phones a low-latency track won't move to a Bluetooth headset.
             .setPerformanceMode(if (route == null || route.lowLatency) AudioTrack.PERFORMANCE_MODE_LOW_LATENCY else AudioTrack.PERFORMANCE_MODE_NONE)
             .build()
+        // Start as soon as ~20 ms is queued, not when the whole buffer is full.
+        if (android.os.Build.VERSION.SDK_INT >= 31)
+            runCatching { t.setStartThresholdInFrames(minOf(t.bufferSizeInFrames, RATE / 50)) }
         route?.device?.let { t.setPreferredDevice(it) }
+        started = false
+        trackMadeAt = SystemClock.elapsedRealtime()
+        lastHead = 0
+        headStillSince = 0
         return t
     }
 
@@ -136,6 +152,7 @@ class AudioEngine(private val onPcm: (pcm: ShortArray, fileTimeUs: Long, recordi
         runCatching { track?.release() }
         track = null
         framesWritten = 0
+        started = false
     }
 
     private fun loop(s: DatagramSocket) {
@@ -230,6 +247,24 @@ class AudioEngine(private val onPcm: (pcm: ShortArray, fileTimeUs: Long, recordi
         t.setVolume(v.coerceAtMost(1f))
         val out = if (v > 1f) boost(pcm, v) else pcm
 
+        val now = SystemClock.elapsedRealtime()
+        val head = t.playbackHeadPosition.toLong() and 0xffffffffL
+        if (!started) {
+            if (head > 0) started = true
+            else {
+                // Not playing yet: keep filling until Android starts it (write stops at full).
+                val n0 = t.write(out, 0, out.size, AudioTrack.WRITE_NON_BLOCKING)
+                if (n0 > 0) framesWritten += n0 / CHANNELS
+                // Full and still not moving after 2 s: this output didn't take the track. Make a
+                // fresh one (it lands wherever Android routes now) rather than stay silent.
+                if (now - trackMadeAt > 2000) { releaseTrack(); router?.dirty = true }
+                return
+            }
+        }
+        // Playing, but the head stopped (output switched under us, or it hung): start again.
+        if (head != lastHead) { lastHead = head; headStillSince = now }
+        else if (headStillSince > 0 && now - headStillSince > 1500) { releaseTrack(); return }
+
         val target = if (targetBufferMs > 0) targetBufferMs else adaptiveMs
         val buffered = bufferedMs()
         // grow the adaptive buffer when packets go missing, shrink it slowly when all is well
@@ -270,4 +305,45 @@ class AudioEngine(private val onPcm: (pcm: ShortArray, fileTimeUs: Long, recordi
     }
 
     private fun toDb(peak: Int): Float = if (peak <= 0) -90f else (20 * log10(peak / 32768.0)).toFloat()
+
+}
+
+/**
+ * A short two-note chime through the output the mix would use now, to check it from Settings
+ * without OBS. Uses the same kind of track and the same routing as listening.
+ */
+object TestSound {
+    fun play(router: OutputRouter?) {
+        Thread({
+            runCatching {
+                val route = router?.current()
+                route?.let { router.applyCallRoute(it) }
+                val rate = 48000
+                val n = rate * 7 / 10
+                val pcm = ShortArray(n * 2)
+                for (i in 0 until n) {
+                    val f = if (i < n / 2) 660.0 else 880.0
+                    val env = minOf(1.0, i / 480.0, (n - i) / 4800.0)
+                    val v = (kotlin.math.sin(2 * Math.PI * f * i / rate) * 0.35 * env * 32767).toInt().toShort()
+                    pcm[2 * i] = v; pcm[2 * i + 1] = v
+                }
+                val t = AudioTrack.Builder()
+                    .setAudioAttributes(AudioAttributes.Builder()
+                        .setUsage(if (route?.callChannel == true) AudioAttributes.USAGE_VOICE_COMMUNICATION else AudioAttributes.USAGE_MEDIA)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build())
+                    .setAudioFormat(AudioFormat.Builder().setSampleRate(rate).setChannelMask(AudioFormat.CHANNEL_OUT_STEREO)
+                        .setEncoding(AudioFormat.ENCODING_PCM_16BIT).build())
+                    .setBufferSizeInBytes(pcm.size * 2)
+                    .setTransferMode(AudioTrack.MODE_STATIC)
+                    .build()
+                route?.device?.let { t.setPreferredDevice(it) }
+                t.write(pcm, 0, pcm.size)
+                t.play()
+                router?.reportRouted(t.routedDevice)
+                Thread.sleep(900)
+                t.release()
+                if (route?.callChannel == true && router != null) router.releaseCallRoute()
+            }
+        }, "obs-director-test-sound").start()
+    }
 }

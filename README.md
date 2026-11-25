@@ -4,22 +4,23 @@ Monitor and direct an OBS session from your phone, or from a browser on any comp
 
 OBS Director has three parts:
 
-- **The OBS plugin** (this repository's root): runs inside OBS on the Windows streaming PC. It sends the recording and stream status, the program mix and a small live picture to your phone over the local network, takes start/stop/pause commands, writes your clips into the recording as chapter markers, and adds a dock where volunteers see your messages.
+- **The OBS plugin** (this repository's root): runs inside OBS on the Windows streaming PC. It sends the recording and stream status, the program mix and a small live picture to your phone over the local network, takes start/stop/pause commands, writes your clips into the recording as chapter markers, and adds a dock in OBS: a group chat between the desk and every phone and browser.
 - **The Android app** ([`android/`](android)): listen to the mix, watch record and stream health, start and stop the recording, and mark clips with notes for cutting short videos later.
 - **The browser version** ([`src/web/`](src/web)): the same app in Chrome, Edge or Firefox, served by the plugin itself. Open the address OBS shows under **Tools, OBS Director**, on a laptop, the OBS PC or any computer on the same network. Nothing to install.
 
 ## What the app does
 
 - **Monitor**: the recording's file name and timecode, the Clip button, the mix with meters that read like OBS's own (−60 to 0 dB, green, yellow from −20, red from −9, with a peak hold), listening with about 40 ms of delay, and the live picture when you switch it on (off by default, never in the background). A line under the meter says how the phone's Wi-Fi is holding up.
-- **Listening**: plays through whatever your phone is using: Bluetooth, a wired headset, a USB sound card, the headphone jack or the speaker. Switch on the phone and the mix follows. Volume goes up to 300% for quiet rooms, with a soft limiter so it doesn't crackle.
+- **Listening**: plays through whatever your phone is using (Bluetooth, a wired headset, a USB sound card, the headphone jack or the speaker), or pick one in **Settings, Listening, Play through**. **Play a test sound** checks it without OBS. Volume goes up to 300% for quiet rooms, with a soft limiter so it doesn't crackle.
 - **Clips**: one button, which shows the clip's length while it runs. A clip starts a minute before your tap (so the build-up is in) and ends a couple of seconds after the second tap. Add a typed or spoken note.
-- **Recordings**: one row per recording, with its clips. Each clip has a **+** for its actions: play, adjust the edges on a waveform, edit the note, share its audio as .m4a, or delete it (with undo).
+- **Recordings**: one row per recording, with its clips. Each clip has a **+** for its actions: play, adjust the edges on a waveform, edit the note, share its audio as .m4a, or delete it (with undo). Delete a whole recording from its page, or all of them from the end of the list or Settings; the files on the PC aren't touched.
 - **Export**: from inside a recording, as a DaVinci Resolve marker EDL, CSV or a plain list, to share or save on the phone. The plugin also saves the EDL and CSV next to the recording on the PC, so the editor finds them there (you can turn this off in Settings).
 - **Stream**: tap the Stream chip on Monitor for the stream, the PC (processor, frame rate, lag, disk) and the network, each on its own tab.
-- **Stage mode**: the moon icon in the top bar. A black, dim screen with the time, the meter and a big Clip button, for a phone propped up during a service or a show.
-- **Outside the app**: a floating bubble with the time; tap it for the Clip button. Long-press the app icon for **Start clip**, **Stage mode** and **Close OBS Director**. Press Back three times to close the app too.
-- **Alerts**: silent mix, recording stopped by someone else, disk nearly full, dropped frames, connection lost, and the phone's own battery running low. The phone buzzes even when locked, and most alerts can be sent to the desk with one tap.
-- **Desk**: typed messages to the volunteers' dock in OBS; they answer with one tap.
+- **Stage mode**: the masks icon in the top bar. A black, dim screen with the time, the meter and a big Clip button, for a phone propped up during a service or a show.
+- **Outside the app**: a floating bubble while connected; tap it to open the app, drag it anywhere, or drop it on the ✕ to put it away. Long-press the app icon for **Start clip**, **Stage mode** and **Close OBS Director**. Press Back three times to close the app too.
+- **Alerts**: silent mix, clipping, recording stopped by someone else, disk nearly full, dropped frames, connection lost, and the phone's own battery running low. Each one notifies (the phone buzzes even when locked) and shows up as a card in the Desk chat, most with a **Tell the desk** button.
+- **Desk**: a group chat with the volunteers at the OBS dock and everyone else connected, laid out like WhatsApp: names, times, and ticks that turn blue when the desk has read your message. Enter starts a new line; Ctrl+Enter or the send button sends.
+- **Touch sound and vibration**: every tap clicks softly and ticks. Set the **Touch sound** volume and **Vibration** strength in **Settings, Controls**.
 - **Drops**: if Wi-Fi drops, a running clip is saved at the drop, listening pauses, and the app reconnects by itself. OBS keeps recording on the PC throughout.
 - **Updates**: each time the app opens it checks this repository's releases. When a newer version is out it asks once, with **Update** and **Ignore**; Update downloads it and hands it to Android's installer, keeping your clips and settings. To check yourself at any time, open **Settings**, scroll to **About**, and press **Check for updates**.
 
@@ -124,6 +125,10 @@ cmake --preset windows-x64 && cmake --build --preset windows-x64
 To build the installer as well, install [Inno Setup 6](https://jrsoftware.org/isinfo.php), then run `.github/scripts/Build-Windows.ps1` and `.github/scripts/Package-Windows.ps1` with the `CI` environment variable set. The installer lands in `release/`.
 
 CI builds both on every push and pull request. Maintainers: releasing and signing are described in [docs/RELEASING.md](docs/RELEASING.md).
+
+## Design
+
+The colours, type, sizes, touch sound and vibration patterns are in [docs/DESIGN.md](docs/DESIGN.md).
 
 ## Protocol
 

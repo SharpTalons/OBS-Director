@@ -5,6 +5,43 @@ All notable changes to OBS Director (plugin and Android app). The project follow
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-26
+
+The desk is now a group chat, everywhere.
+
+### Desk chat
+- **Group chat:** the OBS dock, every phone and every browser see every message.
+- **Layout:** like WhatsApp. Others on the left with their names in colour, your own messages on the right in green, and day separators.
+- **Ticks:** a clock while sending, grey ticks once OBS has the message, blue once the desk has seen it. A message that didn't go shows in red; tap to try again.
+- **Typing:** Enter starts a new line, and Ctrl+Enter or the send button sends. Messages go up to 1000 characters.
+- **Android app:** a Desk tab of its own, with an unread count, and notifications that open the chat. The tabs step aside while the keyboard is up. The desk card is gone from Monitor.
+- **Browser version:** a Desk tab of its own, with an unread count.
+- **OBS dock:** rebuilt as the same chat, with "Got it", "On it" and "Fixed" quick replies. Connections and recording events show as small notes. A phone or browser that connects later gets the conversation so far.
+
+### Alerts live in the chat
+- Alerts no longer sit as banners on top of the screens. Each one sends a notification, vibrates, and shows up in the Desk chat as a centred card (red for a severe one) with its action, **Start recording** or **Tell the desk**.
+- Tapping an alert notification opens the chat. Connection lost and reconnected show there too. The phone's low-battery warning is now an alert like the others.
+
+### Touch sound and vibration
+- **Touch sound:** a tap sound on every button, tile, row, switch and tab, with its volume under Settings, Controls (Off, 25, 50, 75 or 100%). It's one clean tap cut from the supplied recording, which has ten. The app stays quiet while the phone is on silent or vibrate. The browser version plays it too, from the plugin.
+- **Vibration:** a new strength setting (Off, Light, Medium or Strong) under Controls, for taps, clips, alerts and messages. Picking one buzzes so you can feel it. The browser version vibrates on phones whose browser can.
+- **Design constants:** both are now design tokens (`FeedbackTokens` in the app's theme), and are written up with the colours, type and sizes in [docs/DESIGN.md](docs/DESIGN.md).
+
+### Android app
+- **Stage mode:** comedy and tragedy masks replace the moon, which looked like a dark-mode switch. This applies to the top bar, the long-press shortcut and the browser version.
+
+
+### Android app
+- **Sound on every output:** the mix now plays on Bluetooth, USB sound cards and headsets that stayed silent before. Android only starts an ordinary audio track once its buffer has been filled, and the app's 200 ms buffer was never filled; it now uses a small buffer, starts at 20 ms, and remakes a track that doesn't start.
+- **Play through:** a new setting to pick the output (Automatic, or any connected speaker, Bluetooth, headphones, USB, HDMI or line out). When the chosen one isn't connected, the mix plays automatically until it is. **Playing now** shows where it actually goes, and **Play a test sound** checks the output without OBS.
+- **Delete recordings:** delete one recording from its page, or all of them from the end of the Recordings list or from Settings. Their clips, notes and saved audio go too; the files on the PC aren't touched.
+- **Floating bubble:** works like other floating bubbles. Tap it to open the app, drag it anywhere and it settles against the side, or drop it on the ✕ to put it away.
+- **Nothing jumps:** one fixed line under the Clip button replaces "Cancel this clip", the saved message and "see all". The note opens in a sheet over the screen. Pause and Hold to stop are the same size. The three status chips, the volume caption and the Wi-Fi line are always there. The undo bar floats over the list.
+
+### Browser version
+- Delete one recording, or all of them, from the Recordings pages.
+- The same fixed line under the Clip button (the note fits in it), an always-visible volume caption, and a floating undo bar.
+
 ## [0.6.1] - 2026-11-25
 
 Fixes from the design audit of the browser version.
@@ -165,7 +202,7 @@ First release of the plugin and the Android app.
 - The browser version (WebRTC and WebSocket modes) is not built yet; the app uses Direct UDP.
 - Audio missing from the phone's copy during a Wi-Fi drop is not yet refilled from the PC.
 
-[Unreleased]: https://github.com/SharpTalons/OBS-Director/compare/v0.6.1...HEAD
+[Unreleased]: https://github.com/SharpTalons/OBS-Director/compare/v0.6.2...HEAD
 [0.6.1]: https://github.com/SharpTalons/OBS-Director/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/SharpTalons/OBS-Director/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/SharpTalons/OBS-Director/compare/v0.5.0...v0.5.1

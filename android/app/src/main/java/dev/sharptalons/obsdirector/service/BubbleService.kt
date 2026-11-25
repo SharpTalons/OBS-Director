@@ -1,27 +1,29 @@
 package dev.sharptalons.obsdirector.service
 
+import android.animation.ValueAnimator
 import android.annotation.SuppressLint
 import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.graphics.PixelFormat
-import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.os.Build
 import android.os.IBinder
 import android.provider.Settings
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewConfiguration
 import android.view.WindowManager
-import android.widget.LinearLayout
+import android.view.animation.DecelerateInterpolator
+import android.widget.FrameLayout
 import android.widget.TextView
+import androidx.compose.ui.graphics.toArgb
 import dev.sharptalons.obsdirector.MainActivity
 import dev.sharptalons.obsdirector.core.Director
 import dev.sharptalons.obsdirector.core.LinkState
 import dev.sharptalons.obsdirector.core.Prefs
-import dev.sharptalons.obsdirector.ui.Stage
 import dev.sharptalons.obsdirector.ui.T
-import androidx.compose.ui.graphics.toArgb
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -30,11 +32,13 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlin.math.abs
+import kotlin.math.hypot
 
 /**
- * The floating bubble shown over other apps while connected: the recording time, and a tap opens
- * a small panel with the Clip button (it shows the clip's length while one runs), Open app and
- * Hide bubble. Drag it anywhere. Plain views, so it costs next to nothing while it floats.
+ * A floating bubble over other apps while connected, the way chat bubbles work: tap it to open
+ * OBS Director; drag it anywhere and it settles against the nearest side; drag it onto the ✕
+ * that appears at the bottom to put it away (it comes back the next time you leave the app).
+ * The red dot says OBS is recording; a red ring says a clip is running.
  */
 class BubbleService : Service() {
 
@@ -57,82 +61,57 @@ class BubbleService : Service() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private lateinit var wm: WindowManager
-    private lateinit var root: LinearLayout
+    private lateinit var bubble: FrameLayout
+    private lateinit var dot: View
     private lateinit var params: WindowManager.LayoutParams
-    private lateinit var bubbleTime: TextView
-    private lateinit var panel: LinearLayout
-    private lateinit var panelTime: TextView
-    private lateinit var clipButton: TextView
-    private var expanded = false
+    private lateinit var target: TextView
+    private lateinit var targetParams: WindowManager.LayoutParams
+    private var targetShown = false
+    private var snap: ValueAnimator? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
+    private val size get() = dp(56)
 
-    private fun rounded(color: Int, radius: Int, stroke: Int? = null) = GradientDrawable().apply {
-        setColor(color); cornerRadius = dp(radius).toFloat()
-        if (stroke != null) setStroke(dp(2), stroke)
+    private fun oval(fill: Int, stroke: Int, strokeDp: Int) = GradientDrawable().apply {
+        shape = GradientDrawable.OVAL
+        setColor(fill)
+        if (strokeDp > 0) setStroke(dp(strokeDp), stroke)
     }
 
-    private fun label(size: Float, color: Int, bold: Boolean = false) = TextView(this).apply {
-        textSize = size; setTextColor(color); gravity = Gravity.CENTER
-        typeface = Typeface.create("sans-serif", if (bold) Typeface.BOLD else Typeface.NORMAL)
-        fontFeatureSettings = "tnum"
-    }
+    private fun overlayParams(w: Int, h: Int, gravity: Int) = WindowManager.LayoutParams(
+        w, h, WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+        PixelFormat.TRANSLUCENT,
+    ).apply { this.gravity = gravity }
 
     override fun onCreate() {
         super.onCreate()
         shown = true
         wm = getSystemService(WindowManager::class.java)
 
-        bubbleTime = label(13f, T.text.toArgb(), bold = true).apply {
-            background = rounded(T.surface.toArgb(), 28, T.negative.toArgb())
-            minWidth = dp(56); minHeight = dp(56); setPadding(dp(10), 0, dp(10), 0)
-            contentDescription = "OBS Director. Tap for the Clip button"
+        dot = View(this).apply { background = oval(T.negative.toArgb(), 0, 0) }
+        bubble = FrameLayout(this).apply {
+            background = oval(T.surface.toArgb(), T.text.toArgb(), 2)
+            elevation = dp(6).toFloat()
+            contentDescription = "OBS Director. Tap to open the app; drag to move."
+            addView(dot, FrameLayout.LayoutParams(dp(18), dp(18), Gravity.CENTER))
         }
+        params = overlayParams(size, size, Gravity.TOP or Gravity.START).apply { x = screenWidth() - size - dp(8); y = dp(180) }
 
-        panelTime = label(28f, T.text.toArgb())
-        clipButton = label(18f, T.text.toArgb(), bold = true).apply {
-            minHeight = dp(72)
-            setOnClickListener { if (Director.clipStart.value == null) Director.startClip() else Director.endClip(); refresh() }
+        target = TextView(this).apply {
+            text = "✕"
+            textSize = 22f
+            gravity = Gravity.CENTER
+            setTextColor(T.text.toArgb())
+            background = oval(0xCC1C1C20.toInt(), T.text.toArgb(), 2)
+            contentDescription = "Drop here to hide the bubble"
         }
-        val open = label(15f, T.accent.toArgb()).apply {
-            text = "Open app"; minHeight = dp(48)
-            setOnClickListener {
-                startActivity(Intent(this@BubbleService, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP))
-            }
-        }
-        val hideIt = label(15f, T.text2.toArgb()).apply {
-            text = "Hide bubble"; minHeight = dp(48)
-            setOnClickListener { stopSelf() }
-        }
-        val links = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            addView(open, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-            addView(hideIt, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-        }
-        panel = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            background = rounded(T.surface.toArgb(), 22)
-            setPadding(dp(14), dp(12), dp(14), dp(6))
-            addView(panelTime)
-            addView(clipButton, LinearLayout.LayoutParams(dp(220), LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(8) })
-            addView(links, LinearLayout.LayoutParams(dp(220), LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(4) })
-            visibility = View.GONE
-        }
-        root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            addView(bubbleTime, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT))
-            addView(panel, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(8) })
-        }
-        params = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT,
-            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
-            PixelFormat.TRANSLUCENT,
-        ).apply { gravity = Gravity.TOP or Gravity.START; x = dp(12); y = dp(160) }
-        dragAndTap(bubbleTime)
-        if (runCatching { wm.addView(root, params) }.isFailure) { stopSelf(); return }
+        targetParams = overlayParams(dp(64), dp(64), Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply { y = dp(56) }
+
+        dragAndTap()
+        if (runCatching { wm.addView(bubble, params) }.isFailure) { stopSelf(); return }
 
         scope.launch {
             while (isActive) {
@@ -145,48 +124,105 @@ class BubbleService : Service() {
 
     private fun refresh() {
         val s = Director.status.value
-        val time = if (s.recActive) Director.tc(Director.nowFileTimeMs()) else "Not recording"
-        bubbleTime.text = if (s.recActive) time.removePrefix("00:") else "OBS"
-        panelTime.text = time
-        val start = Director.clipStart.value
-        if (start != null) {
-            val len = (Director.nowFileTimeMs() - start).coerceAtLeast(0) / 1000
-            clipButton.text = "End clip · ${len / 60}:${"%02d".format(len % 60)}"
-            clipButton.background = rounded(Stage.rec.toArgb(), 18)
-        } else {
-            clipButton.text = "Clip"
-            clipButton.background = rounded(if (s.recActive) T.blue.toArgb() else T.raised.toArgb(), 18)
+        val clip = Director.clipStart.value != null
+        dot.background = oval(if (s.recActive && !s.recPaused) T.negative.toArgb() else T.muted.toArgb(), 0, 0)
+        bubble.background = oval(T.surface.toArgb(), if (clip) T.negative.toArgb() else T.text.toArgb(), if (clip) 3 else 2)
+        bubble.contentDescription = "OBS Director, " + when {
+            !s.recActive -> "not recording"
+            s.recPaused -> "recording paused"
+            clip -> "recording, clip running"
+            else -> "recording"
+        } + ". Tap to open the app."
+    }
+
+    private fun screenWidth(): Int = if (Build.VERSION.SDK_INT >= 30) wm.currentWindowMetrics.bounds.width() else resources.displayMetrics.widthPixels
+    private fun screenHeight(): Int = if (Build.VERSION.SDK_INT >= 30) wm.currentWindowMetrics.bounds.height() else resources.displayMetrics.heightPixels
+
+    private fun openApp() {
+        startActivity(Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP))
+    }
+
+    /** Is the bubble's centre over the ✕ target? */
+    private fun overTarget(): Boolean {
+        val bx = params.x + size / 2f
+        val by = params.y + size / 2f
+        val tx = screenWidth() / 2f
+        val ty = screenHeight() - targetParams.y - dp(32)
+        return hypot(bx - tx, by - ty) < dp(80)
+    }
+
+    private fun showTarget(on: Boolean) {
+        if (on == targetShown) return
+        targetShown = on
+        runCatching { if (on) wm.addView(target, targetParams) else wm.removeView(target) }
+    }
+
+    /** Settle against the nearer side, keeping it on screen. */
+    private fun snapToEdge() {
+        val w = screenWidth()
+        val endX = if (params.x + size / 2 < w / 2) dp(8) else w - size - dp(8)
+        val endY = params.y.coerceIn(dp(48), screenHeight() - size - dp(96))
+        val startX = params.x
+        val startY = params.y
+        snap?.cancel()
+        snap = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = 220
+            interpolator = DecelerateInterpolator()
+            addUpdateListener {
+                val f = it.animatedValue as Float
+                params.x = (startX + (endX - startX) * f).toInt()
+                params.y = (startY + (endY - startY) * f).toInt()
+                runCatching { wm.updateViewLayout(bubble, params) }
+            }
+            start()
         }
-        clipButton.isEnabled = s.recActive && Director.link.value == LinkState.CONNECTED
-        clipButton.alpha = if (clipButton.isEnabled) 1f else 0.6f
     }
 
     @SuppressLint("ClickableViewAccessibility")
-    private fun dragAndTap(v: View) {
-        var downX = 0f; var downY = 0f; var startX = 0; var startY = 0; var moved = false
-        v.setOnTouchListener { _, e ->
-            when (e.action) {
-                MotionEvent.ACTION_DOWN -> { downX = e.rawX; downY = e.rawY; startX = params.x; startY = params.y; moved = false; true }
-                MotionEvent.ACTION_MOVE -> {
-                    val dx = e.rawX - downX; val dy = e.rawY - downY
-                    if (abs(dx) > dp(6) || abs(dy) > dp(6)) moved = true
-                    if (moved) { params.x = startX + dx.toInt(); params.y = startY + dy.toInt(); runCatching { wm.updateViewLayout(root, params) } }
+    private fun dragAndTap() {
+        val slop = ViewConfiguration.get(this).scaledTouchSlop
+        var downX = 0f; var downY = 0f; var startX = 0; var startY = 0; var dragging = false
+        bubble.setOnTouchListener { v, e ->
+            when (e.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    snap?.cancel()
+                    downX = e.rawX; downY = e.rawY; startX = params.x; startY = params.y; dragging = false
                     true
                 }
-                MotionEvent.ACTION_UP -> {
-                    if (!moved) { expanded = !expanded; panel.visibility = if (expanded) View.VISIBLE else View.GONE; v.performClick() }
+                MotionEvent.ACTION_MOVE -> {
+                    val dx = e.rawX - downX; val dy = e.rawY - downY
+                    if (!dragging && (abs(dx) > slop || abs(dy) > slop)) { dragging = true; showTarget(true) }
+                    if (dragging) {
+                        params.x = startX + dx.toInt(); params.y = startY + dy.toInt()
+                        runCatching { wm.updateViewLayout(bubble, params) }
+                        val over = overTarget()
+                        target.scaleX = if (over) 1.25f else 1f; target.scaleY = target.scaleX
+                    }
+                    true
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    if (dragging) {
+                        val drop = overTarget() && e.actionMasked == MotionEvent.ACTION_UP
+                        showTarget(false)
+                        if (drop) stopSelf() else snapToEdge()
+                    } else if (e.actionMasked == MotionEvent.ACTION_UP) {
+                        v.performClick()
+                        openApp()
+                    }
                     true
                 }
                 else -> false
             }
         }
-        v.setOnClickListener { }
+        bubble.setOnClickListener { }
     }
 
     override fun onDestroy() {
         shown = false
         scope.cancel()
-        runCatching { wm.removeView(root) }
+        snap?.cancel()
+        showTarget(false)
+        runCatching { wm.removeView(bubble) }
         super.onDestroy()
     }
 }

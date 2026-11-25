@@ -6,5 +6,6 @@
     <file>app.js</file>
     <file>app.css</file>
     <file>icon.svg</file>
+    <file>tap.wav</file>
   </qresource>
 </RCC>

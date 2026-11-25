@@ -1,7 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- launcher shortcut: stage -->
+<!-- launcher shortcut: stage mode (comedy and tragedy masks, like the in-app icon) -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="48dp" android:height="48dp" android:viewportWidth="48" android:viewportHeight="48">
     <path android:fillColor="#33291A" android:pathData="M24,0a24,24 0,1 1,0 48a24,24 0,1 1,0 -48z" />
-    <path android:fillColor="#FFFFFF" android:pathData="M26,13a11,11 0,1 0,9 17a9,9 0,0 1,-9 -17z" />
+    <path android:fillColor="#F2C46B" android:pathData="M10,11h13v8a6.5,6.5 0,0 1,-13 0z" />
+    <path android:fillColor="#F2C46B" android:pathData="M25,20h13v8a6.5,6.5 0,0 1,-13 0z" />
+    <path android:fillColor="#33291A" android:pathData="M13,14h2.5v2h-2.5zM17.5,14h2.5v2h-2.5zM13.5,19.5h6c-0.8,2 -5.2,2 -6,0zM28,23h2.5v2h-2.5zM32.5,23h2.5v2h-2.5zM28.5,30.5c0.8,-2 5.2,-2 6,0z" />
 </vector>

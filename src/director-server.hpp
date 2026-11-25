@@ -183,4 +183,17 @@ private:
 	 * write next to one of these. */
 	QHash<QString, QString> recordedFiles;
 	void rememberRecording(const QString &path);
+
+	/* the desk chat: everyone connected sees every message (kept for this OBS session) */
+	struct ChatMessage {
+		QString id;
+		QString from;
+		QString fromDevice; /* the sender's deviceId, never sent out; empty for the desk */
+		QString text;
+		qint64 at = 0;
+		bool seen = false; /* seen at the desk */
+	};
+	QList<ChatMessage> chat;
+	QJsonObject chatJson(const ChatMessage &m, const Client &to) const;
+	void postChat(const ChatMessage &m);
 };

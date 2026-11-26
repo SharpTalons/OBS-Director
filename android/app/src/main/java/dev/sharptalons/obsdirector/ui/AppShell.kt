@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.ui.semantics.Role
@@ -141,7 +142,9 @@ fun AppShell() {
         NavItem("Settings", Icons.Outlined.Settings, tab == "config", null, m, rail = wide) { screen = "config" }
     }
 
-    Column(Modifier.fillMaxSize().background(T.ground).windowInsetsPadding(WindowInsets.statusBars)) {
+    // The app draws edge to edge, so Android doesn't shrink it for the keyboard; this lifts the
+    // screen above the keyboard instead, so the chat box stays in sight while typing.
+    Column(Modifier.fillMaxSize().background(T.ground).windowInsetsPadding(WindowInsets.statusBars).imePadding()) {
         HeadBar(link, pc, latency, awaiting, onStage = { screen = "stage" }, onConnect = { connectOpen = true })
         // Alerts don't sit on top of the screens: they notify, and show up in the Desk chat.
         val top: (@Composable () -> Unit)? = null

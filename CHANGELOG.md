@@ -23,6 +23,7 @@ Fixes from a design audit and review of the Android app.
 - PCs in the connect pop-up are announced as buttons.
 
 ### Android
+- **Desk chat and the keyboard:** the message box now moves up above the keyboard, so you can see what you type. Before, the keyboard covered it.
 - **Back:** the usual Android way, with the back-to-home preview. From Desk, Recordings or Settings, Back goes to Monitor; from Monitor, it leaves the app while listening and recording carry on, with the bubble and notification to come back. The triple-Back exit is gone; **Close OBS Director** on the app icon's long-press still closes it.
 - **Tablets, unfolded phones and landscape:** the tabs move to a rail down the side.
 - **Not connected:** the screen matches the rest of the app.

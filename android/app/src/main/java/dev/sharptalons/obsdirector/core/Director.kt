@@ -100,7 +100,10 @@ object Director {
     val deskUnreadCount: StateFlow<Int> get() = deskUnread
     @Volatile private var deskOpen = false
     /** The Desk tab is on screen: new messages count as read. */
-    fun setDeskOpen(open: Boolean) { deskOpen = open; if (open) deskUnread.value = 0 }
+    private val deskAlert = MutableStateFlow(0)
+    /** The most urgent unread line: 0 messages only, 1 an alert, 2 a severe alert. */
+    val deskUnreadAlert: StateFlow<Int> get() = deskAlert
+    fun setDeskOpen(open: Boolean) { deskOpen = open; if (open) { deskUnread.value = 0; deskAlert.value = 0 } }
     private val toastState = MutableStateFlow<String?>(null)
     val toast: StateFlow<String?> get() = toastState
 
@@ -636,7 +639,11 @@ object Director {
     /** A line in this phone's chat that isn't a message: an alert card, or a connection note. */
     fun chatNote(m: DeskMessage) {
         deskState.value = (deskState.value + m).takeLast(500)
-        if (!deskOpen) deskUnread.value = deskUnread.value + 1
+        // a connection note is shown, but doesn't count as unread
+        if (!deskOpen && m.kind != "note") {
+            deskUnread.value = deskUnread.value + 1
+            if (m.kind == "alert") deskAlert.value = maxOf(deskAlert.value, if (m.severe) 2 else 1)
+        }
     }
 
     private fun clearAlert(id: String) {

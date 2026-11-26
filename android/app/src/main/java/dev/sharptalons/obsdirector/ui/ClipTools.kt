@@ -185,8 +185,8 @@ internal fun AdjustPanel(r: Recording, c: Clip, onClose: () -> Unit) {
 
         Spacer(Modifier.height(8.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlineButton("Revert", Icons.AutoMirrored.Outlined.Undo, Modifier.weight(1f), height = 44.dp) { start = c.startMs; end = c.endMs; error = null }
-            PrimaryButton("Save", Icons.Outlined.Check, Modifier.weight(1f), height = 44.dp) {
+            OutlineButton("Revert", Icons.AutoMirrored.Outlined.Undo, Modifier.weight(1f), height = 48.dp) { start = c.startMs; end = c.endMs; error = null }
+            PrimaryButton("Save", Icons.Outlined.Check, Modifier.weight(1f), height = 48.dp) {
                 ClipPlayer.stop()
                 ClipStore.updateClip(r.file, c.copy(startMs = start, endMs = end))
                 Director.toast("Clip saved. The export uses the new times.")

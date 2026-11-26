@@ -47,6 +47,8 @@ object T {
     val warning = Color(0xFFF2C46B)
     val idle = Color(0xFF3A3A40)
     val onRec = Color(0xFF1A0B0E)
+    /** Dark text on a green, amber or red badge. */
+    val onBadge = Color(0xFF0B1A12)
     val video = Color(0xFF0B0B0D)
     val meter = Color(0xFFD8D8DC)
     val pillNegBg = Color(0xFF3A1B22)

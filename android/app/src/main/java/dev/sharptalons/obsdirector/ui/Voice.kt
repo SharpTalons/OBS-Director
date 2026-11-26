@@ -80,7 +80,7 @@ fun VoiceButton(onText: (String) -> Unit, onStatus: (String) -> Unit) {
 
     Box(
         Modifier
-            .size(44.dp)
+            .size(48.dp)
             .clip(CircleShape)
             .background(if (active) T.negative else Color.Transparent)
             .border(1.dp, if (active) T.negative else T.control, CircleShape)

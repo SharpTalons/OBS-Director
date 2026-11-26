@@ -3,6 +3,7 @@ package dev.sharptalons.obsdirector.ui
 import androidx.compose.ui.semantics.paneTitle
 
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.widthIn
 
 import androidx.compose.ui.semantics.liveRegion
 
@@ -37,6 +38,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.outlined.Send
 import androidx.compose.material.icons.outlined.BatteryAlert
 import androidx.compose.material.icons.outlined.Close
@@ -182,6 +184,14 @@ fun MonitorScreen(onOpenRecording: (String) -> Unit, onOpenStream: () -> Unit) {
             TintChip(if (h == null) "Disk –" else "Disk ${if (h >= 10) "%.0f".format(h) else "%.1f".format(h)} h",
                 if (h != null && h < settings.diskHours) Tints.amber else Tints.purple, modifier = Modifier.weight(1f))
         }
+        // the stream chip opens it too, but this says so
+        Row(
+            Modifier.fillMaxWidth().height(48.dp).clip(RoundedCornerShape(12.dp)).clickable(role = Role.Button, onClick = onOpenStream).padding(horizontal = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("Stream and PC details", style = Type.body.copy(color = T.accent, fontWeight = FontWeight.Medium), modifier = Modifier.weight(1f))
+            Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, null, tint = T.accent)
+        }
 
         LivePicture(lost)
     }
@@ -222,7 +232,7 @@ private fun ListenSection(lost: Boolean) {
             TintTile(Icons.Outlined.Headphones, Tints.teal, size = 36.dp, iconSize = 20.dp)
             Column(Modifier.weight(1f)) {
                 Text("Listen", style = Type.body.copy(fontSize = 17.sp, fontWeight = FontWeight.Medium), modifier = Modifier.semantics { heading() })
-                Text(if (active) "Playing through $output" else if (lost) "Paused until the connection is back" else "Off", style = Type.small.copy(fontSize = 13.sp),
+                Text(if (active) output else if (lost) "Paused until the connection is back" else "Off", style = Type.small.copy(fontSize = 13.sp),
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             DSwitch(listening, { Director.setListening(it) }, modifier = Modifier.semantics { contentDescription = "Listen" })
@@ -233,7 +243,7 @@ private fun ListenSection(lost: Boolean) {
         }
         ObsMeter(levels, active)
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("Volume", style = Type.body.copy(color = T.muted), modifier = Modifier.width(56.dp))
+            Text("Volume", style = Type.body.copy(color = T.muted), maxLines = 1, softWrap = false, modifier = Modifier.widthIn(min = 56.dp))
             Slider(
                 vol, { vol = it; Director.setVolume(it, save = false) }, Modifier.weight(1f).semantics { stateDescription = "${(vol * 100).toInt()} percent" },
                 valueRange = 0f..3f, onValueChangeFinished = { Director.setVolume(vol) },
@@ -252,7 +262,7 @@ private fun ListenSection(lost: Boolean) {
                 drops <= 3 -> "Wi-Fi weak · $drops dropout${if (drops == 1) "" else "s"} in the last minute" to Tints.amber
                 else -> "Wi-Fi poor · audio keeps breaking up. Move closer to the router." to Tints.rec
             }
-            Row(Modifier.fillMaxWidth().heightIn(min = 44.dp).clip(RoundedCornerShape(12.dp)).background(tint.bg).padding(horizontal = 12.dp, vertical = 8.dp),
+            Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).clip(RoundedCornerShape(12.dp)).background(tint.bg).padding(horizontal = 12.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Icon(Icons.Outlined.Wifi, null, tint = tint.ink, modifier = Modifier.size(18.dp))
                 Text(text, style = Type.body.copy(fontSize = 13.sp, color = tint.ink), maxLines = 1, overflow = TextOverflow.Ellipsis)

@@ -32,6 +32,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.ExpandLess
+import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.outlined.Undo
@@ -108,7 +110,10 @@ private fun clipsText(n: Int) = when (n) { 0 -> "No clips"; 1 -> "1 clip"; else 
 fun RecordingsScreen(modifier: Modifier, top: (@Composable () -> Unit)?, onOpen: (String) -> Unit) {
     val recordings by ClipStore.recordings.collectAsState()
     val live = recordings.filter { it.live }
-    val past = recordings.filterNot { it.live }
+    // recordings with no clips go at the end, folded away, so the useful ones come first
+    val past = recordings.filter { !it.live && it.clips.isNotEmpty() }
+    val empty = recordings.filter { !it.live && it.clips.isEmpty() }
+    var showEmpty by rememberSaveable { mutableStateOf(false) }
     var confirm by rememberSaveable { mutableStateOf(false) }
     LazyColumn(modifier, contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         top?.let { t -> item { t() } }
@@ -120,6 +125,19 @@ fun RecordingsScreen(modifier: Modifier, top: (@Composable () -> Unit)?, onOpen:
         items(live, key = { "live:" + it.file }) { r -> RecordingRow(r, null, onOpen) }
         if (past.isNotEmpty()) item { GroupLabel("Earlier", T.muted) }
         itemsIndexed(past, key = { _, r -> r.file }) { i, r -> RecordingRow(r, tileTints[i % tileTints.size], onOpen) }
+        if (empty.isNotEmpty()) item(key = "empty-toggle") {
+            Row(
+                Modifier.fillMaxWidth().height(48.dp).clip(RoundedCornerShape(12.dp))
+                    .clickable(role = Role.Button) { showEmpty = !showEmpty }
+                    .semantics { stateDescription = if (showEmpty) "Expanded" else "Collapsed" }.padding(horizontal = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(if (empty.size == 1) "1 recording without clips" else "${empty.size} recordings without clips",
+                    style = Type.body.copy(color = T.text2), modifier = Modifier.weight(1f))
+                Icon(if (showEmpty) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore, null, tint = T.muted)
+            }
+        }
+        if (showEmpty) itemsIndexed(empty, key = { _, r -> r.file }) { _, r -> RecordingRow(r, Tints.neutral, onOpen) }
         if (recordings.isNotEmpty()) item { DangerLink("Delete all recordings and clips") { confirm = true } }
         item { Spacer(Modifier.height(16.dp)) }
     }
@@ -230,7 +248,7 @@ fun RecordingScreen(file: String, modifier: Modifier, top: (@Composable () -> Un
                             style = Type.body.copy(fontSize = 13.sp, color = if (playing) Tints.ok.ink else if (c.note.isBlank()) T.muted else T.text2), maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                     Box(
-                        Modifier.size(44.dp).clip(CircleShape).background(if (isOpen) T.blue else T.raised)
+                        Modifier.size(48.dp).clip(CircleShape).background(if (isOpen) T.blue else T.raised)
                             .clickable(role = Role.Button) { open = if (isOpen) null else c.id; mode = "actions" }
                             .semantics { contentDescription = (if (isOpen) "Close actions for clip " else "Actions for clip ") + (i + 1); stateDescription = if (isOpen) "Expanded" else "Collapsed" },
                         contentAlignment = Alignment.Center,
@@ -250,7 +268,7 @@ fun RecordingScreen(file: String, modifier: Modifier, top: (@Composable () -> Un
                                 ActionTile("Share", Icons.Outlined.Share, Tints.purple, Modifier.weight(1f)) { scope.launch { shareClipAudio(context, r, c) } }
                             }
                             Text("Delete clip", style = Type.body.copy(color = Tints.rec.ink, fontWeight = FontWeight.Medium),
-                                modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp).clip(RoundedCornerShape(12.dp))
+                                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).clip(RoundedCornerShape(12.dp))
                                     .clickable(role = Role.Button) { ClipPlayer.stop(); ClipStore.removeClip(r.file, c.id); removed = c; open = null }
                                     .padding(vertical = 12.dp),
                                 textAlign = androidx.compose.ui.text.style.TextAlign.Center)

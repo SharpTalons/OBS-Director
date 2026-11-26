@@ -5,6 +5,30 @@ All notable changes to OBS Director (plugin and Android app). The project follow
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-11-26
+
+Fixes from a design audit and review of the Android app.
+
+### Easier to find
+- **Stream and PC details:** a link under the status chips on Monitor opens the Stream screen. Before, only tapping the first chip did.
+- **Alerts on the Desk tab:** the unread count turns amber when an alert is among the unread lines, and red for a severe one. Connection notes no longer count as unread.
+- **Recordings without clips** are folded into one row at the end of the list, so the ones with clips come first.
+- **Settings** is shorter: Listening comes first, **Play through** shows where the sound is playing now (so the separate "Playing now" row is gone), the bubble moved to Controls and the battery warning to Alerts.
+- **How it works:** a short guide on the not-connected screen and under About in Settings.
+
+### Accessibility
+- Confirmations such as "Clip saved" are now read out by screen readers.
+- Every button, switch and link is at least 48 dp: the round icons at the top, a clip's + and Delete, the voice button, the switches, and Revert and Save when adjusting a clip.
+- "Volume" no longer breaks across two lines with large text, and the Listen caption shows just the output, so it isn't cut off.
+- PCs in the connect pop-up are announced as buttons.
+
+### Android
+- **Desk chat and the keyboard:** the message box now moves up above the keyboard, so you can see what you type. Before, the keyboard covered it.
+- **Back:** the usual Android way, with the back-to-home preview. From Desk, Recordings or Settings, Back goes to Monitor; from Monitor, it leaves the app while listening and recording carry on, with the bubble and notification to come back. The triple-Back exit is gone; **Close OBS Director** on the app icon's long-press still closes it.
+- **Tablets, unfolded phones and landscape:** the tabs move to a rail down the side.
+- **Not connected:** the screen matches the rest of the app.
+- **Battery:** the level meter stops drawing once listening is off and the bars have fallen.
+
 ## [0.7.0] - 2026-11-26
 
 The desk is now a group chat, everywhere.
@@ -29,9 +53,6 @@ The desk is now a group chat, everywhere.
 
 ### Android app
 - **Stage mode:** comedy and tragedy masks replace the moon, which looked like a dark-mode switch. This applies to the top bar, the long-press shortcut and the browser version.
-
-
-### Android app
 - **Sound on every output:** the mix now plays on Bluetooth, USB sound cards and headsets that stayed silent before. Android only starts an ordinary audio track once its buffer has been filled, and the app's 200 ms buffer was never filled; it now uses a small buffer, starts at 20 ms, and remakes a track that doesn't start.
 - **Play through:** a new setting to pick the output (Automatic, or any connected speaker, Bluetooth, headphones, USB, HDMI or line out). When the chosen one isn't connected, the mix plays automatically until it is. **Playing now** shows where it actually goes, and **Play a test sound** checks the output without OBS.
 - **Delete recordings:** delete one recording from its page, or all of them from the end of the Recordings list or from Settings. Their clips, notes and saved audio go too; the files on the PC aren't touched.

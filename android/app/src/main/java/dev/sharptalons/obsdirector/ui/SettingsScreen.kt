@@ -11,7 +11,9 @@ import androidx.compose.material.icons.outlined.TouchApp
 import androidx.compose.material.icons.outlined.Vibration
 import androidx.compose.material.icons.automirrored.outlined.VolumeUp
 import androidx.compose.material.icons.outlined.DeleteSweep
-import androidx.compose.material.icons.outlined.GraphicEq
+import androidx.compose.material.icons.automirrored.outlined.HelpOutline
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.outlined.Bookmark
 import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.DesktopWindows
@@ -87,10 +89,11 @@ fun SettingsScreen(onConnect: () -> Unit) {
     val recordings by dev.sharptalons.obsdirector.core.ClipStore.recordings.collectAsState()
     val chosen = outputs.firstOrNull { it.key == s.outputPref }
     val playThrough = when {
-        s.outputPref == "auto" -> "Automatic"
+        s.outputPref == "auto" -> "Automatic · $output"
         chosen != null -> chosen.label
-        else -> "Not connected · automatic for now"
+        else -> "Not connected · $output for now"
     }
+    var help by rememberSaveable { mutableStateOf(false) }
     val context = androidx.compose.ui.platform.LocalContext.current
     // checked again each time Settings comes back to the front, after the person visits Android's page
     var canBubble by remember { mutableStateOf(dev.sharptalons.obsdirector.service.BubbleService.canShow(context)) }
@@ -100,20 +103,38 @@ fun SettingsScreen(onConnect: () -> Unit) {
     }
 
     val groups = listOf(
-        Group("Connection", Tints.ok, listOf(
-            Row.Action(Icons.Outlined.DesktopWindows, "OBS PC",
-                if (link == LinkState.DISCONNECTED) "Find PCs" else pc?.name ?: pc?.ip ?: "OBS PC", onConnect),
-            Row.Action(Icons.Outlined.PhoneAndroid, "This phone in OBS", s.deviceName) { renaming = true },
-        )),
         Group("Listening", Tints.teal, listOf(
             Row.Action(Icons.Outlined.Headphones, "Play through", playThrough) { choosingOutput = true },
-            Row.Info(Icons.Outlined.GraphicEq, "Playing now", output),
             Row.Action(Icons.AutoMirrored.Outlined.VolumeUp, "Play a test sound", "Play") { dev.sharptalons.obsdirector.audio.TestSound.play(Director.router) },
             Row.Switch(Icons.Outlined.PlayArrow, "Start listening when connected", s.autoListen) { x, v -> x.copy(autoListen = v) },
             Row.Choice(Icons.Outlined.Schedule, "Delay", if (s.bufferMs == 0) "Auto" else "${s.bufferMs} ms", listOf("Auto", "10 ms", "20 ms", "40 ms")) { x, v ->
                 x.copy(bufferMs = if (v == "Auto") 0 else v.removeSuffix(" ms").toInt())
             },
         )),
+        Group("Connection", Tints.ok, listOf(
+            Row.Action(Icons.Outlined.DesktopWindows, "OBS PC",
+                if (link == LinkState.DISCONNECTED) "Find PCs" else pc?.name ?: pc?.ip ?: "OBS PC", onConnect),
+            Row.Action(Icons.Outlined.PhoneAndroid, "This phone in OBS", s.deviceName) { renaming = true },
+        )),
+        Group("Controls", Tints.amber, listOf(
+            Row.Choice(Icons.Outlined.Timer, "Hold to stop recording", if (s.holdMs == 500) "0.5 s" else "${s.holdMs / 1000} s", listOf("0.5 s", "1 s", "2 s")) { x, v ->
+                x.copy(holdMs = (secs(v) * 1000).toInt())
+            },
+            Row.Switch(Icons.Outlined.PowerSettingsNew, "Allow ending the stream", s.allowStreamStop) { x, v -> x.copy(allowStreamStop = v) },
+            Row.Switch(Icons.Outlined.LightMode, "Keep the screen on", s.keepScreenOn) { x, v -> x.copy(keepScreenOn = v) },
+            Row.Choice(Icons.Outlined.TouchApp, "Touch sound", if (s.touchSound == 0) "Off" else "${s.touchSound}%", listOf("Off", "25%", "50%", "75%", "100%")) { x, v ->
+                x.copy(touchSound = if (v == "Off") 0 else v.removeSuffix("%").toInt())
+            },
+            Row.Choice(Icons.Outlined.Vibration, "Vibration", listOf("Off", "Light", "Medium", "Strong")[s.haptics.coerceIn(0, 3)], listOf("Off", "Light", "Medium", "Strong")) { x, v ->
+                x.copy(haptics = listOf("Off", "Light", "Medium", "Strong").indexOf(v).coerceAtLeast(0))
+            },
+        ) + listOf(
+            Row.Switch(Icons.Outlined.PictureInPictureAlt, "Floating bubble when you leave", s.bubble) { x, v -> x.copy(bubble = v) },
+        ) + (if (s.bubble && !canBubble) listOf(
+            Row.Action(Icons.Outlined.PictureInPictureAlt, "Allow the bubble over other apps", "Allow") {
+                context.startActivity(android.content.Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION, android.net.Uri.parse("package:" + context.packageName)))
+            },
+        ) else emptyList())),
         Group("Clips", Tints.rec, listOf(
             Row.Choice(Icons.Outlined.FastRewind, "Start before your tap", "${s.leadMinutes} min", listOf("1 min", "2 min", "3 min", "5 min")) { x, v ->
                 x.copy(leadMinutes = v.removeSuffix(" min").toInt())
@@ -134,6 +155,9 @@ fun SettingsScreen(onConnect: () -> Unit) {
             Row.Choice(Icons.Outlined.ShowChart, "Dropped frames over", "${s.dropsPerMinute} a minute", listOf("50 a minute", "100 a minute", "500 a minute")) { x, v ->
                 x.copy(dropsPerMinute = v.substringBefore(' ').toInt())
             },
+            Row.Choice(Icons.Outlined.BatteryAlert, "Warn when the battery is below", if (s.batteryWarn == 0) "Off" else "${s.batteryWarn}%", listOf("Off", "20%", "15%", "10%")) { x, v ->
+                x.copy(batteryWarn = if (v == "Off") 0 else v.removeSuffix("%").toInt())
+            },
         )),
         Group("Audio on this phone", Tints.purple, listOf(
             Row.Switch(Icons.Outlined.Mic, "Save the session audio", s.saveAudio) { x, v -> x.copy(saveAudio = v) },
@@ -142,30 +166,6 @@ fun SettingsScreen(onConnect: () -> Unit) {
             },
             Row.Action(Icons.Outlined.DeleteSweep, "Delete all recordings and clips",
                 if (recordings.isEmpty()) "None stored" else "${recordings.size} stored") { if (recordings.isNotEmpty()) confirmClear = true },
-        )),
-        Group("Outside the app", Tints.teal, listOf(
-            Row.Switch(Icons.Outlined.PictureInPictureAlt, "Floating bubble when you leave", s.bubble) { x, v -> x.copy(bubble = v) },
-        ) + (if (s.bubble && !canBubble) listOf(
-            Row.Action(Icons.Outlined.PictureInPictureAlt, "Allow the bubble over other apps", "Allow") {
-                context.startActivity(android.content.Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION, android.net.Uri.parse("package:" + context.packageName)))
-            },
-        ) else emptyList()) + listOf(
-            Row.Choice(Icons.Outlined.BatteryAlert, "Warn when the battery is below", if (s.batteryWarn == 0) "Off" else "${s.batteryWarn}%", listOf("Off", "20%", "15%", "10%")) { x, v ->
-                x.copy(batteryWarn = if (v == "Off") 0 else v.removeSuffix("%").toInt())
-            },
-        )),
-        Group("Controls", Tints.amber, listOf(
-            Row.Choice(Icons.Outlined.Timer, "Hold to stop recording", if (s.holdMs == 500) "0.5 s" else "${s.holdMs / 1000} s", listOf("0.5 s", "1 s", "2 s")) { x, v ->
-                x.copy(holdMs = (secs(v) * 1000).toInt())
-            },
-            Row.Switch(Icons.Outlined.PowerSettingsNew, "Allow ending the stream", s.allowStreamStop) { x, v -> x.copy(allowStreamStop = v) },
-            Row.Switch(Icons.Outlined.LightMode, "Keep the screen on", s.keepScreenOn) { x, v -> x.copy(keepScreenOn = v) },
-            Row.Choice(Icons.Outlined.TouchApp, "Touch sound", if (s.touchSound == 0) "Off" else "${s.touchSound}%", listOf("Off", "25%", "50%", "75%", "100%")) { x, v ->
-                x.copy(touchSound = if (v == "Off") 0 else v.removeSuffix("%").toInt())
-            },
-            Row.Choice(Icons.Outlined.Vibration, "Vibration", listOf("Off", "Light", "Medium", "Strong")[s.haptics.coerceIn(0, 3)], listOf("Off", "Light", "Medium", "Strong")) { x, v ->
-                x.copy(haptics = listOf("Off", "Light", "Medium", "Strong").indexOf(v).coerceAtLeast(0))
-            },
         )),
     )
 
@@ -201,6 +201,7 @@ fun SettingsScreen(onConnect: () -> Unit) {
                 )
             }
             UpdateRow()
+            OutlineButton("How OBS Director works", Icons.AutoMirrored.Outlined.HelpOutline, Modifier.fillMaxWidth()) { help = true }
             Text("Settings, clips and saved audio stay on this phone. The app talks only to the OBS PC you connect to, and to GitHub to check for updates.", style = Type.small)
         }
     }
@@ -227,6 +228,7 @@ fun SettingsScreen(onConnect: () -> Unit) {
             choosingOutput = false
         }, onDismiss = { choosingOutput = false })
     }
+    if (help) HelpDialog { help = false }
     if (confirmClear) ConfirmDelete(
         title = "Delete all recordings and clips?",
         body = "Removes every recording, clip, note and saved audio from this phone. The recordings on the PC aren't touched. " +
@@ -265,5 +267,26 @@ fun ConfirmDelete(title: String, body: String, confirmLabel: String = "Delete", 
         text = { Text(body, style = Type.body.copy(color = T.text2)) },
         confirmButton = { TextButton(onClick = { onConfirm(); onDone() }) { Text(confirmLabel, color = T.negative) } },
         dismissButton = { TextButton(onClick = onDone) { Text("Cancel", color = T.text2) } },
+    )
+}
+
+/** A short guide to the whole app, from About in Settings. */
+@Composable
+private fun HelpDialog(onDone: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDone,
+        containerColor = T.surface,
+        title = { Text("How OBS Director works", style = Type.cardTitle) },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                HowStep("1", "Connect", "Open OBS with the plugin on the PC, on the same Wi-Fi. Tap the connect icon at the top and choose the PC. The first time, click Allow on the PC.")
+                HowStep("2", "Listen", "Turn on Listen on Monitor to hear the OBS mix. Choose where it plays in Settings, under Listening.")
+                HowStep("3", "Mark clips", "Tap Clip when something good happens and End when it's over. The clip starts a little before your tap, so you won't miss the start.")
+                HowStep("4", "Use the clips", "Recordings lists each recording with its clips. Play, adjust, add a note, share, or export the list for your editor.")
+                HowStep("5", "Talk to the desk", "The Desk tab is a group chat with the OBS dock and other phones. Alerts, like a full disk, show up there too.")
+                HowStep("6", "Stage mode", "The masks icon at the top shows a big, dim timer and Clip button for use beside a stage.")
+            }
+        },
+        confirmButton = { TextButton(onClick = onDone) { Text("Done", color = T.accent) } },
     )
 }

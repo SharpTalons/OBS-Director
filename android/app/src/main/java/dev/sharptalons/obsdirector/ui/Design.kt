@@ -158,7 +158,7 @@ fun HeadBar(link: LinkState, pc: FoundPc?, latencyMs: Int, waiting: String?, onS
 @Composable
 fun RoundIcon(icon: ImageVector, label: String, tint: Color, onClick: () -> Unit) {
     Box(
-        Modifier.size(44.dp).clip(CircleShape).background(T.surface2).clickable(role = Role.Button, onClick = onClick)
+        Modifier.size(48.dp).clip(CircleShape).background(T.surface2).clickable(role = Role.Button, onClick = onClick)
             .semantics { contentDescription = label },
         contentAlignment = Alignment.Center,
     ) { Icon(icon, null, tint = tint, modifier = Modifier.size(20.dp)) }
@@ -180,7 +180,8 @@ fun ObsMeter(levels: Levels, active: Boolean, modifier: Modifier = Modifier, bar
     var holdAtR by remember { mutableLongStateOf(0L) }
     LaunchedEffect(active) {
         var last = 0L
-        while (true) {
+        // once listening stops and the bars have fallen, the meter stops drawing frames
+        while (active || shownL > -60f || shownR > -60f) {
             withFrameNanos { now ->
                 val dt = if (last == 0L) 0f else (now - last) / 1e9f
                 last = now
@@ -193,6 +194,7 @@ fun ObsMeter(levels: Levels, active: Boolean, modifier: Modifier = Modifier, bar
                 if (shownR >= holdR || ms - holdAtR > HOLD_MS) { holdR = shownR; holdAtR = ms }
             }
         }
+        holdL = -60f; holdR = -60f
     }
     val peak = max(holdL, holdR)
     Column(modifier.semantics {

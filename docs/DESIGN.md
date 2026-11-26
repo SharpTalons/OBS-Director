@@ -29,6 +29,7 @@ The app is dark only. It's used in dim rooms beside a stage.
 | positive | `#4CC38A` | Connected, good |
 | negative / rec | `#FF5C76` | Recording, Clip, destructive |
 | warning | `#F2C46B` | Warnings |
+| on-badge | `#0B1A12` | Dark text on a green, amber or red badge |
 
 **Tints** come in pairs: a dark `bg` with a light `ink` for text and icons on it.
 
@@ -79,7 +80,9 @@ The app is dark only. It's used in dim rooms beside a stage.
 
 ## Size and shape
 
-- **Touch targets:** at least 48 dp. Buttons are 48 dp tall; switches are 52×30 with a 44 dp touch area.
+- **Touch targets:** at least 48 dp, everywhere. Buttons are 48 dp tall, round icon buttons 48 dp across; switches are 52×30 with a 48 dp touch area.
+- **Navigation:** tabs along the bottom on phones; a 88 dp rail down the side when the window is 600 dp wide or more. Content keeps a 640 dp reading width.
+- **Unread badge on Desk:** green with the count; amber when an alert is unread, red for a severe one.
 - **Rounding:**
 
 | Element | Radius |

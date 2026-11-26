@@ -211,7 +211,7 @@ private fun PcRow(p: FoundPc, status: RowStatus, onDisconnect: () -> Unit, onCli
         Modifier.fillMaxWidth().padding(vertical = 3.dp).clip(RoundedCornerShape(6.dp))
             .background(if (active) T.raised else T.surface)
             .border(1.dp, edge, RoundedCornerShape(6.dp))
-            .clickable(onClick = onClick).padding(horizontal = 12.dp, vertical = 10.dp),
+            .clickable(role = androidx.compose.ui.semantics.Role.Button, onClick = onClick).padding(horizontal = 12.dp, vertical = 10.dp),
     ) {
         Row(Modifier.heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
             // Yellow: found by the scan, ready to connect. Green: connected. Grey: typed in, not found.

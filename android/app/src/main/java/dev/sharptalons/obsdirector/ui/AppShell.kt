@@ -23,6 +23,9 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.heading
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
@@ -111,25 +114,11 @@ fun AppShell() {
     LaunchedEffect(Unit) { while (true) { delay(1000); now = android.os.SystemClock.elapsedRealtime() } }
     LaunchedEffect(toast) { if (toast != null) { delay(3000); Director.clearToast() } }
 
-    // Back three times within 2 s closes the app (pop-ups and Settings pages take Back first).
-    val activity = androidx.compose.ui.platform.LocalContext.current as? android.app.Activity
-    var backTaps by remember { mutableStateOf(listOf<Long>()) }
+    // Back steps out to Monitor from the other tabs. On Monitor, Back is Android's own: the app
+    // goes to the background (with the predictive back-to-home preview) and keeps listening and
+    // recording, with the bubble and notification to come back.
     androidx.activity.compose.BackHandler(enabled = screen != "monitor") {
         screen = when (screen) { "recording" -> "recordings"; else -> "monitor" }
-    }
-    androidx.activity.compose.BackHandler(enabled = screen == "monitor") {
-        val at = android.os.SystemClock.elapsedRealtime()
-        val taps = backTaps.filter { at - it < 2000 } + at
-        backTaps = taps
-        when (taps.size) {
-            1 -> Director.toast("Press Back 2 more times to close OBS Director")
-            2 -> Director.toast("Press Back once more to close")
-            else -> {
-                backTaps = emptyList()
-                Director.disconnect()
-                activity?.finishAndRemoveTask()
-            }
-        }
     }
 
     if (screen == "stage") {
@@ -137,13 +126,35 @@ fun AppShell() {
         return
     }
 
+    // phones get tabs at the bottom; tablets, unfolded phones and landscape get a rail at the side
+    val wide = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp >= 600
+    val tab = when (screen) { "recordings", "recording" -> "recordings"; "config" -> "config"; "desk" -> "desk"; "monitor", "stream" -> "monitor"; else -> "monitor" }
+    val unread by Director.deskUnreadCount.collectAsState()
+    val unreadAlert by Director.deskUnreadAlert.collectAsState()
+    val deskBadge = if (unread > 0) (if (unread > 99) "99+" else "$unread") else null
+    val deskBadgeColor = when (unreadAlert) { 2 -> T.negative; 1 -> T.warning; else -> T.positive }
+    val deskBadgeSays = when (unreadAlert) { 2 -> "including a severe alert"; 1 -> "including an alert"; else -> null }
+    val tabs: @Composable (Modifier) -> Unit = { m ->
+        NavItem("Monitor", Icons.Outlined.Headphones, tab == "monitor", null, m, rail = wide) { screen = "monitor" }
+        NavItem("Recordings", Icons.Outlined.VideoLibrary, tab == "recordings", if (recordings.any { it.live }) "•" else null, m, rail = wide) { screen = "recordings" }
+        NavItem("Desk", Icons.AutoMirrored.Outlined.Chat, tab == "desk", deskBadge, m, badgeColor = deskBadgeColor, badgeSays = deskBadgeSays, rail = wide) { screen = "desk" }
+        NavItem("Settings", Icons.Outlined.Settings, tab == "config", null, m, rail = wide) { screen = "config" }
+    }
+
     Column(Modifier.fillMaxSize().background(T.ground).windowInsetsPadding(WindowInsets.statusBars)) {
         HeadBar(link, pc, latency, awaiting, onStage = { screen = "stage" }, onConnect = { connectOpen = true })
-        // banners for the link and alerts, shown above every screen
-        // Alerts don't sit on top of the screens any more: they notify, and show up in the Desk chat.
+        // Alerts don't sit on top of the screens: they notify, and show up in the Desk chat.
         val top: (@Composable () -> Unit)? = null
-        Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
-            // on tablets, in landscape and on unfolded phones the content keeps a phone's reading width
+        Row(Modifier.weight(1f).fillMaxWidth()) {
+        if (wide) {
+            Column(
+                Modifier.width(88.dp).fillMaxHeight().windowInsetsPadding(WindowInsets.navigationBars).padding(top = 12.dp).selectableGroup(),
+                verticalArrangement = Arrangement.spacedBy(8.dp), horizontalAlignment = Alignment.CenterHorizontally,
+            ) { tabs(Modifier.fillMaxWidth().height(64.dp)) }
+            androidx.compose.material3.VerticalDivider(color = T.rule)
+        }
+        Box(Modifier.weight(1f).fillMaxHeight(), contentAlignment = Alignment.TopCenter) {
+            // the content keeps a phone's reading width
             val content = Modifier.fillMaxHeight().widthIn(max = 640.dp).fillMaxWidth()
             when (screen) {
                 "recording" -> RecordingScreen(openFile, content, top, onBack = { screen = "recordings" })
@@ -164,48 +175,56 @@ fun AppShell() {
                 }
             }
 
+            // a short confirmation; screen readers read it out
             if (toast != null) {
-                Box(Modifier.align(Alignment.TopCenter).padding(top = 12.dp).clip(RoundedCornerShape(12.dp)).background(T.text).padding(horizontal = 16.dp, vertical = 10.dp)) {
+                Box(Modifier.align(Alignment.TopCenter).padding(top = 12.dp).clip(RoundedCornerShape(12.dp)).background(T.text)
+                    .semantics { liveRegion = LiveRegionMode.Polite }.padding(horizontal = 16.dp, vertical = 10.dp)) {
                     Text(toast ?: "", style = Type.body.copy(color = Color.Black, fontWeight = FontWeight.Medium))
                 }
             }
+        }
         }
 
         // the tabs step aside while the keyboard is up, as in a chat app
         @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
         val keyboard = WindowInsets.isImeVisible
-        if (!keyboard) {
-        HorizontalDivider(color = T.rule)
-        Row(Modifier.fillMaxWidth().background(T.ground).windowInsetsPadding(WindowInsets.navigationBars).padding(vertical = 6.dp).selectableGroup()) {
-            val tab = when (screen) { "recordings", "recording" -> "recordings"; "config" -> "config"; "desk" -> "desk"; else -> "monitor" }
-            val unread by Director.deskUnreadCount.collectAsState()
-            NavItem("Monitor", Icons.Outlined.Headphones, tab == "monitor", null, Modifier.weight(1f)) { screen = "monitor" }
-            NavItem("Recordings", Icons.Outlined.VideoLibrary, tab == "recordings", badge = if (recordings.any { it.live }) "•" else null, Modifier.weight(1f)) { screen = "recordings" }
-            NavItem("Desk", Icons.AutoMirrored.Outlined.Chat, tab == "desk", badge = if (unread > 0) (if (unread > 99) "99+" else "$unread") else null, Modifier.weight(1f)) { screen = "desk" }
-            NavItem("Settings", Icons.Outlined.Settings, tab == "config", null, Modifier.weight(1f)) { screen = "config" }
-        }
+        if (!wide && !keyboard) {
+            HorizontalDivider(color = T.rule)
+            Row(Modifier.fillMaxWidth().background(T.ground).windowInsetsPadding(WindowInsets.navigationBars).padding(vertical = 6.dp).selectableGroup()) {
+                tabs(Modifier.weight(1f).height(56.dp))
+            }
         }
     }
 }
 
 @Composable
-private fun NavItem(label: String, icon: ImageVector, selected: Boolean, badge: String?, modifier: Modifier, onClick: () -> Unit) {
+private fun NavItem(label: String, icon: ImageVector, selected: Boolean, badge: String?, modifier: Modifier,
+                    badgeColor: Color = T.positive, badgeSays: String? = null, rail: Boolean = false, onClick: () -> Unit) {
     Column(
         modifier
-            .height(56.dp)
             .selectable(selected = selected, role = Role.Tab, onClick = onClick)
-            .semantics { if (badge != null) stateDescription = when (badge) { "!" -> "Needs attention"; "•" -> "Recording now"; else -> "$badge unread" } }
-            .drawBehind { if (selected) drawLine(T.accent, Offset(size.width / 2 - 40f, 0f), Offset(size.width / 2 + 40f, 0f), 4f) },
+            .semantics {
+                if (badge != null) stateDescription = when (badge) {
+                    "•" -> "Recording now"
+                    else -> listOfNotNull("$badge unread", badgeSays).joinToString(", ")
+                }
+            }
+            .drawBehind {
+                if (!selected) return@drawBehind
+                // on the rail the mark sits at the inner edge; on the tab bar, along the top
+                if (rail) drawLine(T.accent, Offset(2f, size.height / 2 - 40f), Offset(2f, size.height / 2 + 40f), 4f)
+                else drawLine(T.accent, Offset(size.width / 2 - 40f, 0f), Offset(size.width / 2 + 40f, 0f), 4f)
+            },
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
         Box {
             Icon(icon, null, tint = if (selected) T.text else T.muted, modifier = Modifier.size(22.dp))
-            if (badge == "!" || badge == "•") Text(badge, style = Type.mono.copy(fontSize = 10.sp, color = if (badge == "!") T.warning else T.text),
+            if (badge == "•") Text(badge, style = Type.mono.copy(fontSize = 10.sp, color = T.text),
                 modifier = Modifier.align(Alignment.TopEnd).padding(start = 24.dp).clearAndSetSemantics { })
-            else if (badge != null) Text(badge, style = Type.label.copy(fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0B1A12)),
-                // an unread count, like a chat app's
-                modifier = Modifier.align(Alignment.TopEnd).offset(x = 14.dp, y = (-6).dp).clip(CircleShape).background(T.positive)
+            else if (badge != null) Text(badge, style = Type.label.copy(fontSize = 10.sp, fontWeight = FontWeight.Bold, color = T.onBadge),
+                // an unread count, like a chat app's; amber or red while an alert is among them
+                modifier = Modifier.align(Alignment.TopEnd).offset(x = 14.dp, y = (-6).dp).clip(CircleShape).background(badgeColor)
                     .padding(horizontal = 5.dp, vertical = 1.dp).clearAndSetSemantics { })
         }
         Text(label, style = Type.small.copy(fontSize = 11.sp, color = if (selected) T.text else T.muted))
@@ -217,22 +236,46 @@ private fun NavItem(label: String, icon: ImageVector, selected: Boolean, badge: 
 private fun NotConnected(onConnect: () -> Unit) {
     val settings by Prefs.settings.collectAsState()
     val error by Director.error.collectAsState()
-    Text("Connect this phone to the OBS PC to listen, watch and mark clips.", style = Type.finding)
-    Spacer(Modifier.height(16.dp))
-    DCard {
-        CardHeader("Not connected", Icons.Outlined.Cast)
+    ScreenTitle("Not connected", "Connect this phone to the OBS PC to listen, watch and mark clips")
+    Section {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            TintTile(Icons.Outlined.Cast, Tints.ok, size = 36.dp, iconSize = 20.dp)
+            Column(Modifier.weight(1f)) {
+                val name = settings.lastPcName.ifBlank { "PC at ${settings.lastIp}" }
+                Text(if (settings.lastIp.isNotBlank()) name else "No PC yet", style = Type.body.copy(fontSize = 17.sp, fontWeight = FontWeight.Medium),
+                    modifier = Modifier.semantics { heading() })
+                Text(if (settings.lastIp.isNotBlank()) "The last PC this phone used" else "Find the OBS PC on this Wi-Fi", style = Type.small.copy(fontSize = 13.sp))
+            }
+        }
         if (settings.lastIp.isNotBlank()) {
             val name = settings.lastPcName.ifBlank { "PC at ${settings.lastIp}" }
-            PrimaryButton("Connect to $name", Icons.Outlined.Power, Modifier.fillMaxWidth()) {
+            PrimaryButton("Connect again", Icons.Outlined.Power, Modifier.fillMaxWidth()) {
                 Director.connect(dev.sharptalons.obsdirector.core.FoundPc(name, settings.lastIp, settings.lastPort, lastSeen = 0))
             }
-            Spacer(Modifier.height(10.dp))
             OutlineButton("Choose another PC", Icons.Outlined.Cast, Modifier.fillMaxWidth()) { onConnect() }
         } else {
-            Text("Make sure OBS is open on the PC with the OBS Director plugin, on the same Wi-Fi as this phone.", style = Type.small)
-            Spacer(Modifier.height(14.dp))
-            PrimaryButton("Find PCs", Icons.Outlined.Power, Modifier.fillMaxWidth()) { onConnect() }
+            PrimaryButton("Find PCs", Icons.Outlined.Cast, Modifier.fillMaxWidth()) { onConnect() }
         }
-        error?.let { Text(it, style = Type.small.copy(color = T.negative), modifier = Modifier.padding(top = 10.dp)) }
+        error?.let { Text(it, style = Type.small.copy(color = T.negative)) }
+    }
+    GroupLabel("How it works", T.muted, Modifier.padding(top = 4.dp))
+    Section {
+        HowStep("1", "Open OBS on the PC", "The OBS Director plugin has to be installed there.")
+        HowStep("2", "Use the same Wi-Fi", "This phone and the PC need to be on the same network.")
+        HowStep("3", "Allow this phone", "The first time, OBS asks whether to let this phone in. Click Allow on the PC.")
+        HowStep("4", "Listen and mark clips", "Turn on Listen to hear the mix. Tap Clip at a good moment, and End when it's over.")
+    }
+}
+
+@Composable
+fun HowStep(n: String, title: String, body: String) {
+    Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.semantics(mergeDescendants = true) { }) {
+        Box(Modifier.size(28.dp).clip(CircleShape).background(Tints.blue.bg), contentAlignment = Alignment.Center) {
+            Text(n, style = Type.label.copy(color = Tints.blue.ink, fontWeight = FontWeight.Bold))
+        }
+        Column(Modifier.weight(1f)) {
+            Text(title, style = Type.body.copy(fontWeight = FontWeight.Medium))
+            Text(body, style = Type.small.copy(fontSize = 13.sp))
+        }
     }
 }

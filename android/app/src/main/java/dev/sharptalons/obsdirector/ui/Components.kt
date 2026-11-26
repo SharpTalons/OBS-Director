@@ -90,7 +90,7 @@ enum class PillKind { REC, WARN, OK, IDLE }
 fun DSwitch(checked: Boolean, onChange: (Boolean) -> Unit, label: String? = null, modifier: Modifier = Modifier) {
     Row(
         modifier
-            .heightIn(min = 44.dp)
+            .heightIn(min = 48.dp)
             .clickable(role = Role.Switch) { onChange(!checked) }
             .semantics { if (label != null) contentDescription = label },
         verticalAlignment = Alignment.CenterVertically,

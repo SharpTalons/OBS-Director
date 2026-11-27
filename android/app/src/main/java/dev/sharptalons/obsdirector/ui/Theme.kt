@@ -1,5 +1,6 @@
 package dev.sharptalons.obsdirector.ui
 
+import kotlin.math.pow
 import kotlinx.coroutines.launch
 
 import androidx.compose.material3.MaterialTheme
@@ -155,42 +156,45 @@ fun DirectorTheme(content: @Composable () -> Unit) {
  * parts. Documented in docs/DESIGN.md.
  */
 object FeedbackTokens {
-    /** The tap: one clean tap from the supplied recording (taps at 0.04, 0.30 … 2.44 s; the one at 0.60 s
-     *  rings for 31 ms), cut to 60 ms with a 15 ms fade, peak at -3 dBFS. res/raw/touch_tap.wav */
+    /** The tap: one clean tap from the supplied recording (the one at 0.60 s), cut to 60 ms with a
+     *  15 ms fade, then compressed and brought up to −0.5 dBFS peak (−13 dBFS average) so it is
+     *  full and clear. res/raw/touch_tap.wav, and src/web/tap.wav for the browser. */
     const val TAP_SOUND = "touch_tap"
-    /** Touch sound at 100% in Settings plays at this gain, so it sits under the mix, not over it. */
-    const val TAP_MAX_GAIN = 0.6f
+    /** Touch sound levels in Settings, on a loudness scale: 25, 50, 75 and 100% play at these dB. */
+    val TAP_LEVEL_DB = floatArrayOf(-12f, -6f, -3f, 0f)
+    /** The gain for a Touch sound setting, 0 = off. */
+    fun tapGain(percent: Int): Float = when {
+        percent <= 0 -> 0f
+        else -> 10f.pow(TAP_LEVEL_DB[((percent + 12) / 25 - 1).coerceIn(0, 3)] / 20f)
+    }
     /** Taps can overlap when tapping fast. */
     const val TAP_STREAMS = 3
     /** Default touch sound volume, percent (0 = off). */
     const val TAP_DEFAULT_VOLUME = 50
 
-    /** The tap's vibration tick for light, medium and strong (Android's predefined effects). */
-    val TAP_HAPTIC = intArrayOf(
-        android.os.VibrationEffect.EFFECT_TICK,
-        android.os.VibrationEffect.EFFECT_CLICK,
-        android.os.VibrationEffect.EFFECT_HEAVY_CLICK,
-    )
+    /** The tap's vibration for light, medium and strong: how long (ms) and how strong (1..255). */
+    val TAP_MS = longArrayOf(18, 28, 40)
+    val TAP_AMPLITUDE = intArrayOf(140, 210, 255)
     /** Strength of the longer buzzes (amplitude 1..255) for light, medium and strong. */
-    val BUZZ_AMPLITUDE = intArrayOf(70, 150, 255)
-    /** For phones that can't vary strength: buzz length scaled for light, medium and strong. */
-    val BUZZ_LENGTH_SCALE = floatArrayOf(0.5f, 1f, 1.4f)
+    val BUZZ_AMPLITUDE = intArrayOf(140, 210, 255)
+    /** Buzz length for light, medium and strong (and the only lever on phones that can't vary strength). */
+    val BUZZ_LENGTH_SCALE = floatArrayOf(0.8f, 1.2f, 1.6f)
 
     // Vibration patterns: off/on pairs in ms, starting with a pause.
     /** A clip starts: one short tap. */
-    val CLIP_START = longArrayOf(0, 20)
+    val CLIP_START = longArrayOf(0, 30)
     /** A clip is saved: two short taps. */
-    val CLIP_SAVED = longArrayOf(0, 20, 60, 20)
+    val CLIP_SAVED = longArrayOf(0, 30, 70, 30)
     /** A message in the desk chat. */
-    val MESSAGE = longArrayOf(0, 40, 70, 40)
+    val MESSAGE = longArrayOf(0, 60, 80, 60)
     /** An alert. */
-    val ALERT = longArrayOf(0, 200, 100, 200)
+    val ALERT = longArrayOf(0, 300, 120, 300)
     /** A severe alert (recording stopped, disk nearly full). */
-    val ALERT_SEVERE = longArrayOf(0, 300, 120, 300, 120, 300)
+    val ALERT_SEVERE = longArrayOf(0, 400, 150, 400, 150, 400)
     /** The connection to the PC dropped. */
-    val LINK_LOST = longArrayOf(0, 200, 100, 200)
+    val LINK_LOST = longArrayOf(0, 300, 120, 300)
     /** Preview when the strength is changed in Settings. */
-    val PREVIEW = longArrayOf(0, 40, 80, 40)
+    val PREVIEW = longArrayOf(0, 60, 90, 60)
 }
 
 /** The app's tap: Material's ripple, plus the touch sound and vibration tick when a press lands. */

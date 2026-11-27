@@ -10,24 +10,24 @@ import kotlin.math.roundToInt
  *
  * - 1% is 40 dB quieter than OBS sends it, 25% is 20 dB quieter;
  * - 50% is the mix as OBS sends it;
- * - 75% is 10 dB louder (about twice as loud to the ear), 100% is 20 dB louder (about four times).
+ * - 75% is 12 dB louder (more than twice as loud to the ear), 100% is 24 dB louder (about five times).
  *
  * Above 50% the boost is done in the app, with a limiter that holds peaks just under full scale.
  */
 object Loudness {
     const val AS_SENT = 50
     const val MIN_DB = -40f
-    const val MAX_DB = 20f
+    const val MAX_DB = 24f
 
     /** The labels under the slider, at 1, 25, 50, 75 and 100%. */
-    val marks = listOf("−40 dB", "−20", "As sent", "+10", "+20 dB")
+    val marks = listOf("−40 dB", "−20", "As sent", "+12", "+24 dB")
 
     fun db(percent: Int): Float {
         val p = percent.coerceIn(1, 100)
         return if (p <= AS_SENT) MIN_DB - MIN_DB * (p - 1) / (AS_SENT - 1f) else MAX_DB * (p - AS_SENT) / (100f - AS_SENT)
     }
 
-    /** The gain to apply: 0.01 at 1%, 1 at 50%, 10 at 100%. */
+    /** The gain to apply: 0.01 at 1%, 1 at 50%, about 16 at 100%. */
     fun gain(percent: Int): Float = 10f.pow(db(percent) / 20f)
 
     /** The slider position for a gain, for volumes saved before this scale (0–300% of amplitude). */
@@ -51,7 +51,7 @@ object Loudness {
 
 /**
  * The boost's limiter, for interleaved stereo 16-bit samples. It turns the whole sound down for a
- * moment when a peak would pass 95% of full scale, and lets it back up over about 150 ms, so quiet
+ * moment when a peak would pass 98% of full scale, and lets it back up over about 100 ms, so quiet
  * speech comes up by the full boost while shouts and claps don't distort. Both channels move
  * together, so the stereo picture stays put.
  */
@@ -68,6 +68,8 @@ class Limiter {
             val peak = maxOf(kotlin.math.abs(l), kotlin.math.abs(r))
             val want = if (peak * hold > CEILING) CEILING / peak else 1f
             hold = if (want < hold) want else hold + (want - hold) * RELEASE
+            // letting go never lifts a peak past the ceiling
+            if (peak * hold > CEILING) hold = CEILING / peak
             out[i] = (l * hold * 32767f).toInt().coerceIn(-32768, 32767).toShort()
             out[i + 1] = (r * hold * 32767f).toInt().coerceIn(-32768, 32767).toShort()
             i += 2
@@ -75,8 +77,8 @@ class Limiter {
     }
 
     companion object {
-        const val CEILING = 0.95f
-        /** About 150 ms to let go at 48 kHz. */
-        const val RELEASE = 0.00014f
+        const val CEILING = 0.98f
+        /** About 100 ms to let go at 48 kHz: quick enough to keep the level up between words. */
+        const val RELEASE = 0.0002f
     }
 }

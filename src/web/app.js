@@ -307,7 +307,7 @@ function connect() {
 			state.link = 'lost';
 			state.lostAt = Date.now();
 			chatNote({ kind: 'alert', severe: true, from: 'Connection to ' + (state.pc || 'the PC') + ' lost.', text: 'Listening paused. The recording carries on at the PC. Reconnecting…' });
-			feedback.buzz([200, 100, 200]);
+			feedback.buzz([300, 120, 300]);
 			endClipIfRunning(', ended when the connection dropped');
 			audio.pause();
 			video.reset();
@@ -1093,7 +1093,7 @@ function raise(a) {
 	state.alerts = state.alerts.filter((x) => x.id !== a.id).concat([a]);
 	if (had) return;
 	chatNote({ kind: 'alert', from: a.title, text: a.body, severe: !!a.severe, deskText: a.desk || null, offerStart: !!a.offerStart });
-	feedback.buzz(a.severe ? [300, 120, 300, 120, 300] : [200, 100, 200]);
+	feedback.buzz(a.severe ? [400, 150, 400, 150, 400] : [300, 120, 300]);
 	notify(a.title, a.body);
 	render();
 }
@@ -1184,15 +1184,18 @@ const feedback = {
 			this.load();
 			if (this.buffer && audio.ctx) {
 				const src = audio.ctx.createBufferSource(), g = audio.ctx.createGain();
-				g.gain.value = (vol / 100) * 0.6; /* same ceiling as the app: under the mix, not over it */
+				/* the same loudness scale as the app: 25, 50, 75 and 100% play at −12, −6, −3 and 0 dB */
+				g.gain.value = Math.pow(10, [-12, -6, -3, 0][Math.max(0, Math.min(3, Math.round(vol / 25) - 1))] / 20);
 				src.buffer = this.buffer; src.connect(g); g.connect(audio.ctx.destination); src.start();
 			}
 		}
-		if (settings.haptics > 0) this.buzz([[8, 14, 22][settings.haptics - 1]]);
+		if (settings.haptics > 0) this.buzz([[18, 28, 40][settings.haptics - 1]], true);
 	},
-	buzz(pattern) {
+	/* Browsers can't set vibration strength, only length, so stronger settings buzz longer. A tap
+	 * is already sized for its level; patterns are scaled. */
+	buzz(pattern, sized) {
 		if (!settings.haptics || !navigator.vibrate) return;
-		const scale = [0.5, 1, 1.4][settings.haptics - 1];
+		const scale = sized ? 1 : [0.8, 1.2, 1.6][settings.haptics - 1];
 		try { navigator.vibrate(pattern.map((v, i) => (i % 2 === 0 ? Math.max(5, Math.round(v * scale)) : v))); } catch { /* not allowed */ }
 	},
 };
@@ -1890,7 +1893,7 @@ function settingsPage() {
 				tile, h('span.grow', label), h('span.switch', { 'aria-checked': String(on), 'aria-hidden': 'true' }));
 		}
 		if (kind === 'choice') {
-			const sel = h('select.choice', { 'aria-label': label, onchange: (e) => { const o = options[e.target.selectedIndex]; settings[key] = o[0]; saveSettings(); if (key === 'touchSound' || key === 'haptics') feedback.tap(); if (key === 'haptics') feedback.buzz([40, 80, 40]); render(); } },
+			const sel = h('select.choice', { 'aria-label': label, onchange: (e) => { const o = options[e.target.selectedIndex]; settings[key] = o[0]; saveSettings(); if (key === 'touchSound' || key === 'haptics') feedback.tap(); if (key === 'haptics') feedback.buzz([60, 90, 60]); render(); } },
 				options.map(([v, l]) => h('option', { selected: settings[key] === v }, l)));
 			return h('label.setting', base, tile, h('span.grow', label), sel);
 		}

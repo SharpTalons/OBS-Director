@@ -267,8 +267,14 @@ private fun ListenSection(lost: Boolean) {
                 }
             }
         }
+        // Nothing is louder than the phone's own media volume lets it be, so say when that is down.
+        val context = androidx.compose.ui.platform.LocalContext.current
+        val am = remember { context.getSystemService(android.media.AudioManager::class.java) }
+        val phonePct = am?.let { it.getStreamVolume(android.media.AudioManager.STREAM_MUSIC) * 100 / it.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC).coerceAtLeast(1) } ?: 100
+        val phoneLow = active && phonePct < 70
         // Always shown, so moving the slider doesn't push anything down.
-        Text(Loudness.describe(vol), style = Type.small.copy(color = if (boosting) T.warning else T.muted), maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(if (phoneLow) "The phone's own volume is at $phonePct%. Press volume up for more." else Loudness.describe(vol),
+            style = Type.small.copy(color = if (boosting || phoneLow) T.warning else T.muted), maxLines = 2, minLines = 2, overflow = TextOverflow.Ellipsis)
         run {
             val drops = Director.dropoutsLastMinute()
             val (text, tint) = when {

@@ -87,7 +87,7 @@ The app is dark only. It's used in dim rooms beside a stage.
 - **OBS dock text** follows the PC's text size: the body is OBS's own font size, names 92% of it, notes 85%, times 78%.
 - **OBS dock colours**, for dark screens: background `#0B141A`; others' bubbles `#2B3B45` edged `#3D4E59`; your own `#005C4B` edged `#0A7A63`; message text white (at least 6.5:1); times and notes `#C9D3D8` (at least 5.5:1); sender names from a light set, each at least 6:1 on its bubble.
 - **Top bar:** only on Monitor. Recordings, Desk, Settings and Stream start with their own title.
-- **Volume:** 1–100% on a loudness scale (`Loudness` in the app): 1% is −40 dB, 25% −20 dB, 50% the mix as sent, 75% +10 dB, 100% +20 dB. The scale shows under the slider; above 50% the slider and its caption turn amber. The boost goes through a limiter with a 95% ceiling and a 150 ms release.
+- **Volume:** 1–100% on a loudness scale (`Loudness` in the app): 1% is −40 dB, 25% −20 dB, 50% the mix as sent, 75% +12 dB, 100% +24 dB. The scale shows under the slider; above 50% the slider and its caption turn amber, and the caption says when the phone's own media volume is below 70%. The boost goes through a limiter with a 98% ceiling and a 100 ms release.
 - **Rounding:**
 
 | Element | Radius |
@@ -121,39 +121,44 @@ One screen, clips first, the same in the app and the browser version.
 - **The sound:** one tap, cut from the supplied recording of a touchscreen tap.
   - **The recording:** 2.59 s, 48 kHz mono, containing ten taps at 0.04, 0.30, 0.60, 0.87, 1.20, 1.44, 1.71, 1.98, 2.18 and 2.44 s.
   - **The tap used:** the one at **0.60 s**. It is strong and clean, and fades out within 31 ms. The one at 1.20 s rings for 250 ms, and the ones at 0.30 and 1.98 s are faint.
-  - **Cut:** 0.595 s to 0.655 s, so **60 ms**, with a 15 ms fade-out. Peak normalised to −3 dBFS. 16-bit mono WAV at 48 kHz, 5.8 KB.
+  - **Cut:** 0.595 s to 0.655 s, so **60 ms**, with a 15 ms fade-out.
+  - **Made louder (0.8.0):** compressed (tanh, drive 4) so its body is fuller, then brought up to **−0.5 dBFS** peak. Its average level went from −22 to **−13 dBFS**, about 9 dB louder. 16-bit mono WAV at 48 kHz.
   - **Files:** `android/app/src/main/res/raw/touch_tap.wav`, and the same file as `src/web/tap.wav`, served by the plugin at `/tap.wav`.
 - **When it plays:** on the release of a press on any button, tile, row, switch or tab, and when a hold completes.
   - **App:** through the app's own tap indication, set once in `DirectorTheme`.
   - **Browser version:** on any button, switch, tab, link or menu.
-- **Volume:** Settings, Controls, **Touch sound**: Off, 25, 50 (default), 75 or 100%.
-  - 100% plays at gain **0.6** (`TAP_MAX_GAIN`), so a tap sits under the mix you're listening to, not over it.
-  - Up to 3 taps can overlap (`TAP_STREAMS`).
+- **Volume:** Settings, Controls, **Touch sound**, on a loudness scale (`FeedbackTokens.tapGain`):
+
+| Setting | Off | 25% | 50% (default) | 75% | 100% |
+| --- | --- | --- | --- | --- | --- |
+| Level | silent | −12 dB | −6 dB | −3 dB | 0 dB, full |
+
+- **Which volume:** the app plays it on the **media** volume, the one the volume buttons set while you listen, not the quieter system-sounds volume. Up to 3 taps can overlap (`TAP_STREAMS`).
 - **Silent phone:** the app plays no tap sound while the phone is on silent or vibrate, as Android's own touch sounds don't.
 - **OBS dock:** never makes a sound, since OBS may be capturing the PC's audio. A new message while OBS is in the background flashes OBS in the taskbar instead.
 
 ## Vibration
 
-Settings, Controls, **Vibration** sets the strength: Off, Light, Medium (default) or Strong. Choosing one plays a preview.
+Settings, Controls, **Vibration** sets the strength: Off, Light, Medium (default) or Strong. Choosing one plays a preview. Android's built-in "click" effects are too faint on many phones, so the app sets each pulse's length and, where the phone can vary it, its strength.
 
 | | Light | Medium | Strong |
 | --- | --- | --- | --- |
-| Tap tick (Android's built-in effects) | `EFFECT_TICK` | `EFFECT_CLICK` | `EFFECT_HEAVY_CLICK` |
-| Buzz strength (amplitude, 1–255) | 70 | 150 | 255 |
-| Buzz length, on phones that can't vary strength | ×0.5 | ×1 | ×1.4 |
-| Browser tap (`navigator.vibrate`) | 8 ms | 14 ms | 22 ms |
+| Tap (one pulse) | 18 ms at 140 | 28 ms at 210 | 40 ms at 255 |
+| Buzz strength (amplitude, 1–255) | 140 | 210 | 255 |
+| Buzz length (all phones) | ×0.8 | ×1.2 | ×1.6 |
+| Browser tap (`navigator.vibrate`, length only) | 18 ms | 28 ms | 40 ms |
 
-The patterns below are off/on pairs in milliseconds, starting with a pause. The browser version scales the "on" parts by the same ×0.5, ×1 or ×1.4.
+The patterns below are off/on pairs in milliseconds, starting with a pause, before the length scale. The browser version scales the "on" parts the same way.
 
 | Moment | Pattern |
 | --- | --- |
-| A clip starts | `0, 20` |
-| A clip is saved | `0, 20, 60, 20` |
-| A message in the desk chat | `0, 40, 70, 40` |
-| An alert | `0, 200, 100, 200` |
-| A severe alert (recording stopped by someone else, disk nearly full, battery at 5%) | `0, 300, 120, 300, 120, 300` |
-| The connection to the PC drops | `0, 200, 100, 200` |
-| Preview in Settings | `0, 40, 80, 40` |
+| A clip starts | `0, 30` |
+| A clip is saved | `0, 30, 70, 30` |
+| A message in the desk chat | `0, 60, 80, 60` |
+| An alert | `0, 300, 120, 300` |
+| A severe alert (recording stopped by someone else, disk nearly full, battery at 5%) | `0, 400, 150, 400, 150, 400` |
+| The connection to the PC drops | `0, 300, 120, 300` |
+| Preview in Settings | `0, 60, 90, 60` |
 
 ## Alerts
 

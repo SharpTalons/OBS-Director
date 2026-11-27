@@ -20,8 +20,14 @@ A simpler Recordings tab, in the app and the browser version.
 - Recordings without clips stay folded at the end, each with its own delete button.
 
 ### Volume (app)
-- **1 to 100%, on a loudness scale.** The old slider went to 300%, but its limiter squashed the peaks so hard that 300% sounded little louder than 100%. Now each step of the slider is an even step in loudness: 50% is the mix as OBS sends it, 75% is 10 dB louder and 100% is 20 dB louder. A scale under the slider shows −40 dB, −20, As sent, +10 and +20 dB.
+- **1 to 100%, on a loudness scale.** The old slider went to 300%, but its limiter squashed the peaks so hard that 300% sounded little louder than 100%. Now each step of the slider is an even step in loudness: 50% is the mix as OBS sends it, 75% is 12 dB louder and 100% is 24 dB louder. A scale under the slider shows −40 dB, −20, As sent, +12 and +24 dB.
 - **A real boost:** a new limiter brings quiet speech up by the full amount and holds peaks just under full scale, without distorting. Your saved volume carries over to the new scale.
+- **Phone volume:** when the phone's own media volume is below 70%, the line under the slider says so, since nothing can be louder than that allows.
+
+### Touch sound and vibration (app and browser)
+- **A louder tap:** the tap sound is compressed and brought up to just under full scale, about 9 dB louder on average, and the Touch sound setting is now a loudness scale (25, 50, 75 and 100% play at −12, −6, −3 and 0 dB; 100% used to be 60% of the tap).
+- **On the media volume:** the app plays it on the volume the volume buttons set while listening, instead of the quieter system-sounds volume.
+- **Stronger vibration:** taps are now a firm pulse (18, 28 or 40 ms at strength 140, 210 or 255) instead of Android's faint built-in clicks, and every buzz is stronger and longer at each level.
 
 ### Top bar (app)
 - Only Monitor has the top bar now. Recordings, Desk, Settings and Stream start straight with their title, which gives their content more room.

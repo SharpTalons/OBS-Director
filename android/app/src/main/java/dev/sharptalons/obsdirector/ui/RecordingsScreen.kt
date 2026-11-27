@@ -4,6 +4,10 @@ import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
+import dev.sharptalons.obsdirector.audio.Trim
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -325,10 +329,9 @@ private fun RecordingCard(r: Recording, open: Boolean, playingKey: String?, save
                     }
                     Column(Modifier.weight(1f).heightIn(min = 52.dp).clip(RoundedCornerShape(10.dp)).clickable(role = Role.Button, onClickLabel = "Open") { onOpenClip(c) }
                         .padding(vertical = 4.dp), verticalArrangement = Arrangement.Center) {
-                        Text(c.note.ifBlank { "Add a note" }, style = Type.body.copy(fontSize = 15.sp,
-                            fontWeight = if (c.note.isBlank()) FontWeight.Normal else FontWeight.Medium, color = if (c.note.isBlank()) T.muted else T.text),
-                            maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(clipMeta(c), style = Type.small.copy(fontSize = 13.sp))
+                        // its note as the title; a clip without one is named by its time, "No note" under it
+                        Text(clipName(c), style = Type.body.copy(fontSize = 15.sp, fontWeight = FontWeight.Medium), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(if (c.note.isBlank()) "No note · ${clipLength(c.lengthMs)} long" else clipMeta(c), style = Type.small.copy(fontSize = 13.sp))
                     }
                     Box(Modifier.size(48.dp).clip(CircleShape).clickable(role = Role.Button) { onOpenClip(c) }
                         .semantics { contentDescription = "More for ${clipName(c)}" }, contentAlignment = Alignment.Center) {
@@ -415,42 +418,141 @@ private fun SheetTile(label: String, icon: ImageVector, tint: Tint, modifier: Mo
     }
 }
 
-/** Trim: the sound around the clip with the kept part lit, then Start and End, 5 s at a time. */
+/**
+ * Trim, the way phones trim video: the sound of the clip with 15 s either side, the kept part lit,
+ * and a handle at each end. Drag a handle to move that end, or drag the lit part to move the whole
+ * clip; tap elsewhere to bring the nearer end there. Letting go of a handle settles it in the
+ * nearest pause (see [Trim.snap]) and plays a moment of sound at that edge, so you hear the cut.
+ * ±1 s fine-tunes the end you last touched. Nothing changes until Save.
+ */
 @Composable
 private fun TrimPanel(r: Recording, c: Clip, onDone: () -> Unit) {
     var start by remember(c.id) { mutableLongStateOf(c.startMs) }
     var end by remember(c.id) { mutableLongStateOf(c.endMs) }
+    var active by remember(c.id) { mutableStateOf("start") } // the end ±1 s moves
     val playback by ClipPlayer.playback.collectAsState()
     val envelope = Director.liveEnvelope(r.file) ?: r.envelope
-    val duration = if (r.live) Director.nowFileTimeMs() else r.durationMs.coerceAtLeast(envelope.size * 100L)
-    val from = (minOf(start, c.startMs) - 30_000).coerceAtLeast(0)
-    val to = (maxOf(end, c.endMs) + 30_000).let { if (duration > 0) it.coerceAtMost(duration) else it }
-    val span = (to - from).coerceAtLeast(1)
+    val duration = if (r.live) Director.nowFileTimeMs() else r.durationMs.coerceAtLeast(envelope.size * Trim.ENVELOPE_MS)
+    // the view: the clip with 15 s either side, widened when an end is dragged to its side
+    var view by remember(c.id) { mutableStateOf(Trim.window(c.startMs, c.endMs, duration)) }
     val trimPlaying = playback.playing && playback.key == "trim"
-    Canvas(Modifier.fillMaxWidth().height(48.dp).clip(RoundedCornerShape(10.dp)).background(T.sunken)
-        .semantics { contentDescription = "Sound around the clip. Kept: ${Director.tc(start)} to ${Director.tc(end)}" }) {
-        val sx = (start - from) / span.toFloat() * size.width
-        val ex = (end - from) / span.toFloat() * size.width
-        drawRect(Tints.teal.bg, Offset(sx, 0f), Size(ex - sx, size.height))
-        val bars = 60
-        val bw = size.width / bars
-        for (k in 0 until bars) {
-            val t = from + span * k / bars
-            val a = (envelope.getOrNull((t / 100).toInt()) ?: 0.05f).coerceIn(0.06f, 1f)
-            val h = a * size.height * 0.85f
-            drawRect(if (t in start..end) Tints.teal.ink else T.waveform, Offset(k * bw + bw * 0.2f, (size.height - h) / 2), Size(bw * 0.6f, h))
-        }
-        if (trimPlaying) {
-            val px = (playback.posMs - from) / span.toFloat() * size.width
-            drawRect(Color.White, Offset(px, 0f), Size(2f, size.height))
-        }
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val grab = with(density) { 28.dp.toPx() }
+
+    fun hear(edge: String) {
+        if (edge == "start") playClip(r, c, "trim", start, minOf(start + 2000, end))
+        else if (edge == "end") playClip(r, c, "trim", maxOf(start, end - 2000), end)
     }
-    TrimRow("Starts at", start, onEarlier = { start = (start - 5000).coerceAtLeast(0) }, onLater = { start = minOf(start + 5000, end - 1000) })
-    TrimRow("Ends at", end, onEarlier = { end = maxOf(end - 5000, start + 1000) },
-        onLater = { end = if (duration > 0) minOf(end + 5000, duration) else end + 5000 })
-    OutlineButton(if (trimPlaying) "Stop" else "Play ${Director.len(end - start)}", if (trimPlaying) Icons.Outlined.Stop else Icons.Outlined.PlayArrow,
+    fun settle(edge: String) {
+        if (edge == "start") start = Trim.moveStart(start, end, Trim.snap(start, envelope))
+        if (edge == "end") end = Trim.moveEnd(start, end, Trim.snap(end, envelope), duration)
+        // an end pushed to the side of the view: show more
+        if (start - view.first < 1500 || view.last - end < 1500) view = Trim.window(start, end, duration)
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Canvas(
+            Modifier.fillMaxWidth().height(84.dp).clip(RoundedCornerShape(12.dp)).background(T.sunken)
+                .semantics { contentDescription = "Trimmer. Keeps ${Director.tc(start)} to ${Director.tc(end)}, ${clipLength(end - start)}. Use the buttons below to move each end." }
+                .pointerInput(c.id) {
+                    awaitEachGesture {
+                        val down = awaitFirstDown()
+                        val w = size.width.toFloat()
+                        val span = (view.last - view.first).coerceAtLeast(1)
+                        fun msAt(x: Float) = view.first + (x / w * span).toLong()
+                        val sx = (start - view.first) / span.toFloat() * w
+                        val ex = (end - view.first) / span.toFloat() * w
+                        val x0 = down.position.x
+                        // which part was grabbed: an end, the kept part, or elsewhere (the nearer end jumps there)
+                        val target = when {
+                            kotlin.math.abs(x0 - sx) <= grab && kotlin.math.abs(x0 - sx) <= kotlin.math.abs(x0 - ex) -> "start"
+                            kotlin.math.abs(x0 - ex) <= grab -> "end"
+                            x0 > sx && x0 < ex -> "both"
+                            kotlin.math.abs(x0 - sx) < kotlin.math.abs(x0 - ex) -> { start = Trim.moveStart(start, end, msAt(x0)); "start" }
+                            else -> { end = Trim.moveEnd(start, end, msAt(x0), duration); "end" }
+                        }
+                        if (target != "both") active = target
+                        if (trimPlaying) ClipPlayer.stop()
+                        val startAt = start
+                        down.consume()
+                        while (true) {
+                            val ev = awaitPointerEvent()
+                            val ch = ev.changes.firstOrNull { it.id == down.id } ?: break
+                            if (!ch.pressed) break
+                            val x = ch.position.x.coerceIn(0f, w)
+                            when (target) {
+                                "start" -> start = Trim.moveStart(start, end, msAt(x))
+                                "end" -> end = Trim.moveEnd(start, end, msAt(x), duration)
+                                "both" -> {
+                                    val len = end - start
+                                    start = Trim.moveBoth(startAt, startAt + len, ((x - x0) / w * span).toLong(), duration)
+                                    end = start + len
+                                }
+                            }
+                            ch.consume()
+                        }
+                        if (target != "both") { settle(target); hear(target) }
+                    }
+                },
+        ) {
+            val span = (view.last - view.first).coerceAtLeast(1)
+            val sx = (start - view.first) / span.toFloat() * size.width
+            val ex = (end - view.first) / span.toFloat() * size.width
+            // the kept part
+            drawRect(Tints.teal.bg, Offset(sx, 0f), Size(ex - sx, size.height))
+            // the sound: one bar per few pixels, lit inside the clip
+            val bars = (size.width / 6f).toInt().coerceAtLeast(20)
+            val bw = size.width / bars
+            for (k in 0 until bars) {
+                val t = view.first + span * k / bars
+                val a = (envelope.getOrNull((t / Trim.ENVELOPE_MS).toInt()) ?: 0.08f).coerceIn(0.06f, 1f)
+                val h = a * size.height * 0.7f
+                drawRect(if (t in start..end) Tints.teal.ink else T.waveform, Offset(k * bw + bw * 0.25f, (size.height - h) / 2), Size(bw * 0.5f, h))
+            }
+            // the two handles: a line with a grip, brighter for the end ±1 s moves
+            for ((x, which) in listOf(sx to "start", ex to "end")) {
+                val col = if (active == which) T.text else Tints.teal.ink
+                val line = 2.dp.toPx(); val gw = 12.dp.toPx(); val gh = 32.dp.toPx()
+                drawRect(col, Offset(x - line / 2, 0f), Size(line, size.height))
+                drawRoundRect(col, Offset(x - gw / 2, size.height / 2 - gh / 2), Size(gw, gh), androidx.compose.ui.geometry.CornerRadius(4.dp.toPx()))
+                // two little ridges on the grip, so it reads as something to drag
+                for (k in listOf(-2.5f, 2.5f)) drawRect(T.sunken, Offset(x + k.dp.toPx() - 0.5.dp.toPx(), size.height / 2 - 8.dp.toPx()), Size(1.dp.toPx(), 16.dp.toPx()))
+            }
+            if (trimPlaying) {
+                val px = (playback.posMs - view.first) / span.toFloat() * size.width
+                drawRect(Color.White, Offset(px - 1f, 0f), Size(2f, size.height))
+            }
+        }
+        // the two ends and the length; tapping a time picks that end for ±1 s
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            EdgeTime("Start", start, active == "start", Modifier.weight(1f)) { active = "start" }
+            Text(clipLength(end - start), style = Type.body.copy(fontSize = 15.sp, fontWeight = FontWeight.Medium), textAlign = TextAlign.Center,
+                modifier = Modifier.weight(1f).semantics { contentDescription = "Length ${clipLength(end - start)}" })
+            EdgeTime("End", end, active == "end", Modifier.weight(1f), alignEnd = true) { active = "end" }
+        }
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            val which = if (active == "start") "start" else "end"
+            Text("Move the $which", style = Type.small.copy(fontSize = 13.sp), modifier = Modifier.weight(1f))
+            listOf(-1000L to "−1 s", 1000L to "+1 s").forEach { (d, t) ->
+                Box(Modifier.width(64.dp).height(48.dp).clip(RoundedCornerShape(12.dp)).background(T.raised)
+                    .clickable(role = Role.Button) {
+                        if (active == "start") start = Trim.moveStart(start, end, start + d) else end = Trim.moveEnd(start, end, end + d, duration)
+                        hear(active)
+                    }
+                    .semantics { contentDescription = "Move the $which 1 second ${if (d > 0) "later" else "earlier"}" },
+                    contentAlignment = Alignment.Center) { Text(t, style = Type.body.copy(fontSize = 14.sp, fontWeight = FontWeight.Medium)) }
+            }
+        }
+        Text(if (envelope.isEmpty()) "Drag the ends, or the lit part to move the whole clip."
+            else "Drag the ends, or the lit part to move the whole clip. Each end settles in the nearest pause.",
+            style = Type.small.copy(fontSize = 12.sp))
+    }
+    OutlineButton(if (trimPlaying) "Stop" else "Play ${clipLength(end - start)}", if (trimPlaying) Icons.Outlined.Stop else Icons.Outlined.PlayArrow,
         Modifier.fillMaxWidth()) { if (trimPlaying) ClipPlayer.stop() else playClip(r, c, "trim", start, end) }
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        OutlineButton("Reset", modifier = Modifier.weight(1f), enabled = start != c.startMs || end != c.endMs) {
+            start = c.startMs; end = c.endMs; view = Trim.window(c.startMs, c.endMs, duration)
+        }
         OutlineButton("Cancel", modifier = Modifier.weight(1f)) { if (trimPlaying) ClipPlayer.stop(); onDone() }
         PrimaryButton("Save", modifier = Modifier.weight(1f)) {
             ClipPlayer.stop()
@@ -461,19 +563,17 @@ private fun TrimPanel(r: Recording, c: Clip, onDone: () -> Unit) {
     }
 }
 
+/** One end's time under the trimmer; the one ±1 s moves is underlined in blue. */
 @Composable
-private fun TrimRow(label: String, ms: Long, onEarlier: () -> Unit, onLater: () -> Unit) {
-    Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).clip(RoundedCornerShape(14.dp)).background(T.sunken).padding(start = 14.dp, end = 6.dp),
-        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Column(Modifier.weight(1f)) {
-            Text(label, style = Type.small.copy(fontSize = 13.sp))
-            Text(Director.tc(ms), style = Type.body.copy(fontSize = 17.sp, fontWeight = FontWeight.Medium))
-        }
-        listOf(Triple("−5 s", "5 seconds earlier", onEarlier), Triple("+5 s", "5 seconds later", onLater)).forEach { (t, said, go) ->
-            Box(Modifier.width(64.dp).height(48.dp).clip(RoundedCornerShape(12.dp)).background(T.raised)
-                .clickable(role = Role.Button, onClick = go).semantics { contentDescription = "$label: $said" },
-                contentAlignment = Alignment.Center) { Text(t, style = Type.body.copy(fontSize = 14.sp, fontWeight = FontWeight.Medium)) }
-        }
+private fun EdgeTime(label: String, ms: Long, active: Boolean, modifier: Modifier, alignEnd: Boolean = false, onPick: () -> Unit) {
+    Column(
+        modifier.heightIn(min = 48.dp).clip(RoundedCornerShape(10.dp)).clickable(role = Role.Button, onClickLabel = "Fine-tune the ${label.lowercase()}", onClick = onPick)
+            .semantics { stateDescription = if (active) "Selected" else "" }.padding(horizontal = 6.dp, vertical = 4.dp),
+        horizontalAlignment = if (alignEnd) Alignment.End else Alignment.Start, verticalArrangement = Arrangement.Center,
+    ) {
+        Text(label, style = Type.small.copy(fontSize = 12.sp, color = if (active) T.accent else T.muted))
+        Text(Director.tc(ms), style = Type.body.copy(fontSize = 16.sp, fontWeight = FontWeight.Medium, color = if (active) T.text else T.text2))
+        Box(Modifier.width(24.dp).height(2.dp).background(if (active) T.accent else Color.Transparent))
     }
 }
 

@@ -21,10 +21,12 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 #include <plugin-support.h>
 
 #include "desk-dock.hpp"
+#include "update-check.hpp"
 #include "director-server.hpp"
 #include "video-preview.hpp"
 
 #include <QDateTime>
+#include <QCheckBox>
 #include <QDialog>
 #include <QFormLayout>
 #include <QHBoxLayout>
@@ -40,6 +42,7 @@ OBS_MODULE_USE_DEFAULT_LOCALE(PLUGIN_NAME, "en-US")
 
 static DirectorServer *server = nullptr;
 static DeskDock *dock = nullptr;
+static UpdateCheck *updates = nullptr;
 
 /* A string from data/locale, so the Tools window can be translated like the rest of OBS. */
 static QString text(const char *key)
@@ -86,6 +89,22 @@ static void showConnectInfo(void *)
 	QObject::connect(server, &DirectorServer::addressChanged, &dlg, showWeb);
 	form->addRow(text("OBSDirector.Tools.InBrowser"), web);
 	form->addRow(text("OBSDirector.Tools.Plugin"), new QLabel(QString::fromUtf8(PLUGIN_VERSION), &dlg));
+	if (updates) {
+		/* updates: how the last check went, Check now, and the daily check on or off */
+		auto *updateRow = new QHBoxLayout();
+		auto *updateStatus = new QLabel(updates->status(), &dlg);
+		updateStatus->setWordWrap(true);
+		auto *checkNow = new QPushButton(text("OBSDirector.Update.CheckNow"), &dlg);
+		updateRow->addWidget(updateStatus, 1);
+		updateRow->addWidget(checkNow);
+		form->addRow(text("OBSDirector.Update.Row"), updateRow);
+		auto *autoCheck = new QCheckBox(text("OBSDirector.Update.Auto"), &dlg);
+		autoCheck->setChecked(updates->autoCheck());
+		form->addRow(QString(), autoCheck);
+		QObject::connect(updates, &UpdateCheck::statusChanged, updateStatus, &QLabel::setText);
+		QObject::connect(checkNow, &QPushButton::clicked, &dlg, []() { updates->checkNow(); });
+		QObject::connect(autoCheck, &QCheckBox::toggled, &dlg, [](bool on) { updates->setAutoCheck(on); });
+	}
 	root->addLayout(form);
 
 	auto *heading = new QLabel(text("OBSDirector.Tools.Allowed"), &dlg);
@@ -118,6 +137,10 @@ static void showConnectInfo(void *)
 							 text("OBSDirector.Tools.AllowedOn").arg(when),
 				list);
 			item->setData(Qt::UserRole, t.id);
+			item->setData(Qt::AccessibleTextRole,
+				      when.isEmpty() ? t.name
+						     : t.name + QStringLiteral(", ") +
+							       text("OBSDirector.Tools.AllowedOn").arg(when));
 		}
 		bool none = list->count() == 0;
 		list->setVisible(!none);
@@ -163,6 +186,13 @@ static void onFrontendEvent(enum obs_frontend_event event, void *)
 			obs_log(LOG_WARNING, "could not add the desk dock");
 		server = new DirectorServer(dock);
 		obs_frontend_add_tools_menu_item(obs_module_text("OBSDirector.Tools"), showConnectInfo, nullptr);
+		updates = new UpdateCheck(
+			[](const QString &line) {
+				if (dock)
+					dock->addFeed(line);
+			},
+			main);
+		updates->checkSoon();
 		break;
 	}
 	case OBS_FRONTEND_EVENT_EXIT:
@@ -172,6 +202,10 @@ static void onFrontendEvent(enum obs_frontend_event event, void *)
 	default:
 		if (server)
 			server->handleFrontendEvent(event);
+		/* an update held back during a stream or recording is offered once both have stopped */
+		if (updates &&
+		    (event == OBS_FRONTEND_EVENT_RECORDING_STOPPED || event == OBS_FRONTEND_EVENT_STREAMING_STOPPED))
+			updates->obsIdle();
 		break;
 	}
 }

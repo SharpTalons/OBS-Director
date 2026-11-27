@@ -13,7 +13,7 @@ OBS Director has three parts:
 - **Monitor**: the recording's file name and timecode, the Clip button, the mix with meters that read like OBS's own (−60 to 0 dB, green, yellow from −20, red from −9, with a peak hold), listening with about 40 ms of delay on the phone's speaker or wired headphones (about 200 ms on Bluetooth, which needs a bigger cushion to play smoothly), and the live picture when you switch it on (off by default, never in the background). A line under the meter says how the phone's Wi-Fi is holding up.
 - **Listening**: plays through whatever your phone is using (Bluetooth, a wired headset, a USB sound card, the headphone jack or the speaker), or pick one in **Settings, Listening, Play through**. **Play a test sound** checks it without OBS. The volume slider runs from 1 to 100% on a loudness scale: 50% is the mix as OBS sends it, 75% is 12 dB louder and 100% is 24 dB louder, for quiet rooms, with a limiter so loud parts don't distort.
 - **Clips**: one button, which shows the clip's length while it runs. A clip starts a minute before your tap (so the build-up is in) and ends a couple of seconds after the second tap. Add a typed or spoken note.
-- **Recordings**: one screen, clips first. Each recording is a card with its clips inside; tap a heading to open or fold it. Every clip has its own Play button, and a small player shows above the tabs while one plays. Tap a clip for one sheet with Play, Trim (start and end, 5 s at a time), Note, Share (its audio as .m4a) and Delete, with Undo. Recordings without clips stay folded at the end. Delete a recording from its ⋯ menu, or all of them from the end of the list or Settings; the files on the PC aren't touched.
+- **Recordings**: one screen, clips first. Each recording is a card with its clips inside; tap a heading to open or fold it. Every clip has its own Play button, and a small player shows above the tabs while one plays. Tap a clip for one sheet with Play, Trim (drag the ends on the clip's waveform; each end settles in the nearest pause), Note, Share (its audio as .m4a) and Delete, with Undo. Recordings without clips stay folded at the end. Delete a recording from its ⋯ menu, or all of them from the end of the list or Settings; the files on the PC aren't touched.
 - **Export**: from a recording's ⋯ menu, as a DaVinci Resolve marker EDL, CSV or a plain list, to share or save on the phone. The plugin also saves the EDL and CSV next to the recording on the PC, so the editor finds them there (you can turn this off in Settings).
 - **Stream**: tap **Stream and PC details** (or the stream chip) on Monitor for the stream, the PC (processor, frame rate, lag, disk) and the network, each on its own tab.
 - **Stage mode**: the masks icon in Monitor's top bar (the other screens have no top bar, just their title). A black, dim screen with the time, the meter and a big Clip button, for a phone propped up during a service or a show.
@@ -80,7 +80,7 @@ Volunteers see your phone's name in the OBS dock while you're connected. To chan
 
 **In a browser instead:** open the address under **In a browser** in **Tools, OBS Director** (it looks like `http://192.168.1.24:4470`) in Chrome, Edge or Firefox on any computer on the same network, the OBS PC included. OBS asks **Allow "Chrome on Windows" to connect?** once, the same as for a phone. Everything the app does works there:
 
-- listening through that computer's sound output, with the same meters and volume up to 300%
+- listening through that computer's sound output, with the same meters and the same 1–100% loudness scale as the app
 - the live picture
 - Start clip (or press **Space**), and Stage mode (**Esc** leaves it)
 - recordings, with Play, Adjust, Note, Download audio and Delete for each clip
@@ -90,6 +90,8 @@ Volunteers see your phone's name in the OBS dock while you're connected. To chan
 What a browser keeps (settings, clips and the session audio for playing clips back) stays in that browser. The page comes from the plugin, so it updates when you update the plugin.
 
 **Tools, OBS Director** in OBS shows the PC's address and lists the phones and browsers you've allowed. Select one and press **Remove** to stop it connecting; it would have to be allowed again.
+
+**Updates:** once a day, shortly after OBS starts, the plugin asks GitHub whether a newer OBS Director is out (nothing about your PC is sent). If one is, OBS offers **Download** (the Windows installer), **Skip this version** or **Later**. It never interrupts a stream or a recording: it leaves a note in the dock and asks once both have stopped. **Tools, OBS Director** has **Check now**, and a switch to turn the daily check off. The phone app checks for its own updates the same way.
 
 ### Troubleshooting
 

@@ -34,6 +34,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -74,10 +75,9 @@ fun StageScreen(onExit: () -> Unit) {
     }
 
     Column(
-        Modifier.fillMaxSize().background(Stage.ground).windowInsetsPadding(WindowInsets.safeDrawing).padding(horizontal = 20.dp, vertical = 16.dp),
+        Modifier.fillMaxSize().semantics { paneTitle = "Stage mode" }.background(Stage.ground).windowInsetsPadding(WindowInsets.safeDrawing).padding(horizontal = 20.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(20.dp),
     ) {
-        Text("Stage mode", style = Type.label, modifier = Modifier.size(1.dp).semantics { heading() })
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(8.dp).clip(CircleShape).background(if (status.recActive) Stage.rec else Stage.muted))
             Spacer(Modifier.width(10.dp))

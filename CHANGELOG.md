@@ -5,6 +5,41 @@ All notable changes to OBS Director (plugin and Android app). The project follow
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-11-27
+
+Fixes from design audits and reviews of the app, the browser version and the OBS dock.
+
+### Android app
+- **Connection status off Monitor:** Recordings, Desk, Settings and Stream show a slim amber line at the top while the connection is lost or connecting (tap it to connect), since they have no top bar.
+- **Clip titles:** a clip without a note is named by its time ("Clip at 00:52:00") with "No note" under it, instead of "Add a note", which read like a button.
+- **Volume in words:** the line under the slider says how loud in plain terms, such as "About twice as loud (+12 dB)".
+- **Delay and Bluetooth:** the Delay choices are now Auto, 20, 40, 80 and 160 ms, and on Bluetooth the row says it uses 160 ms there.
+- Recordings uses more of a tablet's width (840 dp). Stage mode names itself to screen readers properly.
+
+### Browser version
+- **Volume like the app:** 1 to 100% on the same loudness scale (50% as sent, +24 dB at 100%), a scale under the slider, the level in words, and a limiter in place of the old soft clip, so the boost is really louder. A saved 300% becomes 70%.
+- **How it works:** a short guide under Settings, About.
+- **Hold to stop** is a filled button now, not one that looks switched off.
+- **On phones:** the header shows on Monitor (and anywhere while the connection needs attention), and the Stream tab is labelled "Stream" so it fits.
+- Clip titles match the app.
+
+### A new trimmer (app and browser)
+- **Trim the way phones trim video.** The sound of the clip is drawn with 15 s either side and the kept part lit. Drag the handle at either end to move it, or drag the lit part to move the whole clip; tap anywhere else to bring the nearer end there.
+- **Hear each cut:** letting go of an end plays a moment of sound at that edge.
+- **Cuts land between words:** an end you let go settles in the nearest pause within half a second (when the session audio is saved).
+- **Fine-tune:** ±1 s moves whichever end you last touched; tap Start or End under the trimmer to pick one. In the browser the ends are sliders too: arrow keys move them 1 s, Page Up and Page Down 5 s.
+- Dragging an end to the side of the view widens it. **Reset** puts the clip back; nothing changes until **Save**.
+
+### OBS plugin: update check
+- **Tells you when a new version is out.** Once a day, shortly after OBS starts, the plugin asks GitHub for the newest release (nothing about the PC is sent). If it's newer, OBS offers **Download** (the Windows installer), **Skip this version** or **Later**, with the release notes under **Show Details**.
+- **Never mid-show:** while streaming or recording it only leaves a note in the dock, and asks once both have stopped.
+- **Tools, OBS Director** shows how the last check went, has **Check now**, and a switch to turn the daily check off.
+
+### OBS dock
+- The status line at the top uses the chat's dark colours, so there's no light strip in light OBS themes.
+- The empty chat says how to write: Enter for a new line, Ctrl+Enter to send.
+- Phones and browsers in Tools, OBS Director read out with the date they were allowed.
+
 ## [0.8.0] - 2026-11-27
 
 A simpler Recordings tab, in the app and the browser version.

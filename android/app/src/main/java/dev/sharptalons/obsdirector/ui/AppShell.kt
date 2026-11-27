@@ -17,6 +17,8 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
@@ -153,6 +155,8 @@ fun AppShell() {
         // The top bar (connection, Stage mode, connect) belongs to Monitor. The other screens have
         // their own title and give the room to their content; Settings has the OBS PC row.
         if (screen == "monitor") HeadBar(link, pc, latency, awaiting, onStage = { screen = "stage" }, onConnect = { connectOpen = true })
+        // Off Monitor there is no top bar, so say so here when the connection isn't healthy
+        else if (link != LinkState.CONNECTED) ConnectionStrip(link, pc?.name, awaiting) { connectOpen = true }
         // Alerts don't sit on top of the screens: they notify, and show up in the Desk chat.
         val top: (@Composable () -> Unit)? = null
         Row(Modifier.weight(1f).fillMaxWidth()) {
@@ -165,7 +169,8 @@ fun AppShell() {
         }
         Box(Modifier.weight(1f).fillMaxHeight(), contentAlignment = Alignment.TopCenter) {
             // the content keeps a phone's reading width
-            val content = Modifier.fillMaxHeight().widthIn(max = 640.dp).fillMaxWidth()
+            // a phone's reading width; Recordings may use more on a tablet
+            val content = Modifier.fillMaxHeight().widthIn(max = if (wide && (screen == "recordings" || screen == "recording")) 840.dp else 640.dp).fillMaxWidth()
             when (screen) {
                 // one screen for recordings and their clips; "recording" opens one of them
                 "recording", "recordings" -> RecordingsScreen(content, top, focus = if (screen == "recording") openFile else null)
@@ -283,5 +288,23 @@ fun HowStep(n: String, title: String, body: String) {
             Text(title, style = Type.body.copy(fontWeight = FontWeight.Medium))
             Text(body, style = Type.small.copy(fontSize = 13.sp))
         }
+    }
+}
+
+/** A slim line at the top of Recordings, Desk, Settings and Stream while the connection isn't healthy. */
+@Composable
+private fun ConnectionStrip(link: LinkState, pcName: String?, waiting: String?, onConnect: () -> Unit) {
+    val (text, tint) = when (link) {
+        LinkState.LOST -> "Connection to ${pcName ?: "the PC"} lost · reconnecting" to Tints.amber
+        LinkState.CONNECTING -> (if (waiting != null) "Waiting for Allow in OBS on ${pcName ?: "the PC"}" else "Connecting to ${pcName ?: "the PC"}…") to Tints.amber
+        else -> "Not connected to OBS · tap to connect" to Tints.neutral
+    }
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = 40.dp).background(tint.bg).clickable(role = Role.Button, onClickLabel = "Connect", onClick = onConnect)
+            .semantics { liveRegion = androidx.compose.ui.semantics.LiveRegionMode.Polite }.padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Box(Modifier.size(8.dp).clip(CircleShape).background(if (link == LinkState.DISCONNECTED) T.muted else T.warning))
+        Text(text, style = Type.small.copy(fontSize = 13.sp, color = tint.ink, fontWeight = FontWeight.Medium), modifier = Modifier.weight(1f))
     }
 }

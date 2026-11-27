@@ -38,6 +38,7 @@ QString chatStyle(double pt)
 	};
 	return QStringLiteral(R"(
 QWidget#chat { background: #0b141a; }
+QLabel#presence { background: #1c2a31; color: #e3e9ec; font-weight: 600; font-size: %2; }
 QLabel#empty { color: #c9d3d8; font-size: %2; }
 QFrame#in { background: #2b3b45; border: 1px solid #3d4e59; border-radius: 10px; }
 QFrame#out { background: #005c4b; border: 1px solid #0a7a63; border-radius: 10px; }
@@ -89,7 +90,8 @@ DeskDock::DeskDock(QWidget *parent) : QWidget(parent)
 	presence->setWordWrap(true);
 	presence->setTextFormat(Qt::PlainText);
 	presence->setContentsMargins(10, 6, 10, 6);
-	presence->setStyleSheet("font-weight: 600;");
+	/* in the chat's own colours, so it doesn't stand out as a light strip in light OBS themes */
+	presence->setObjectName("presence");
 	root->addWidget(presence);
 
 	scroll = new QScrollArea(this);
@@ -103,7 +105,9 @@ DeskDock::DeskDock(QWidget *parent) : QWidget(parent)
 	list->setContentsMargins(10, 10, 10, 10);
 	list->setSpacing(4);
 	list->addStretch(1); /* messages sit at the bottom, newest last, like a chat */
-	empty = new QLabel(tr("Messages with the phones and browsers appear here."), inner);
+	empty = new QLabel(tr("Messages with the phones and browsers appear here.\n"
+			      "Write below: Enter starts a new line, Ctrl+Enter sends."),
+			   inner);
 	empty->setObjectName("empty");
 	empty->setAlignment(Qt::AlignCenter);
 	empty->setWordWrap(true);

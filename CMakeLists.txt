@@ -42,6 +42,8 @@ target_sources(
     src/desk-dock.cpp
     src/desk-dock.hpp
     src/web-server.cpp
+    src/update-check.cpp
+    src/update-check.hpp
     src/web/web.qrc
 )
 

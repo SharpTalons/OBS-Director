@@ -32,6 +32,8 @@ class AudioEngine(private val onPcm: (pcm: ShortArray, fileTimeUs: Long, recordi
         const val RATE = 48000
         const val CHANNELS = 2
         const val FRAMES_PER_PACKET = 240 // 5 ms
+        /** The least cushion kept queued for a Bluetooth output. */
+        const val BT_CUSHION_MS = 160
         private const val HEADER = 24
     }
 
@@ -65,6 +67,11 @@ class AudioEngine(private val onPcm: (pcm: ShortArray, fileTimeUs: Long, recordi
     private var headStillSince = 0L
     private var adaptiveMs = 10
     private var lateCount = 0
+    /** The current track plays to Bluetooth: a deeper buffer and cushion. */
+    private var bluetooth = false
+    /** The buffer level, smoothed over about half a second: Bluetooth's play head moves in jumps. */
+    private var smoothedMs = -1.0
+    private val resampler = Resampler()
 
     val port: Int get() = socket?.localPort ?: 0
 
@@ -111,10 +118,12 @@ class AudioEngine(private val onPcm: (pcm: ShortArray, fileTimeUs: Long, recordi
         router?.dirty = false
         route?.let { router?.applyCallRoute(it) }
         val minBytes = AudioTrack.getMinBufferSize(RATE, AudioFormat.CHANNEL_OUT_STEREO, AudioFormat.ENCODING_PCM_16BIT)
-        // A small buffer: Android only starts an ordinary (not low-latency) track once its buffer
-        // has been filled, and we keep just a few tens of ms queued. A 200 ms buffer that we never
-        // fill meant Bluetooth, USB and some headsets stayed silent.
-        val bytes = max(minBytes, RATE * CHANNELS * 2 * 60 / 1000)
+        // Bluetooth pulls audio in uneven bursts of 20-40 ms, so it gets a deep buffer (400 ms)
+        // and a cushion of about 160 ms; the phone's speaker and wired headphones keep a small one.
+        // Either way playback starts once the start threshold is queued (below), not when the
+        // whole buffer is full: a buffer that never fills kept some outputs silent.
+        bluetooth = route?.lowLatency == false
+        val bytes = max(minBytes, RATE * CHANNELS * 2 * (if (bluetooth) 400 else 60) / 1000)
         val t = AudioTrack.Builder()
             .setAudioAttributes(
                 AudioAttributes.Builder()
@@ -136,11 +145,13 @@ class AudioEngine(private val onPcm: (pcm: ShortArray, fileTimeUs: Long, recordi
             // and on some phones a low-latency track won't move to a Bluetooth headset.
             .setPerformanceMode(if (route == null || route.lowLatency) AudioTrack.PERFORMANCE_MODE_LOW_LATENCY else AudioTrack.PERFORMANCE_MODE_NONE)
             .build()
-        // Start as soon as ~20 ms is queued, not when the whole buffer is full.
+        // Start once ~20 ms is queued (120 ms on Bluetooth), not when the whole buffer is full.
         if (android.os.Build.VERSION.SDK_INT >= 31)
-            runCatching { t.setStartThresholdInFrames(minOf(t.bufferSizeInFrames, RATE / 50)) }
+            runCatching { t.setStartThresholdInFrames(minOf(t.bufferSizeInFrames, RATE * (if (bluetooth) 120 else 20) / 1000)) }
         route?.device?.let { t.setPreferredDevice(it) }
         started = false
+        resampler.reset()
+        smoothedMs = -1.0
         trackMadeAt = SystemClock.elapsedRealtime()
         lastHead = 0
         headStillSince = 0
@@ -197,6 +208,8 @@ class AudioEngine(private val onPcm: (pcm: ShortArray, fileTimeUs: Long, recordi
                     val t = if (fileTimeUs > 0) fileTimeUs - (missing - i) * packetUs else 0
                     onPcm(silence, t, recording, true)
                 }
+                // and keep the cushion steady while listening: a short loss plays as a short gap
+                if (missing <= 20) repeat(missing.toInt()) { play(silence) }
                 lateCount++
             } else if (expectedSeq >= 0 && seq < expectedSeq) {
                 continue // late, already covered
@@ -265,23 +278,40 @@ class AudioEngine(private val onPcm: (pcm: ShortArray, fileTimeUs: Long, recordi
         if (head != lastHead) { lastHead = head; headStillSince = now }
         else if (headStillSince > 0 && now - headStillSince > 1500) { releaseTrack(); return }
 
-        val target = if (targetBufferMs > 0) targetBufferMs else adaptiveMs
+        // The cushion to keep queued. Bluetooth never goes below 160 ms, whatever Delay says.
+        val target = if (bluetooth) max(BT_CUSHION_MS, targetBufferMs) else if (targetBufferMs > 0) targetBufferMs else adaptiveMs
         val buffered = bufferedMs()
-        // grow the adaptive buffer when packets go missing, shrink it slowly when all is well
-        if (targetBufferMs == 0) {
-            if (lateCount > 3) { adaptiveMs = (adaptiveMs + 10).coerceAtMost(60); lateCount = 0 }
-            else if (buffered < 2) { adaptiveMs = (adaptiveMs + 5).coerceAtMost(60) }
+        smoothedMs = if (smoothedMs < 0) buffered.toDouble() else smoothedMs + (buffered - smoothedMs) * 0.02
+        // grow the adaptive buffer when packets go missing (phone speaker and wired only)
+        if (!bluetooth && targetBufferMs == 0 && lateCount > 3) { adaptiveMs = (adaptiveMs + 10).coerceAtMost(60); lateCount = 0 }
+
+        // Ran dry (Wi-Fi stalled): there is already a gap, so put the cushion back in one go
+        // rather than limp along at the edge and crackle.
+        if (buffered < 3) {
+            if (!bluetooth && targetBufferMs == 0) adaptiveMs = (adaptiveMs + 5).coerceAtMost(60)
+            writeSilence(t, target / 2)
+            smoothedMs = target / 2.0
         }
-        // drift correction: drop a packet when we're ahead, repeat one when we run dry
-        if (buffered > target + 25) return
-        val n = t.write(out, 0, out.size, AudioTrack.WRITE_NON_BLOCKING)
-        if (n > 0) framesWritten += n / CHANNELS
-        if (buffered < target / 2) {
-            val m = t.write(out, 0, out.size, AudioTrack.WRITE_NON_BLOCKING)
-            if (m > 0) framesWritten += m / CHANNELS
+        // Far too much queued (a long stall that then caught up): start afresh, once.
+        if (smoothedMs > target * 3 + 200) { releaseTrack(); return }
+
+        // Keep the cushion by playing a hair faster or slower (at most 0.6%), never by dropping
+        // or repeating packets, which click.
+        val err = (smoothedMs - target) / target.coerceAtLeast(10)
+        val ratio = 1.0 + (err * 0.004).coerceIn(-0.006, 0.006)
+        resampler.process(out, ratio) { o, len ->
+            val n = t.write(o, 0, len, AudioTrack.WRITE_NON_BLOCKING)
+            if (n > 0) framesWritten += n / CHANNELS
         }
         val outMs = (t.bufferSizeInFrames * 1000 / RATE).coerceAtMost(40)
         latency.value = (bufferedMs() + 6 + outMs / 2).toInt()
+    }
+
+    private fun writeSilence(t: AudioTrack, ms: Int) {
+        val frames = RATE * ms / 1000
+        val z = ShortArray(frames * CHANNELS)
+        val n = t.write(z, 0, z.size, AudioTrack.WRITE_NON_BLOCKING)
+        if (n > 0) framesWritten += n / CHANNELS
     }
 
     /** Louder than the mix: the gain, then [Limiter]. Only what you hear: the saved audio is untouched. */

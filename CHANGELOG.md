@@ -24,6 +24,11 @@ A simpler Recordings tab, in the app and the browser version.
 - **A real boost:** a new limiter brings quiet speech up by the full amount and holds peaks just under full scale, without distorting. Your saved volume carries over to the new scale.
 - **Phone volume:** when the phone's own media volume is below 70%, the line under the slider says so, since nothing can be louder than that allows.
 
+### Smooth listening on Bluetooth (app)
+- **No more crackling on Bluetooth headsets.** Bluetooth takes audio in uneven bursts, and the app's small buffer kept running dry. On Bluetooth it now keeps a deeper cushion (a 400 ms buffer, starting at 120 ms and holding about 160 ms), so listening is about 150 ms further behind than on the speaker, and smooth.
+- **No more clicks from keeping time, on any output.** The app used to drop a 5 ms packet when it got ahead and play one twice when it fell behind; each was a jump in the sound. Now it plays up to 0.6% faster or slower, which no one can hear, and if Wi-Fi stalls it puts the whole cushion back in one go instead of crackling at the edge.
+- Packets lost on the way now play as a short gap that keeps the timing steady.
+
 ### Touch sound and vibration (app and browser)
 - **A louder tap:** the tap sound is compressed and brought up to just under full scale, about 9 dB louder on average, and the Touch sound setting is now a loudness scale (25, 50, 75 and 100% play at −12, −6, −3 and 0 dB; 100% used to be 60% of the tap).
 - **On the media volume:** the app plays it on the volume the volume buttons set while listening, instead of the quieter system-sounds volume.

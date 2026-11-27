@@ -24,8 +24,6 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
-import androidx.compose.ui.semantics.liveRegion
-import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.heading
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -113,7 +111,14 @@ fun AppShell() {
     if (UpdateController.updatePrompt && pendingUpdate != null && !connectOpen) UpdateDialog(pendingUpdate)
     var now by remember { mutableLongStateOf(android.os.SystemClock.elapsedRealtime()) }
     LaunchedEffect(Unit) { while (true) { delay(1000); now = android.os.SystemClock.elapsedRealtime() } }
-    LaunchedEffect(toast) { if (toast != null) { delay(3000); Director.clearToast() } }
+    // confirmations are Android's own snackbar, which screen readers announce by themselves
+    val snackbar = remember { androidx.compose.material3.SnackbarHostState() }
+    LaunchedEffect(toast) {
+        val t = toast ?: return@LaunchedEffect
+        snackbar.currentSnackbarData?.dismiss()
+        snackbar.showSnackbar(t)
+        Director.clearToast()
+    }
 
     // Back steps out to Monitor from the other tabs. On Monitor, Back is Android's own: the app
     // goes to the background (with the predictive back-to-home preview) and keeps listening and
@@ -160,8 +165,17 @@ fun AppShell() {
             // the content keeps a phone's reading width
             val content = Modifier.fillMaxHeight().widthIn(max = 640.dp).fillMaxWidth()
             when (screen) {
-                "recording" -> RecordingScreen(openFile, content, top, onBack = { screen = "recordings" })
-                "recordings" -> RecordingsScreen(content, top, onOpen = { openFile = it; screen = "recording" })
+                // on wide windows the list and the open recording sit side by side
+                "recording", "recordings" -> if (wide) Row(Modifier.fillMaxHeight().widthIn(max = 1100.dp).fillMaxWidth()) {
+                    RecordingsScreen(Modifier.weight(0.42f).fillMaxHeight(), top, selected = if (screen == "recording") openFile else null,
+                        onOpen = { openFile = it; screen = "recording" })
+                    androidx.compose.material3.VerticalDivider(color = T.rule)
+                    if (screen == "recording") RecordingScreen(openFile, Modifier.weight(0.58f).fillMaxHeight(), top, onBack = { screen = "recordings" })
+                    else Box(Modifier.weight(0.58f).fillMaxHeight(), contentAlignment = Alignment.Center) {
+                        Text("Choose a recording to see its clips", style = Type.body.copy(color = T.muted))
+                    }
+                } else if (screen == "recording") RecordingScreen(openFile, content, top, onBack = { screen = "recordings" })
+                else RecordingsScreen(content, top, onOpen = { openFile = it; screen = "recording" })
                 "desk" -> DeskScreen(content)
                 else -> Column(content.verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     top?.invoke()
@@ -178,12 +192,8 @@ fun AppShell() {
                 }
             }
 
-            // a short confirmation; screen readers read it out
-            if (toast != null) {
-                Box(Modifier.align(Alignment.TopCenter).padding(top = 12.dp).clip(RoundedCornerShape(12.dp)).background(T.text)
-                    .semantics { liveRegion = LiveRegionMode.Polite }.padding(horizontal = 16.dp, vertical = 10.dp)) {
-                    Text(toast ?: "", style = Type.body.copy(color = Color.Black, fontWeight = FontWeight.Medium))
-                }
+            androidx.compose.material3.SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).padding(12.dp).widthIn(max = 560.dp)) { data ->
+                androidx.compose.material3.Snackbar(data, containerColor = T.text, contentColor = Color.Black, shape = RoundedCornerShape(12.dp))
             }
         }
         }

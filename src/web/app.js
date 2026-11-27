@@ -263,6 +263,8 @@ const state = {
 	alerts: [],
 	desk: [], // the desk chat, from OBS: {id, from, text, at, desk, mine, state}
 	deskUnread: 0,
+	/** the most urgent unread line: 0 messages only, 1 an alert, 2 a severe alert */
+	deskAlert: 0,
 	health: [], // dropped frames per minute, last 30
 	listening: false,
 	video: false,
@@ -1098,7 +1100,11 @@ function raise(a) {
 /** A line in this browser's chat that isn't a message: an alert card or a connection note. */
 function chatNote(n) {
 	state.desk.push(Object.assign({ id: 'local-' + newId(), at: Date.now(), mine: false, desk: false, state: 'sent' }, n));
-	if (view.name !== 'desk') state.deskUnread++;
+	/* a connection note shows in the chat but doesn't count as unread; an alert colours the count */
+	if (view.name !== 'desk' && n.kind !== 'note') {
+		state.deskUnread++;
+		if (n.kind === 'alert') state.deskAlert = Math.max(state.deskAlert, n.severe ? 2 : 1);
+	}
 }
 
 /** A system notification, when the browser allows it (it does on the OBS PC itself, at localhost). */
@@ -1253,7 +1259,7 @@ const tint = (name) => ({ bg: `var(--${name}-tint)`, ink: `var(--${name}-ink)` }
 function structureKey() {
 	const s = state.status || {};
 	return [state.link, view.name, view.recording, view.open, view.mode, view.streamTab, view.exporting, s.recActive, s.recPaused, s.streamActive,
-		state.clipStart !== null, state.listening, state.video, state.desk.length, state.desk.map((m) => m.state).join(''), state.deskUnread, state.alerts.map((a) => a.id).join(), !!state.lastSaved, settings.allowStreamStop,
+		state.clipStart !== null, state.listening, state.video, state.desk.length, state.desk.map((m) => m.state).join(''), state.deskUnread, state.deskAlert, state.alerts.map((a) => a.id).join(), !!state.lastSaved, settings.allowStreamStop,
 		player.key, recordings.length].join('|');
 }
 
@@ -1292,6 +1298,7 @@ function render() {
 	const newMain = $('.main'), newChat = $('#chat-list');
 	if (newMain && sameView) newMain.scrollTop = mainTop;
 	if (newChat) newChat.scrollTop = chatAtEnd || !sameView ? newChat.scrollHeight : chatTop;
+	startFrames();
 	tick();
 }
 
@@ -1359,13 +1366,15 @@ function appView() {
 	const nav = [['monitor', 'Monitor', 'teal'], ['stream', 'Stream and PC', 'rec'], ['recordings', 'Recordings', 'amber'], ['desk', 'Desk', 'ok'], ['settings', 'Settings', 'purple']];
 	const current = view.name === 'recording' ? 'recordings' : view.name;
 	const page = { monitor: monitorPage, stream: streamPage, recordings: recordingsPage, recording: recordingPage, settings: settingsPage }[view.name] || monitorPage;
-	if (view.name === 'desk') state.deskUnread = 0;
+	if (view.name === 'desk') { state.deskUnread = 0; state.deskAlert = 0; }
 	return h('div.app',
 		h('nav.nav', { 'aria-label': 'Main' },
 			nav.map(([id, label, sw]) => h('button', { type: 'button', 'aria-current': current === id ? 'page' : 'false', onclick: () => { view.name = id; view.open = null; render(); } },
 				h('span.swatch', { style: { background: `var(--${sw}-ink)` } }), label,
 				id === 'recordings' && recordings.some((r) => r.live) ? h('span.badge', h('span.dot', { style: { background: 'var(--rec)' } }), h('span.sr', ', recording now')) : null,
-				id === 'desk' && state.deskUnread ? h('span.count', { 'aria-label': state.deskUnread + ' unread' }, state.deskUnread > 99 ? '99+' : state.deskUnread) : null)),
+				id === 'desk' && state.deskUnread ? h('span.count' + (state.deskAlert === 2 ? '.severe' : state.deskAlert === 1 ? '.alert' : ''),
+					{ 'aria-label': state.deskUnread + ' unread' + (state.deskAlert === 2 ? ', including a severe alert' : state.deskAlert === 1 ? ', including an alert' : '') },
+					state.deskUnread > 99 ? '99+' : state.deskUnread) : null)),
 			h('div.nav-foot', 'Plugin ' + (state.plugin || '–') + ' · page ' + VERSION)),
 		view.name === 'desk' ? h('main.main.chat-main', deskPage()) : h('main.main', h('div.page', page())));
 }
@@ -1643,7 +1652,8 @@ function drawHealth(canvas) {
 
 /* ---------- recordings ---------- */
 function recordingsPage() {
-	const live_ = recordings.filter((r) => r.live), past = recordings.filter((r) => !r.live);
+	/* recordings with no clips go at the end, folded away, so the useful ones come first */
+	const live_ = recordings.filter((r) => r.live), past = recordings.filter((r) => !r.live && r.clips.length), empty = recordings.filter((r) => !r.live && !r.clips.length);
 	const tiles = ['teal', 'purple', 'amber', 'ok'];
 	const row = (r, t) => {
 		const d = new Date(r.startedAt);
@@ -1658,6 +1668,9 @@ function recordingsPage() {
 		!recordings.length && h('section.section', h('div.small', 'No recordings yet. Clips you mark while OBS records show up here, one row per recording.')),
 		live_.length ? [h('div.group-label', { style: { color: 'var(--rec-ink)' } }, 'Now'), h('div.list', live_.map((r) => row(r, null)))] : null,
 		past.length ? [h('div.group-label', { style: { color: 'var(--muted)' } }, 'Earlier'), h('div.list', past.map((r, i) => row(r, tiles[i % 4])))] : null,
+		empty.length ? h('button.fold', { type: 'button', 'aria-expanded': String(!!view.showEmpty), onclick: () => { view.showEmpty = !view.showEmpty; render(); } },
+			h('span.grow', empty.length === 1 ? '1 recording without clips' : empty.length + ' recordings without clips'), h('span.chev' + (view.showEmpty ? '.up' : '.down'), icon('chev'))) : null,
+		empty.length && view.showEmpty ? h('div.list', empty.map((r) => row(r, 'neutral'))) : null,
 		recordings.length ? h('button.btn.danger', { type: 'button', onclick: () => {
 			if (!confirm('Delete all recordings and clips in this browser? Their notes and saved audio go too. The recordings on the PC are not touched. A recording OBS is making now keeps going, without its clips.')) return;
 			const live = recordings.filter((r) => r.live);
@@ -1837,9 +1850,9 @@ function settingsPage() {
 			return h('label.setting', base, tile, h('span.grow', label), sel);
 		}
 		if (kind === 'text') {
-			const input = h('input', { type: 'text', value: settings[key], maxlength: 40, 'aria-label': label, style: { maxWidth: '240px' },
+			const input = h('input', { type: 'text', value: settings[key], maxlength: 40, 'aria-label': label,
 				onchange: (e) => { settings[key] = e.target.value.trim() || defaultName(); saveSettings(); toast('OBS shows the new name from the next connection.'); render(); } });
-			return h('label.setting', base, tile, h('span.grow', label), input);
+			return h('label.setting.with-field', base, tile, h('span.grow', label), input);
 		}
 		return h('div.setting', base, tile, h('span.grow', label), bind(h('span.value', { style: { color: `var(--${t}-ink)` } }), key));
 	};
@@ -1887,10 +1900,16 @@ function tick() {
 }
 setInterval(tick, 250);
 
+/* The meters' frame loop runs only while a meter is on screen; render() restarts it. */
+let framing = false;
 function frame() {
 	meters.step();
 	for (const [c, dim] of meterCanvases) meters.draw(c, dim);
-	requestAnimationFrame(frame);
+	framing = meterCanvases.length > 0;
+	if (framing) requestAnimationFrame(frame);
+}
+function startFrames() {
+	if (!framing && meterCanvases.length) { framing = true; requestAnimationFrame(frame); }
 }
 
 document.addEventListener('keydown', (e) => {
@@ -1917,5 +1936,4 @@ window.addEventListener('beforeunload', () => { audio.endSegment(); });
 
 idb.prune(settings.keepDays);
 render();
-requestAnimationFrame(frame);
 connect();

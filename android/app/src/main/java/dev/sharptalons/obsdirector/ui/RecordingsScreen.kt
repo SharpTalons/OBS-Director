@@ -107,7 +107,7 @@ private fun clipsText(n: Int) = when (n) { 0 -> "No clips"; 1 -> "1 clip"; else 
 
 /** The list: one plain row per recording; tap one to see its clips. */
 @Composable
-fun RecordingsScreen(modifier: Modifier, top: (@Composable () -> Unit)?, onOpen: (String) -> Unit) {
+fun RecordingsScreen(modifier: Modifier, top: (@Composable () -> Unit)?, selected: String? = null, onOpen: (String) -> Unit) {
     val recordings by ClipStore.recordings.collectAsState()
     val live = recordings.filter { it.live }
     // recordings with no clips go at the end, folded away, so the useful ones come first
@@ -122,9 +122,9 @@ fun RecordingsScreen(modifier: Modifier, top: (@Composable () -> Unit)?, onOpen:
             Section { Text("No recordings yet. Clips you mark while OBS records show up here, one row per recording.", style = Type.body.copy(color = T.muted)) }
         }
         if (live.isNotEmpty()) item { GroupLabel("Now", Tints.rec.ink) }
-        items(live, key = { "live:" + it.file }) { r -> RecordingRow(r, null, onOpen) }
+        items(live, key = { "live:" + it.file }) { r -> RecordingRow(r, null, onOpen, r.file == selected) }
         if (past.isNotEmpty()) item { GroupLabel("Earlier", T.muted) }
-        itemsIndexed(past, key = { _, r -> r.file }) { i, r -> RecordingRow(r, tileTints[i % tileTints.size], onOpen) }
+        itemsIndexed(past, key = { _, r -> r.file }) { i, r -> RecordingRow(r, tileTints[i % tileTints.size], onOpen, r.file == selected) }
         if (empty.isNotEmpty()) item(key = "empty-toggle") {
             Row(
                 Modifier.fillMaxWidth().height(48.dp).clip(RoundedCornerShape(12.dp))
@@ -137,7 +137,7 @@ fun RecordingsScreen(modifier: Modifier, top: (@Composable () -> Unit)?, onOpen:
                 Icon(if (showEmpty) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore, null, tint = T.muted)
             }
         }
-        if (showEmpty) itemsIndexed(empty, key = { _, r -> r.file }) { _, r -> RecordingRow(r, Tints.neutral, onOpen) }
+        if (showEmpty) itemsIndexed(empty, key = { _, r -> r.file }) { _, r -> RecordingRow(r, Tints.neutral, onOpen, r.file == selected) }
         if (recordings.isNotEmpty()) item { DangerLink("Delete all recordings and clips") { confirm = true } }
         item { Spacer(Modifier.height(16.dp)) }
     }
@@ -160,11 +160,13 @@ fun DangerLink(text: String, onClick: () -> Unit) {
 }
 
 @Composable
-private fun RecordingRow(r: Recording, tint: Tint?, onOpen: (String) -> Unit) {
+private fun RecordingRow(r: Recording, tint: Tint?, onOpen: (String) -> Unit, selected: Boolean = false) {
     val c = Calendar.getInstance().apply { timeInMillis = r.startedAt }
     Row(
         Modifier.fillMaxWidth().heightIn(min = 72.dp).clip(RoundedCornerShape(18.dp)).background(T.surface)
-            .then(if (tint == null) Modifier.border(1.dp, Tints.rec.bg, RoundedCornerShape(18.dp)) else Modifier)
+            .then(if (selected) Modifier.border(2.dp, T.accent, RoundedCornerShape(18.dp))
+                else if (tint == null) Modifier.border(1.dp, Tints.rec.bg, RoundedCornerShape(18.dp)) else Modifier)
+            .semantics { this.selected = selected }
             .clickable(role = Role.Button) { onOpen(r.file) }.padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp),
     ) {

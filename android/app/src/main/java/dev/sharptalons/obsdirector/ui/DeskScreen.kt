@@ -28,6 +28,9 @@ import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -129,6 +132,15 @@ fun DeskScreen(modifier: Modifier) {
                 }
             }
         }
+        // A screen reader reads out each new message from someone else while the chat is open, as
+        // the browser version's chat log does. Messages already there when the chat opened aren't read.
+        val firstSeen = remember { msgs.lastOrNull()?.id }
+        val latestIn = msgs.lastOrNull { !it.mine && it.kind == "message" }
+        val announceIn = latestIn?.takeIf { m -> firstSeen == null || msgs.indexOfFirst { it.id == m.id } > msgs.indexOfFirst { it.id == firstSeen } }
+        Box(Modifier.size(1.dp).semantics {
+            liveRegion = LiveRegionMode.Polite
+            contentDescription = announceIn?.let { "${it.from}: ${it.text}" } ?: ""
+        })
         // the bar at the bottom: the message box and send
         Row(Modifier.fillMaxWidth().background(T.surface).padding(horizontal = 10.dp, vertical = 8.dp), verticalAlignment = Alignment.Bottom,
             horizontalArrangement = Arrangement.spacedBy(8.dp)) {

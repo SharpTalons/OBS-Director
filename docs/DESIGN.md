@@ -108,6 +108,12 @@ One screen, clips first, the same in the app and the browser version.
 - **At the bottom**, floating so the list never moves: Undo after a delete (6 s), then a small player with the clip's name, its progress and Stop.
 - **Recordings without clips** fold into one line at the end.
 
+## Floating bubble
+
+- **The app icon**, 56 dp, cut to a circle: the launcher icon's foreground on its own `#121214` background, with a 1 dp `#2A2A30` edge.
+- **Badge:** 16 dp on its top right corner, red while OBS records, amber while paused, gone otherwise, with a 2 dp ground-coloured edge.
+- **Clip running:** a 3 dp red ring round it.
+
 ## Touch sound
 
 - **The sound:** one tap, cut from the supplied recording of a touchscreen tap.

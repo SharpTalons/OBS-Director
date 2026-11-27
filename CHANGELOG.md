@@ -19,6 +19,9 @@ A simpler Recordings tab, in the app and the browser version.
 - **Monitor's "See all"** opens Recordings at that recording.
 - Recordings without clips stay folded at the end, each with its own delete button.
 
+### Floating bubble
+- It's the app icon now. A small badge on its corner shows OBS is recording (red) or paused (amber), and a red ring shows a clip is running.
+
 ## [0.7.2] - 2026-11-27
 
 Fixes from design audits of the OBS plugin, the browser version and the app.

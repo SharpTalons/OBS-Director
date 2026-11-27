@@ -17,6 +17,9 @@ import android.view.ViewConfiguration
 import android.view.WindowManager
 import android.view.animation.DecelerateInterpolator
 import android.widget.FrameLayout
+import dev.sharptalons.obsdirector.R
+import android.widget.ImageView
+import android.view.ViewOutlineProvider
 import android.widget.TextView
 import androidx.compose.ui.graphics.toArgb
 import dev.sharptalons.obsdirector.MainActivity
@@ -38,7 +41,8 @@ import kotlin.math.hypot
  * A floating bubble over other apps while connected, the way chat bubbles work: tap it to open
  * OBS Director; drag it anywhere and it settles against the nearest side; drag it onto the ✕
  * that appears at the bottom to put it away (it comes back the next time you leave the app).
- * The red dot says OBS is recording; a red ring says a clip is running.
+ * It is the app's own icon. A small badge on its corner says OBS is recording (red) or paused
+ * (amber); a red ring round it says a clip is running.
  */
 class BubbleService : Service() {
 
@@ -62,7 +66,8 @@ class BubbleService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private lateinit var wm: WindowManager
     private lateinit var bubble: FrameLayout
-    private lateinit var dot: View
+    private lateinit var face: FrameLayout
+    private lateinit var badge: View
     private lateinit var params: WindowManager.LayoutParams
     private lateinit var target: TextView
     private lateinit var targetParams: WindowManager.LayoutParams
@@ -91,12 +96,21 @@ class BubbleService : Service() {
         shown = true
         wm = getSystemService(WindowManager::class.java)
 
-        dot = View(this).apply { background = oval(T.negative.toArgb(), 0, 0) }
+        // the launcher icon: its foreground on the icon's own background, cut to a circle
+        face = FrameLayout(this).apply {
+            background = oval(T.ground.toArgb(), 0, 0)
+            clipToOutline = true
+            outlineProvider = ViewOutlineProvider.BACKGROUND
+            elevation = dp(4).toFloat()
+            // an adaptive icon's foreground is 108 units with the icon in the middle 72
+            addView(ImageView(this@BubbleService).apply { setImageResource(R.drawable.ic_launcher_foreground) },
+                FrameLayout.LayoutParams(size * 108 / 72, size * 108 / 72, Gravity.CENTER))
+        }
+        badge = View(this).apply { visibility = View.GONE; elevation = dp(5).toFloat() }
         bubble = FrameLayout(this).apply {
-            background = oval(T.surface.toArgb(), T.text.toArgb(), 2)
-            elevation = dp(6).toFloat()
             contentDescription = "OBS Director. Tap to open the app; drag to move."
-            addView(dot, FrameLayout.LayoutParams(dp(18), dp(18), Gravity.CENTER))
+            addView(face, FrameLayout.LayoutParams(size, size))
+            addView(badge, FrameLayout.LayoutParams(dp(16), dp(16), Gravity.TOP or Gravity.END))
         }
         params = overlayParams(size, size, Gravity.TOP or Gravity.START).apply { x = screenWidth() - size - dp(8); y = dp(180) }
 
@@ -125,8 +139,11 @@ class BubbleService : Service() {
     private fun refresh() {
         val s = Director.status.value
         val clip = Director.clipStart.value != null
-        dot.background = oval(if (s.recActive && !s.recPaused) T.negative.toArgb() else T.muted.toArgb(), 0, 0)
-        bubble.background = oval(T.surface.toArgb(), if (clip) T.negative.toArgb() else T.text.toArgb(), if (clip) 3 else 2)
+        // a badge on the corner: red while OBS records, amber while paused
+        badge.visibility = if (s.recActive) View.VISIBLE else View.GONE
+        badge.background = oval(if (s.recPaused) T.warning.toArgb() else T.negative.toArgb(), T.ground.toArgb(), 2)
+        // a red ring while a clip runs; otherwise a fine edge so it shows on dark screens too
+        face.foreground = oval(0, if (clip) T.negative.toArgb() else T.control.toArgb(), if (clip) 3 else 1)
         bubble.contentDescription = "OBS Director, " + when {
             !s.recActive -> "not recording"
             s.recPaused -> "recording paused"

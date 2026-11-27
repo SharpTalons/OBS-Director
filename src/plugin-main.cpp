@@ -41,6 +41,12 @@ OBS_MODULE_USE_DEFAULT_LOCALE(PLUGIN_NAME, "en-US")
 static DirectorServer *server = nullptr;
 static DeskDock *dock = nullptr;
 
+/* A string from data/locale, so the Tools window can be translated like the rest of OBS. */
+static QString text(const char *key)
+{
+	return QString::fromUtf8(obs_module_text(key));
+}
+
 /* Tools > OBS Director: how to connect, this PC's address, and the phones allowed to connect. */
 static void showConnectInfo(void *)
 {
@@ -48,58 +54,53 @@ static void showConnectInfo(void *)
 		return;
 	auto *main = static_cast<QMainWindow *>(obs_frontend_get_main_window());
 	QDialog dlg(main);
-	dlg.setWindowTitle(QStringLiteral("OBS Director"));
+	dlg.setWindowTitle(text("OBSDirector"));
 	dlg.setMinimumWidth(420);
 	auto *root = new QVBoxLayout(&dlg);
 
-	auto *intro = new QLabel(
-		QStringLiteral("Open OBS Director on your phone and tap this PC in the list, or open the "
-			       "web address below in Chrome, Edge or Firefox on any computer on this network. "
-			       "The first time a phone or browser connects, OBS asks you to allow it."),
-		&dlg);
+	auto *intro = new QLabel(text("OBSDirector.Tools.Intro"), &dlg);
 	intro->setWordWrap(true);
 	root->addWidget(intro);
 
 	auto *form = new QFormLayout();
-	form->addRow(QStringLiteral("PC name"), new QLabel(server->pcName(), &dlg));
+	form->addRow(text("OBSDirector.Tools.PcName"), new QLabel(server->pcName(), &dlg));
 	auto *addr = new QLabel(&dlg);
 	addr->setTextInteractionFlags(Qt::TextSelectableByMouse);
 	auto showAddress = [addr]() {
 		const QString a = server->advertisedAddress();
-		addr->setText(a.isEmpty() ? QStringLiteral("Not connected to a network") : a);
+		addr->setText(a.isEmpty() ? text("OBSDirector.Tools.NoNetwork") : a);
 	};
 	showAddress();
 	QObject::connect(server, &DirectorServer::addressChanged, &dlg, showAddress);
-	form->addRow(QStringLiteral("Address"), addr);
+	form->addRow(text("OBSDirector.Tools.Address"), addr);
 	auto *web = new QLabel(&dlg);
 	web->setTextFormat(Qt::RichText);
 	web->setOpenExternalLinks(true);
 	web->setTextInteractionFlags(Qt::TextBrowserInteraction);
 	auto showWeb = [web]() {
 		const QString w = server->webAddress();
-		web->setText(w.isEmpty() ? QStringLiteral("Not connected to a network")
+		web->setText(w.isEmpty() ? text("OBSDirector.Tools.NoNetwork")
 					 : QStringLiteral("<a href=\"%1\">%1</a>").arg(w.toHtmlEscaped()));
 	};
 	showWeb();
 	QObject::connect(server, &DirectorServer::addressChanged, &dlg, showWeb);
-	form->addRow(QStringLiteral("In a browser"), web);
-	form->addRow(QStringLiteral("Plugin"), new QLabel(QString::fromUtf8(PLUGIN_VERSION), &dlg));
+	form->addRow(text("OBSDirector.Tools.InBrowser"), web);
+	form->addRow(text("OBSDirector.Tools.Plugin"), new QLabel(QString::fromUtf8(PLUGIN_VERSION), &dlg));
 	root->addLayout(form);
 
-	auto *heading = new QLabel(QStringLiteral("Phones and browsers allowed to connect"), &dlg);
+	auto *heading = new QLabel(text("OBSDirector.Tools.Allowed"), &dlg);
 	heading->setStyleSheet("font-weight: 600; margin-top: 8px;");
 	root->addWidget(heading);
 	auto *list = new QListWidget(&dlg);
 	list->setMinimumHeight(110);
 	root->addWidget(list);
-	auto *empty =
-		new QLabel(QStringLiteral("None yet. Phones and browsers appear here once you press Allow."), &dlg);
-	empty->setStyleSheet("color: palette(mid);");
+	auto *empty = new QLabel(text("OBSDirector.Tools.NoneYet"), &dlg);
+	empty->setWordWrap(true);
 	root->addWidget(empty);
 
 	auto *removeRow = new QHBoxLayout();
-	auto *remove = new QPushButton(QStringLiteral("Remove"), &dlg);
-	auto *removeAll = new QPushButton(QStringLiteral("Remove all"), &dlg);
+	auto *remove = new QPushButton(text("OBSDirector.Tools.Remove"), &dlg);
+	auto *removeAll = new QPushButton(text("OBSDirector.Tools.RemoveAll"), &dlg);
 	removeRow->addWidget(remove);
 	removeRow->addWidget(removeAll);
 	removeRow->addStretch(1);
@@ -112,7 +113,10 @@ static void showConnectInfo(void *)
 							      .toString(QStringLiteral("d MMM yyyy"))
 						    : QString();
 			auto *item = new QListWidgetItem(
-				when.isEmpty() ? t.name : t.name + QStringLiteral("  ·  allowed ") + when, list);
+				when.isEmpty() ? t.name
+					       : t.name + QStringLiteral("  ·  ") +
+							 text("OBSDirector.Tools.AllowedOn").arg(when),
+				list);
 			item->setData(Qt::UserRole, t.id);
 		}
 		bool none = list->count() == 0;
@@ -130,25 +134,18 @@ static void showConnectInfo(void *)
 			server->forgetDevice(item->data(Qt::UserRole).toString());
 	});
 	QObject::connect(removeAll, &QPushButton::clicked, &dlg, [&dlg]() {
-		if (QMessageBox::question(
-			    &dlg, QStringLiteral("OBS Director"),
-			    QStringLiteral("Remove every phone and browser? Each one will need to be allowed again.")) ==
+		if (QMessageBox::question(&dlg, text("OBSDirector"), text("OBSDirector.Tools.RemoveAllQuestion")) ==
 		    QMessageBox::Yes)
 			server->forgetAllDevices();
 	});
 
-	auto *note = new QLabel(
-		QStringLiteral(
-			"A removed phone or browser is disconnected and has to be allowed again. Clips are written into the "
-			"recording as chapter markers when OBS records in Hybrid MP4 (Settings, Output, Recording "
-			"Format)."),
-		&dlg);
+	/* normal text colour: OBS's dark themes make palette(mid) too faint to read */
+	auto *note = new QLabel(text("OBSDirector.Tools.Note"), &dlg);
 	note->setWordWrap(true);
-	note->setStyleSheet("color: palette(mid);");
 	root->addWidget(note);
 
 	auto *buttons = new QHBoxLayout();
-	auto *close = new QPushButton(QStringLiteral("Close"), &dlg);
+	auto *close = new QPushButton(text("OBSDirector.Tools.Close"), &dlg);
 	buttons->addStretch(1);
 	buttons->addWidget(close);
 	root->addLayout(buttons);

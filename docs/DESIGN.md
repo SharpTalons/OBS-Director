@@ -82,7 +82,11 @@ The app is dark only. It's used in dim rooms beside a stage.
 
 - **Touch targets:** at least 48 dp, everywhere. Buttons are 48 dp tall, round icon buttons 48 dp across; switches are 52×30 with a 48 dp touch area.
 - **Navigation:** tabs along the bottom on phones; a 88 dp rail down the side when the window is 600 dp wide or more. Content keeps a 640 dp reading width.
-- **Unread badge on Desk:** green with the count; amber when an alert is unread, red for a severe one.
+- **Unread badge on Desk:** green with the count; amber when an alert is unread, red for a severe one. The same in the app and the browser version. Connection notes don't count.
+- **Two panes:** on wide windows, Recordings shows the list and the open recording side by side.
+- **Confirmations:** a snackbar at the bottom, above the tabs (Android's own in the app; `role="status"` in the browser version).
+- **OBS dock text** follows the PC's text size: the body is OBS's own font size, names and quick replies 92% of it, notes 85%, times 78%.
+- **Quick replies** in the dock wait 3 s before sending; clicking again cancels.
 - **Rounding:**
 
 | Element | Radius |
@@ -109,6 +113,7 @@ The app is dark only. It's used in dim rooms beside a stage.
   - 100% plays at gain **0.6** (`TAP_MAX_GAIN`), so a tap sits under the mix you're listening to, not over it.
   - Up to 3 taps can overlap (`TAP_STREAMS`).
 - **Silent phone:** the app plays no tap sound while the phone is on silent or vibrate, as Android's own touch sounds don't.
+- **OBS dock:** never makes a sound, since OBS may be capturing the PC's audio. A new message while OBS is in the background flashes OBS in the taskbar instead.
 
 ## Vibration
 

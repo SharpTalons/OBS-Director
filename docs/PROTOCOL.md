@@ -92,7 +92,7 @@ The status carries the recording's file name only, never its full path.
 
 ### Desk chat
 
-Since 0.7.0 the desk is a group chat. The OBS dock, every phone and every browser see every message. The plugin keeps the conversation for the OBS session and tells each device which messages are its own (`mine`), without ever sending out a device's ID. The desk writes from the dock, and its messages have `desk: true`. Quick replies in the dock ("Got it", "On it", "Fixed") are ordinary messages.
+Since 0.7.0 the desk is a group chat. The OBS dock, every phone and every browser see every message. The plugin keeps the conversation for the OBS session and tells each device which messages are its own (`mine`), without ever sending out a device's ID. The desk writes from the dock, and its messages have `desk: true`. Quick replies in the dock ("Got it", "On it", "Fixed") are ordinary messages; the dock waits three seconds before sending one, so a slip can be cancelled.
 
 A ping keeps the line warm: `{"type":"ping","t":…}` gets `{"type":"pong","t":…}`.
 

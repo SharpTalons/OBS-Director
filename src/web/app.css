@@ -18,6 +18,8 @@
 	--rec-tint: #3a1b22;
 	--on-rec: #1a0b0e;
 	--ok: #4cc38a;
+	/* dark text on a green, amber or red badge */
+	--on-badge: #0b1a12;
 	--ok-ink: #6edda8;
 	--ok-tint: #183327;
 	--amber-ink: #f2c46b;
@@ -26,6 +28,8 @@
 	--orange-tint: #3a2614;
 	--teal-ink: #5fd4e8;
 	--teal-tint: #14303a;
+	--neutral-ink: #c9cbd0;
+	--neutral-tint: #2a2a30;
 	--purple-ink: #b9a2ff;
 	--purple-tint: #2a2340;
 	--meter-green: #4cff4c;
@@ -99,7 +103,9 @@ svg { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; 
 .nav .swatch { width: 10px; height: 10px; border-radius: 3px; flex: none; }
 .nav .badge { margin-left: auto; display: inline-flex; }
 .nav .badge .dot { width: 8px; height: 8px; }
-.nav .count { margin-left: auto; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 10px; background: var(--ok); color: #0b1a12; font-size: 11px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; }
+.nav .count { margin-left: auto; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 10px; background: var(--ok); color: var(--on-badge); font-size: 11px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; }
+.nav .count.alert { background: var(--amber-ink); }
+.nav .count.severe { background: var(--rec); }
 
 /* ---------- desk chat, laid out like a messaging app ---------- */
 .chat-main { display: flex; flex-direction: column; padding: 0; overflow: hidden; }
@@ -222,6 +228,8 @@ svg { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; 
 button.switch::before { content: ""; position: absolute; inset: -7px -4px; }
 .switch::after { content: ""; width: 24px; height: 24px; border-radius: 50%; background: #fff; transition: transform .15s; }
 .switch[aria-checked="true"] { background: var(--blue); }
+/* the switch looks 52x30 but answers a 52x48 touch */
+.switch::before { content: ""; position: absolute; inset: -9px 0; }
 .switch[aria-checked="true"]::after { transform: translateX(22px); }
 @media (prefers-reduced-motion: reduce) { .switch::after { transition: none; } }
 
@@ -290,6 +298,14 @@ button.list-row:hover { background: var(--surface-2); }
 /* settings */
 .setting { display: flex; align-items: center; gap: 14px; min-height: 56px; padding: 8px 14px; width: 100%; border: 0; background: transparent; text-align: left; border-top: 1px solid var(--control); }
 .setting:first-child { border-top: 0; }
+/* a text field in a setting row moves under its label when the row is too narrow for both */
+.setting.with-field { flex-wrap: wrap; }
+.setting.with-field .grow { min-width: 140px; }
+.setting.with-field input { flex: 1 1 180px; max-width: 280px; margin-left: auto; }
+/* "N recordings without clips": opens the rest of the list */
+.fold { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 48px; padding: 0 6px; border: 0; border-radius: 12px; background: transparent; color: var(--text-2); font: inherit; text-align: left; }
+.fold .chev.down svg { transform: rotate(90deg); }
+.fold .chev.up svg { transform: rotate(-90deg); }
 .setting .value { font-size: 14px; }
 select.choice { background: var(--sunken); border: 1px solid var(--line-strong); border-radius: 10px; min-height: 44px; padding: 0 10px; }
 

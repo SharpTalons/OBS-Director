@@ -5,6 +5,32 @@ All notable changes to OBS Director (plugin and Android app). The project follow
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-11-27
+
+Fixes from design audits of the OBS plugin, the browser version and the app.
+
+### OBS plugin
+- **No more beep:** a new message no longer plays the PC's system sound, which OBS could capture into the stream or recording. While OBS is in the background, it flashes in the taskbar instead.
+- **Screen readers:** the message box has a name, each message reads as one line (who, when, what), and new messages are read out (OBS 31 and later).
+- **Text size:** the chat follows the PC's text size instead of fixed pixel sizes.
+- **Narrow docks:** messages rewrap to fit the dock instead of being cut off on the right, and the hint in the message box shortens to "Message" when it wouldn't fit.
+- **Long sessions:** the chat keeps the last 600 lines, like the PC side, so a week-long OBS session stays light. It stays at the newest message unless you scroll up to read.
+- **Quick replies** wait three seconds before they go. Click the reply again to cancel it.
+- **Tools, OBS Director:** the notes are in normal text colour, easier to read in dark themes, and the window's text can now be translated like the rest of OBS.
+
+### Browser version
+- **Phone keyboard:** the page shrinks above the keyboard, so the chat box stays in sight while typing.
+- **Desk tab:** the unread count turns amber when an alert is unread, and red for a severe one. Connection notes no longer count as unread.
+- **Recordings without clips** are folded into one row at the end of the list.
+- **Settings:** at phone width, the name field moves under its label instead of squeezing it.
+- **Switches** answer a 48 px tall touch.
+- **Battery:** the level meter stops drawing when no meter is on screen.
+
+### Android app
+- **Desk chat:** screen readers read out new messages while the chat is open.
+- **Confirmations** use Android's own snackbar, above the tabs.
+- **Tablets and unfolded phones:** Recordings shows the list and the open recording side by side.
+
 ## [0.7.1] - 2026-11-26
 
 Fixes from a design audit and review of the Android app.

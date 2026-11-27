@@ -23,11 +23,11 @@ namespace {
 
 /* As many lines as the PC side keeps (500 messages), plus room for day labels and notes. */
 constexpr int kMaxRows = 600;
-/* How long a quick reply waits before it goes, so a slip can be taken back. */
-constexpr int kQuickDelayMs = 3000;
 
 /*
- * The chat keeps its own colours, the same in every OBS theme, like a messaging app. Text
+ * The chat keeps its own colours, the same in every OBS theme, like a messaging app, picked to
+ * read well on a dark screen: white message text (at least 6.5:1 on its bubble), light grey times
+ * and notes (at least 5.5:1), and bubbles edged so they stand out from the background. Text
  * sizes follow the PC's own text size (Windows, Accessibility, Text size), so they're worked
  * out from OBS's font rather than fixed in pixels.
  */
@@ -38,22 +38,19 @@ QString chatStyle(double pt)
 	};
 	return QStringLiteral(R"(
 QWidget#chat { background: #0b141a; }
-QLabel#empty { color: #8696a0; font-size: %2; }
-QFrame#in { background: #202c33; border-radius: 10px; }
-QFrame#out { background: #005c4b; border-radius: 10px; }
-QLabel#body { color: #e9edef; font-size: %1; }
-QLabel#time { color: #8696a0; font-size: %3; }
-QLabel#outtime { color: #a5d6c9; font-size: %3; }
-QLabel#note { background: #182229; color: #8696a0; font-size: %4; border-radius: 8px; padding: 3px 10px; }
-QLabel#day { background: #182229; color: #8696a0; font-size: %4; border-radius: 8px; padding: 3px 10px; }
-QWidget#bar { background: #202c33; }
-QPlainTextEdit#input { background: #2a3942; color: #e9edef; border: none; border-radius: 18px; padding: 6px 10px; font-size: %1; }
+QLabel#empty { color: #c9d3d8; font-size: %2; }
+QFrame#in { background: #2b3b45; border: 1px solid #3d4e59; border-radius: 10px; }
+QFrame#out { background: #005c4b; border: 1px solid #0a7a63; border-radius: 10px; }
+QLabel#body { color: #ffffff; font-size: %1; background: transparent; border: none; }
+QLabel#time { color: #c9d3d8; font-size: %3; background: transparent; border: none; }
+QLabel#outtime { color: #d9f2ea; font-size: %3; background: transparent; border: none; }
+QLabel#note { background: #223038; color: #c9d3d8; font-size: %4; border-radius: 8px; padding: 3px 10px; }
+QLabel#day { background: #223038; color: #c9d3d8; font-size: %4; border-radius: 8px; padding: 3px 10px; }
+QWidget#bar { background: #1c2a31; }
+QPlainTextEdit#input { background: #34444f; color: #ffffff; border: none; border-radius: 18px; padding: 6px 10px; font-size: %1; }
 QPushButton#send { background: #00a884; color: #0b141a; border: none; border-radius: 18px; font-weight: 600; min-width: 36px; min-height: 36px; }
-QPushButton#send:disabled { background: #2a3942; color: #8696a0; }
-QPushButton#quick { background: #2a3942; color: #e9edef; border: none; border-radius: 12px; padding: 5px 10px; font-size: %2; min-height: 18px; }
-QPushButton#quick:hover { background: #374248; }
-QPushButton#quick[pending="true"] { background: #005c4b; }
-QPushButton:focus { outline: none; border: 2px solid #53bdeb; }
+QPushButton#send:disabled { background: #34444f; color: #b7c2c8; }
+QPushButton:focus { outline: none; border: 2px solid #7fd0f5; }
 )")
 		.arg(size(1.0), size(0.92), size(0.78), size(0.85));
 }
@@ -121,32 +118,11 @@ DeskDock::DeskDock(QWidget *parent) : QWidget(parent)
 	});
 	connect(bar0, &QScrollBar::valueChanged, this, [this, bar0](int v) { followEnd = v >= bar0->maximum() - 4; });
 
-	/* the bar at the bottom: quick replies, then the text box and send */
+	/* the bar at the bottom: the text box and send */
 	auto *bar = new QWidget(this);
 	bar->setObjectName("bar");
 	auto *barLayout = new QVBoxLayout(bar);
-	barLayout->setContentsMargins(8, 6, 8, 8);
-	barLayout->setSpacing(6);
-	auto *quick = new QHBoxLayout();
-	quick->setSpacing(6);
-	for (const QString &q : {tr("Got it"), tr("On it"), tr("Fixed")}) {
-		auto *b = new QPushButton(q, bar);
-		b->setObjectName("quick");
-		b->setCursor(Qt::PointingHandCursor);
-		b->setToolTip(tr("Sends \"%1\" after 3 seconds. Click again to cancel.").arg(q));
-		b->setAccessibleName(tr("Quick reply: %1").arg(q));
-		connect(b, &QPushButton::clicked, this, [this, b, q]() { quickReply(b, q); });
-		quickButtons << b;
-		quick->addWidget(b);
-	}
-	quick->addStretch(1);
-	barLayout->addLayout(quick);
-	pendingTimer.setSingleShot(true);
-	connect(&pendingTimer, &QTimer::timeout, this, [this]() {
-		const QString text = pendingText;
-		quickReply(nullptr, QString());
-		emit sent(text);
-	});
+	barLayout->setContentsMargins(8, 8, 8, 8);
 
 	auto *row = new QHBoxLayout();
 	row->setSpacing(6);
@@ -155,6 +131,12 @@ DeskDock::DeskDock(QWidget *parent) : QWidget(parent)
 	input->setPlaceholderText(tr("Message  (Ctrl+Enter to send)"));
 	input->setAccessibleName(tr("Message to everyone connected"));
 	input->setAccessibleDescription(tr("Enter starts a new line. Ctrl+Enter sends."));
+	{
+		/* the hint in the empty box, light enough to read on the dark bar */
+		QPalette pal = input->palette();
+		pal.setColor(QPalette::PlaceholderText, QColor("#b7c2c8"));
+		input->setPalette(pal);
+	}
 	input->setTabChangesFocus(true);
 	input->installEventFilter(this);
 	auto *sendBtn = new QPushButton(QStringLiteral("➤"), bar);
@@ -243,30 +225,6 @@ void DeskDock::send()
 	emit sent(text.left(1000));
 }
 
-void DeskDock::quickReply(QPushButton *button, const QString &text)
-{
-	/* a second click on the waiting reply cancels it; a click on another replaces it */
-	const bool cancel = button && button == pendingButton;
-	pendingTimer.stop();
-	if (pendingButton) {
-		pendingButton->setProperty("pending", false);
-		pendingButton->setText(pendingText);
-		pendingButton->style()->unpolish(pendingButton);
-		pendingButton->style()->polish(pendingButton);
-	}
-	pendingButton = nullptr;
-	pendingText.clear();
-	if (!button || cancel)
-		return;
-	pendingButton = button;
-	pendingText = text;
-	button->setProperty("pending", true);
-	button->setText(tr("Sending \"%1\"… click to cancel").arg(text));
-	button->style()->unpolish(button);
-	button->style()->polish(button);
-	pendingTimer.start(kQuickDelayMs);
-}
-
 void DeskDock::setPresence(const QString &text, bool listening)
 {
 	presence->setText((listening ? QStringLiteral("● ") : QString()) + text);
@@ -275,8 +233,9 @@ void DeskDock::setPresence(const QString &text, bool listening)
 QColor DeskDock::nameColour(const QString &name) const
 {
 	/* each sender keeps one colour, as in a group chat */
-	static const QColor palette[] = {QColor("#53bdeb"), QColor("#ffd279"), QColor("#a5b337"), QColor("#ff8a9c"),
-					 QColor("#b9a2ff"), QColor("#5fd4e8"), QColor("#f7a35c"), QColor("#6edda8")};
+	/* light enough to read on an incoming bubble: at least 6:1 */
+	static const QColor palette[] = {QColor("#7fd0f5"), QColor("#ffe08a"), QColor("#c6d35a"), QColor("#ffa3b1"),
+					 QColor("#cbb8ff"), QColor("#7fe0f0"), QColor("#ffbb80"), QColor("#8ee8bb")};
 	if (!nameOrder.contains(name))
 		nameOrder.insert(name, nameOrder.size());
 	return palette[nameOrder.value(name) % int(sizeof(palette) / sizeof(palette[0]))];

@@ -27,8 +27,7 @@ the Free Software Foundation; either version 2 of the License, or
  * The dock the volunteers see in OBS: a group chat with everyone connected, laid out like a
  * messaging app. Messages from phones and browsers sit on the left with the sender's name;
  * the desk's own on the right. Connections and recording events show as small centred notes.
- * Enter starts a new line; Ctrl+Enter or the send button sends. A quick reply waits three
- * seconds before it goes, so a slip of the mouse can be taken back.
+ * Enter starts a new line; Ctrl+Enter or the send button sends.
  *
  * The dock never plays a sound: OBS may be capturing the PC's audio. A new message while OBS
  * is in the background flashes OBS in the taskbar instead.
@@ -68,7 +67,6 @@ private:
 	void pruneRows();
 	void fitBubbles();
 	int bubbleRoom() const;
-	void quickReply(QPushButton *button, const QString &text);
 	void announce(const QString &text);
 
 	QLabel *presence = nullptr;
@@ -83,9 +81,5 @@ private:
 	QList<QHBoxLayout *> rows;             /* every line in the chat, oldest first */
 	QList<QPointer<QLabel>> bodies;        /* each message's text, to rewrap when the dock is resized */
 	bool followEnd = true;                 /* the chat is scrolled to the newest message */
-	QList<QPushButton *> quickButtons;
-	QPointer<QPushButton> pendingButton; /* a quick reply waiting to go */
-	QString pendingText;
-	QTimer pendingTimer;
 	bool styling = false;
 };

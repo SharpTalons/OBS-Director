@@ -5,6 +5,45 @@ All notable changes to OBS Director (plugin and Android app). The project follow
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-11-27
+
+A simpler Recordings tab, in the app and the browser version.
+
+### Recordings, clips first
+- **One screen.** Each recording is a card with its clips listed inside, so there is no second page to open and come back from. Tap a heading to open or fold it. The recording OBS is making and the two newest others start open.
+- **Play from the list.** Every clip has its own Play button. While one plays, a small player shows at the bottom with its progress and Stop.
+- **One sheet for a clip.** Tap a clip for Play, Trim, Note, Share (Download in the browser) and Delete.
+- **Simpler trim:** Start and End, 5 seconds at a time, over the sound around the clip, with a button to hear the result.
+- **Export and delete** are in each recording's ⋯ menu. In the app, tap a format to share it or the arrow to save it to the phone; in the browser, click a format to download it, or Copy.
+- **Undo** after deleting a clip or a recording, for six seconds.
+- **Monitor's "See all"** opens Recordings at that recording.
+- Recordings without clips stay folded at the end, each with its own delete button.
+
+### Volume (app)
+- **1 to 100%, on a loudness scale.** The old slider went to 300%, but its limiter squashed the peaks so hard that 300% sounded little louder than 100%. Now each step of the slider is an even step in loudness: 50% is the mix as OBS sends it, 75% is 12 dB louder and 100% is 24 dB louder. A scale under the slider shows −40 dB, −20, As sent, +12 and +24 dB.
+- **A real boost:** a new limiter brings quiet speech up by the full amount and holds peaks just under full scale, without distorting. Your saved volume carries over to the new scale.
+- **Phone volume:** when the phone's own media volume is below 70%, the line under the slider says so, since nothing can be louder than that allows.
+
+### Smooth listening on Bluetooth (app)
+- **No more crackling on Bluetooth headsets.** Bluetooth takes audio in uneven bursts, and the app's small buffer kept running dry. On Bluetooth it now keeps a deeper cushion (a 400 ms buffer, starting at 120 ms and holding about 160 ms), so listening is about 150 ms further behind than on the speaker, and smooth.
+- **No more clicks from keeping time, on any output.** The app used to drop a 5 ms packet when it got ahead and play one twice when it fell behind; each was a jump in the sound. Now it plays up to 0.6% faster or slower, which no one can hear, and if Wi-Fi stalls it puts the whole cushion back in one go instead of crackling at the edge.
+- Packets lost on the way now play as a short gap that keeps the timing steady.
+
+### Touch sound and vibration (app and browser)
+- **A louder tap:** the tap sound is compressed and brought up to just under full scale, about 9 dB louder on average, and the Touch sound setting is now a loudness scale (25, 50, 75 and 100% play at −12, −6, −3 and 0 dB; 100% used to be 60% of the tap).
+- **On the media volume:** the app plays it on the volume the volume buttons set while listening, instead of the quieter system-sounds volume.
+- **Stronger vibration:** taps are now a firm pulse (18, 28 or 40 ms at strength 140, 210 or 255) instead of Android's faint built-in clicks, and every buzz is stronger and longer at each level.
+
+### Top bar (app)
+- Only Monitor has the top bar now. Recordings, Desk, Settings and Stream start straight with their title, which gives their content more room.
+
+### OBS dock
+- **No quick replies:** "Got it", "On it" and "Fixed" are gone; write a message instead.
+- **Easier to read on dark screens:** white message text, light grey times and notes, lighter sender names, and bubbles with an edge so they stand out from the background.
+
+### Floating bubble
+- It's the app icon now. A small badge on its corner shows OBS is recording (red) or paused (amber), and a red ring shows a clip is running.
+
 ## [0.7.2] - 2026-11-27
 
 Fixes from design audits of the OBS plugin, the browser version and the app.

@@ -9,6 +9,7 @@ import android.os.Vibrator
 import android.view.Surface
 import androidx.core.content.ContextCompat
 import dev.sharptalons.obsdirector.audio.AudioEngine
+import dev.sharptalons.obsdirector.audio.Loudness
 import dev.sharptalons.obsdirector.audio.Levels
 import dev.sharptalons.obsdirector.audio.SessionRecorder
 import dev.sharptalons.obsdirector.net.Connection
@@ -344,7 +345,7 @@ object Director {
     private fun startAudio() {
         if (engine == null) {
             engine = AudioEngine { pcm, fileTimeUs, recording, gap -> onPcm(pcm, fileTimeUs, recording, gap) }.also { e ->
-                e.volume = Prefs.settings.value.volume
+                e.volume = Loudness.gain(Prefs.settings.value.volumePct)
                 e.router = router
                 e.targetBufferMs = Prefs.settings.value.bufferMs
                 e.listening = listenState.value
@@ -370,11 +371,11 @@ object Director {
         engine?.listening = on
     }
 
-    /** 0..3 (0–300%). Heard at once while dragging; saved with [save]. */
-    fun setVolume(v: Float, save: Boolean = true) {
-        val c = v.coerceIn(0f, 3f)
-        engine?.volume = c
-        if (save) Prefs.update { it.copy(volume = c) }
+    /** 1–100% on the loudness scale. Heard at once while dragging; saved with [save]. */
+    fun setVolume(percent: Int, save: Boolean = true) {
+        val p = percent.coerceIn(1, 100)
+        engine?.volume = Loudness.gain(p)
+        if (save) Prefs.update { it.copy(volumePct = p) }
     }
 
     fun setBuffer(ms: Int) {
@@ -735,14 +736,15 @@ object Director {
         val level = Prefs.settings.value.haptics.coerceIn(0, 3)
         if (level == 0) return
         val v = ContextCompat.getSystemService(app, Vibrator::class.java) ?: return
+        // stronger settings buzz both harder (where the phone can) and longer
+        val scale = FeedbackTokens.BUZZ_LENGTH_SCALE[level - 1]
+        val timing = LongArray(pattern.size) { i -> if (i % 2 == 1) (pattern[i] * scale).toLong().coerceAtLeast(10) else pattern[i] }
         runCatching {
             if (v.hasAmplitudeControl()) {
                 val strength = FeedbackTokens.BUZZ_AMPLITUDE[level - 1]
-                val amps = IntArray(pattern.size) { i -> if (i % 2 == 1) strength else 0 }
-                v.vibrate(VibrationEffect.createWaveform(pattern, amps, -1))
+                v.vibrate(VibrationEffect.createWaveform(timing, IntArray(pattern.size) { i -> if (i % 2 == 1) strength else 0 }, -1))
             } else {
-                val scale = FeedbackTokens.BUZZ_LENGTH_SCALE[level - 1]
-                v.vibrate(VibrationEffect.createWaveform(LongArray(pattern.size) { i -> if (i % 2 == 1) (pattern[i] * scale).toLong().coerceAtLeast(10) else pattern[i] }, -1))
+                v.vibrate(VibrationEffect.createWaveform(timing, -1))
             }
         }
     }

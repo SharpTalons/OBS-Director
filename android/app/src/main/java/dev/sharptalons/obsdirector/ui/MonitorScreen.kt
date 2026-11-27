@@ -55,6 +55,9 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import kotlin.math.roundToInt
+import dev.sharptalons.obsdirector.audio.Loudness
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -224,7 +227,7 @@ private fun ListenSection(lost: Boolean) {
     val output by Director.router.outputName.collectAsState()
     val latency by Director.latencyMs.collectAsState()
     @Suppress("UNUSED_VARIABLE") val tick = rememberTicker(1000)
-    var vol by remember { mutableFloatStateOf(settings.volume) }
+    var vol by remember { mutableIntStateOf(settings.volumePct) }
     val active = listening && !lost
 
     Section {
@@ -242,18 +245,36 @@ private fun ListenSection(lost: Boolean) {
             Text("Peak ${peakLabel(levels, active)}", style = Type.mono)
         }
         ObsMeter(levels, active)
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("Volume", style = Type.body.copy(color = T.muted), maxLines = 1, softWrap = false, modifier = Modifier.widthIn(min = 56.dp))
+        // The volume: 1–100% on a loudness scale. 50% is the mix as OBS sends it; above that the
+        // app boosts it, up to 20 dB at 100%. The scale under the slider says how loud each part is.
+        val boosting = vol > Loudness.AS_SENT
+        Column {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Volume", style = Type.body.copy(color = T.muted), modifier = Modifier.weight(1f))
+                Text("$vol%", style = Type.mono.copy(fontSize = 14.sp, color = if (boosting) T.warning else T.text))
+            }
             Slider(
-                vol, { vol = it; Director.setVolume(it, save = false) }, Modifier.weight(1f).semantics { stateDescription = "${(vol * 100).toInt()} percent" },
-                valueRange = 0f..3f, onValueChangeFinished = { Director.setVolume(vol) },
-                colors = SliderDefaults.colors(thumbColor = T.text, activeTrackColor = if (vol > 1f) T.warning else T.accent, inactiveTrackColor = T.control),
+                vol.toFloat(), { vol = it.roundToInt(); Director.setVolume(vol, save = false) },
+                Modifier.fillMaxWidth().semantics { stateDescription = "$vol percent. " + Loudness.describe(vol) },
+                valueRange = 1f..100f, onValueChangeFinished = { Director.setVolume(vol) },
+                colors = SliderDefaults.colors(thumbColor = T.text, activeTrackColor = if (boosting) T.warning else T.accent, inactiveTrackColor = T.control),
             )
-            Text("${(vol * 100).toInt()}%", style = Type.mono.copy(fontSize = 14.sp, color = if (vol > 1f) T.warning else T.text), modifier = Modifier.width(48.dp))
+            // the loudness scale: 1, 25, 50, 75 and 100% sit at the ends and quarters of the track
+            Box(Modifier.fillMaxWidth().padding(horizontal = 2.dp).clearAndSetSemantics { }) {
+                Loudness.marks.forEachIndexed { k, label ->
+                    Text(label, style = Type.mono.copy(fontSize = 11.sp, color = if (k == 2) T.text2 else T.muted),
+                        modifier = Modifier.align(androidx.compose.ui.BiasAlignment(-1f + k * 0.5f, 0f)))
+                }
+            }
         }
-        // Always shown, so moving the slider past 100% doesn't push anything down.
-        Text(if (vol > 1f) "Boosted above 100%. Loud parts are softened, not clipped." else "Up to 300% for quiet rooms.",
-            style = Type.small.copy(color = if (vol > 1f) T.warning else T.muted), maxLines = 1, overflow = TextOverflow.Ellipsis)
+        // Nothing is louder than the phone's own media volume lets it be, so say when that is down.
+        val context = androidx.compose.ui.platform.LocalContext.current
+        val am = remember { context.getSystemService(android.media.AudioManager::class.java) }
+        val phonePct = am?.let { it.getStreamVolume(android.media.AudioManager.STREAM_MUSIC) * 100 / it.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC).coerceAtLeast(1) } ?: 100
+        val phoneLow = active && phonePct < 70
+        // Always shown, so moving the slider doesn't push anything down.
+        Text(if (phoneLow) "The phone's own volume is at $phonePct%. Press volume up for more." else Loudness.describe(vol),
+            style = Type.small.copy(color = if (boosting || phoneLow) T.warning else T.muted), maxLines = 2, minLines = 2, overflow = TextOverflow.Ellipsis)
         run {
             val drops = Director.dropoutsLastMinute()
             val (text, tint) = when {

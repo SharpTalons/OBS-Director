@@ -109,6 +109,7 @@ function icon(name, size = 20) {
 		timer: '<circle cx="12" cy="13" r="8"/><path d="M12 9v4l2 2M9 2h6"/>',
 		tap: '<path d="M9 11V5a2 2 0 0 1 4 0v6M13 10a2 2 0 0 1 4 0v4a6 6 0 0 1-6 6h-1a6 6 0 0 1-5-3l-1.5-3a1.6 1.6 0 0 1 2.8-1.6L9 15"/>',
 		vibrate: '<rect x="8" y="4" width="8" height="16" rx="2"/><path d="M4 8v8M20 8v8"/>',
+		more: '<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',
 	};
 	return h('span', { 'aria-hidden': 'true', style: { display: 'inline-flex' }, html: `<svg width="${size}" height="${size}" viewBox="0 0 24 24">${paths[name] || ''}</svg>` });
 }
@@ -306,7 +307,7 @@ function connect() {
 			state.link = 'lost';
 			state.lostAt = Date.now();
 			chatNote({ kind: 'alert', severe: true, from: 'Connection to ' + (state.pc || 'the PC') + ' lost.', text: 'Listening paused. The recording carries on at the PC. Reconnecting…' });
-			feedback.buzz([200, 100, 200]);
+			feedback.buzz([300, 120, 300]);
 			endClipIfRunning(', ended when the connection dropped');
 			audio.pause();
 			video.reset();
@@ -1092,7 +1093,7 @@ function raise(a) {
 	state.alerts = state.alerts.filter((x) => x.id !== a.id).concat([a]);
 	if (had) return;
 	chatNote({ kind: 'alert', from: a.title, text: a.body, severe: !!a.severe, deskText: a.desk || null, offerStart: !!a.offerStart });
-	feedback.buzz(a.severe ? [300, 120, 300, 120, 300] : [200, 100, 200]);
+	feedback.buzz(a.severe ? [400, 150, 400, 150, 400] : [300, 120, 300]);
 	notify(a.title, a.body);
 	render();
 }
@@ -1183,15 +1184,18 @@ const feedback = {
 			this.load();
 			if (this.buffer && audio.ctx) {
 				const src = audio.ctx.createBufferSource(), g = audio.ctx.createGain();
-				g.gain.value = (vol / 100) * 0.6; /* same ceiling as the app: under the mix, not over it */
+				/* the same loudness scale as the app: 25, 50, 75 and 100% play at −12, −6, −3 and 0 dB */
+				g.gain.value = Math.pow(10, [-12, -6, -3, 0][Math.max(0, Math.min(3, Math.round(vol / 25) - 1))] / 20);
 				src.buffer = this.buffer; src.connect(g); g.connect(audio.ctx.destination); src.start();
 			}
 		}
-		if (settings.haptics > 0) this.buzz([[8, 14, 22][settings.haptics - 1]]);
+		if (settings.haptics > 0) this.buzz([[18, 28, 40][settings.haptics - 1]], true);
 	},
-	buzz(pattern) {
+	/* Browsers can't set vibration strength, only length, so stronger settings buzz longer. A tap
+	 * is already sized for its level; patterns are scaled. */
+	buzz(pattern, sized) {
 		if (!settings.haptics || !navigator.vibrate) return;
-		const scale = [0.5, 1, 1.4][settings.haptics - 1];
+		const scale = sized ? 1 : [0.8, 1.2, 1.6][settings.haptics - 1];
 		try { navigator.vibrate(pattern.map((v, i) => (i % 2 === 0 ? Math.max(5, Math.round(v * scale)) : v))); } catch { /* not allowed */ }
 	},
 };
@@ -1258,7 +1262,7 @@ const tint = (name) => ({ bg: `var(--${name}-tint)`, ink: `var(--${name}-ink)` }
 
 function structureKey() {
 	const s = state.status || {};
-	return [state.link, view.name, view.recording, view.open, view.mode, view.streamTab, view.exporting, s.recActive, s.recPaused, s.streamActive,
+	return [state.link, view.name, view.recording, view.open, view.mode, view.streamTab, view.exporting, JSON.stringify(view.sheet), view.sheetMode, !!undoing, s.recActive, s.recPaused, s.streamActive,
 		state.clipStart !== null, state.listening, state.video, state.desk.length, state.desk.map((m) => m.state).join(''), state.deskUnread, state.deskAlert, state.alerts.map((a) => a.id).join(), !!state.lastSaved, settings.allowStreamStop,
 		player.key, recordings.length].join('|');
 }
@@ -1365,7 +1369,7 @@ function connectView() {
 function appView() {
 	const nav = [['monitor', 'Monitor', 'teal'], ['stream', 'Stream and PC', 'rec'], ['recordings', 'Recordings', 'amber'], ['desk', 'Desk', 'ok'], ['settings', 'Settings', 'purple']];
 	const current = view.name === 'recording' ? 'recordings' : view.name;
-	const page = { monitor: monitorPage, stream: streamPage, recordings: recordingsPage, recording: recordingPage, settings: settingsPage }[view.name] || monitorPage;
+	const page = { monitor: monitorPage, stream: streamPage, recordings: recordingsPage, recording: recordingsPage, settings: settingsPage }[view.name] || monitorPage;
 	if (view.name === 'desk') { state.deskUnread = 0; state.deskAlert = 0; }
 	return h('div.app',
 		h('nav.nav', { 'aria-label': 'Main' },
@@ -1650,152 +1654,196 @@ function drawHealth(canvas) {
 	canvas.setAttribute('aria-label', bars.length ? 'Dropped frames per minute, most recent ' + bars[bars.length - 1] + ', highest ' + Math.max(...bars) : 'No stream data yet');
 }
 
-/* ---------- recordings ---------- */
-function recordingsPage() {
-	/* recordings with no clips go at the end, folded away, so the useful ones come first */
-	const live_ = recordings.filter((r) => r.live), past = recordings.filter((r) => !r.live && r.clips.length), empty = recordings.filter((r) => !r.live && !r.clips.length);
-	const tiles = ['teal', 'purple', 'amber', 'ok'];
-	const row = (r, t) => {
-		const d = new Date(r.startedAt);
-		return h('button.list-row', { type: 'button', onclick: () => { view.name = 'recording'; view.recording = r.file; view.open = null; render(); } },
-			t ? h('span.date-tile', { style: { background: `var(--${t}-tint)`, color: `var(--${t}-ink)` } }, h('b', d.getDate()), h('small', d.toLocaleDateString(undefined, { month: 'short' }).toUpperCase()))
-				: h('span.date-tile', { style: { background: 'var(--rec-tint)' } }, h('span.dot', { style: { width: '14px', height: '14px', background: 'var(--rec)' } })),
-			h('span.grow', h('div', { style: { fontWeight: 500, fontSize: '16px' } }, recordingTitle(r)),
-				h('div.small', (r.live ? 'Recording' : durationText(r.durationMs)) + ' · ' + clipsText(r.clips.length))),
-			h('span.chev', icon('chev')));
-	};
-	return [h('div', h('h1.title', 'Recordings'), h('div.sub', 'Click one to see its clips and export them. Kept in this browser.')),
-		!recordings.length && h('section.section', h('div.small', 'No recordings yet. Clips you mark while OBS records show up here, one row per recording.')),
-		live_.length ? [h('div.group-label', { style: { color: 'var(--rec-ink)' } }, 'Now'), h('div.list', live_.map((r) => row(r, null)))] : null,
-		past.length ? [h('div.group-label', { style: { color: 'var(--muted)' } }, 'Earlier'), h('div.list', past.map((r, i) => row(r, tiles[i % 4])))] : null,
-		empty.length ? h('button.fold', { type: 'button', 'aria-expanded': String(!!view.showEmpty), onclick: () => { view.showEmpty = !view.showEmpty; render(); } },
-			h('span.grow', empty.length === 1 ? '1 recording without clips' : empty.length + ' recordings without clips'), h('span.chev' + (view.showEmpty ? '.up' : '.down'), icon('chev'))) : null,
-		empty.length && view.showEmpty ? h('div.list', empty.map((r) => row(r, 'neutral'))) : null,
-		recordings.length ? h('button.btn.danger', { type: 'button', onclick: () => {
-			if (!confirm('Delete all recordings and clips in this browser? Their notes and saved audio go too. The recordings on the PC are not touched. A recording OBS is making now keeps going, without its clips.')) return;
-			const live = recordings.filter((r) => r.live);
-			for (const r of recordings) if (!r.live) idb.remove(r.file);
-			recordings = live.map((r) => Object.assign(r, { clips: [] }));
-			saveRecordings();
-			toast('Deleted');
-		} }, icon('trash', 18), 'Delete all recordings and clips') : null];
+/* ---------- recordings ----------
+ * Clips first, on one page. Each recording is a card with its clips inside; click a heading to
+ * open or fold it. Every clip has its own Play button, and a small player shows at the bottom while
+ * one plays. Clicking a clip opens one sheet with Play, Trim, Note, Download and Delete; a
+ * recording's ⋯ opens Export and Delete. Recordings without clips stay folded at the end. */
+const clipKey = (r, c) => r.file + ':' + c.id;
+const clipName = (c) => c.note || 'Clip at ' + tc(c.startMs);
+const clipMeta = (c) => clipLength(c.endMs - c.startMs) + ' long · at ' + tc(c.startMs);
+const recMeta = (r) => (r.live ? 'Recording now' : durationText(r.durationMs)) + ' · ' + clipsText(r.clips.length);
+
+/* Undo after a delete: one at a time. A deleted recording's saved audio goes only once Undo has gone. */
+let undoing = null;
+let undoTimer = 0;
+function offerUndo(text, undo, commit) {
+	if (undoing && undoing.commit) undoing.commit();
+	clearTimeout(undoTimer);
+	undoing = { text, undo, commit };
+	undoTimer = setTimeout(() => { if (undoing && undoing.commit) undoing.commit(); undoing = null; render(); }, 6000);
 }
 
-let removed = null;
-let undoTimer = 0;
-function recordingPage() {
-	const r = recordings.find((x) => x.file === view.recording);
-	const back = h('button.round.plain', { type: 'button', 'aria-label': 'Back to Recordings', onclick: () => { view.name = 'recordings'; render(); } }, icon('back'));
-	if (!r) return [h('div.row', back, h('h1.title', 'Recording')), h('div.small', "This recording isn't in this browser any more.")];
-	const out = [h('div.row', back,
-		h('div.grow', h('h1.title', { style: { fontSize: '22px' } }, recordingTitle(r)),
-			h('div.small', (r.live ? 'Recording' : durationText(r.durationMs)) + ' · ' + clipsText(r.clips.length) + ' · ' + r.file)),
-		h('button.btn.primary', { type: 'button', disabled: !r.clips.length, onclick: () => { view.exporting = true; render(); } }, icon('export', 18), 'Export'))];
-	if (settings.pcClipLists && r.savedOnPc)
-		out.push(h('div.note-ok', icon('pc', 20), 'Saved on ' + r.savedOnPc + ' too, next to the recording as ' + r.file.replace(/\.[^.]*$/, '') + '.edl and .csv.'));
-	/* Undo floats over the bottom of the page, so deleting a clip doesn't shove the list around. */
-	if (removed && removed.file === r.file)
-		out.push(h('div.undo-bar', { role: 'status' }, h('span.grow', 'Clip at ' + tc(removed.clip.startMs) + ' deleted.'),
-			h('button.btn.outline', { type: 'button', onclick: () => { r.clips.push(removed.clip); r.clips.sort((a, b) => a.startMs - b.startMs); removed = null; saveRecordings(); } }, icon('undo', 18), 'Undo')));
-	if (!r.clips.length) out.push(h('section.section', h('div.small', 'No clips in this recording.')));
-	const tints = ['rec', 'blue', 'amber', 'teal'];
-	r.clips.forEach((c, i) => {
-		const key = r.file + ':' + c.id, isOpen = view.open === c.id, playing = player.key === key, t = tints[i % 4];
-		const sub = playing ? bind(h('div.small', { style: { color: 'var(--ok-ink)' } }), () => 'Playing ' + len(player.posMs() - c.startMs) + ' of ' + len(c.endMs - c.startMs))
-			: h('div.small', { style: { color: c.note ? 'var(--text-2)' : 'var(--muted)' } }, c.note || 'No note');
-		const card = h('div.clip-card' + (isOpen ? '.open' : ''),
-			h('div.clip-head', h('span.num', { style: { background: `var(--${t}-tint)`, color: `var(--${t}-ink)` } }, i + 1),
-				h('div.grow', h('div', h('b', { style: { fontWeight: 500 } }, clipLength(c.endMs - c.startMs)), h('span.small', ' · at ' + tc(c.startMs))), sub),
-				h('button.plus', { type: 'button', 'aria-expanded': String(isOpen), 'aria-label': (isOpen ? 'Close actions for clip ' : 'Actions for clip ') + (i + 1),
-					onclick: () => { view.open = isOpen ? null : c.id; view.mode = 'actions'; render(); } }, icon('plus'))));
-		if (isOpen) card.append(h('div.clip-body', clipActions(r, c, key, playing)));
-		out.push(card);
-	});
-	out.push(h('button.btn.danger', { type: 'button', onclick: () => {
-		if (!confirm('Delete this recording from this browser? Its clips, notes and saved audio go too. The recording on the PC is not touched.')) return;
-		player.stop();
-		recordings = recordings.filter((x) => x.file !== r.file);
-		idb.remove(r.file);
+function deleteRecording(r) {
+	if (player.key && player.key.startsWith(r.file + ':')) player.stop();
+	const at = recordings.indexOf(r);
+	recordings = recordings.filter((x) => x !== r);
+	saveRecordings();
+	offerUndo('Recording deleted', () => { recordings.splice(Math.min(at, recordings.length), 0, r); saveRecordings(); }, () => idb.remove(r.file));
+}
+
+function recordingsPage() {
+	const order = (a, b) => (b.live - a.live) || (b.startedAt - a.startedAt);
+	const withClips = recordings.filter((r) => r.live || r.clips.length).sort(order);
+	const empty = recordings.filter((r) => !r.live && !r.clips.length).sort(order);
+	const total = recordings.reduce((n, r) => n + r.clips.length, 0);
+	/* the recording OBS is making and the two newest others start open */
+	if (!view.openRecs) view.openRecs = new Set(withClips.filter((r) => r.live).map((r) => r.file).concat(withClips.filter((r) => !r.live).slice(0, 2).map((r) => r.file)));
+	if (view.name === 'recording' && view.recording) {
+		view.openRecs.add(view.recording);
+		const target = view.recording;
 		view.name = 'recordings';
+		setTimeout(() => { const el = document.getElementById('rec-' + cssId(target)); if (el) el.scrollIntoView({ block: 'start', behavior: 'smooth' }); }, 0);
+	}
+	const playingKey = player.key && player.key.includes(':') ? player.key : null;
+
+	const card = (r) => {
+		const open = view.openRecs.has(r.file);
+		const head = h('div.rec-head',
+			h('button.rec-toggle', { type: 'button', 'aria-expanded': String(open), onclick: () => { open ? view.openRecs.delete(r.file) : view.openRecs.add(r.file); render(); } },
+				r.live ? h('span.rec-pill', h('span.dot', { style: { background: 'var(--rec)' } }), 'REC') : null,
+				h('span.grow', h('h2.rec-title', recordingTitle(r)), h('span.small', recMeta(r))),
+				h('span.chev' + (open ? '.up' : '.down'), icon('chev'))),
+			h('button.round.plain', { type: 'button', 'aria-label': 'More for ' + recordingTitle(r), onclick: () => { view.sheet = { rec: r.file }; render(); } }, icon('more', 22)));
+		const body = !open ? null : h('div.rec-body',
+			!r.clips.length ? h('div.small', { style: { padding: '14px 16px 16px' } }, 'No clips yet. Click Start clip on Monitor when something good happens.') : null,
+			r.clips.map((c) => {
+				const key = clipKey(r, c), playing = playingKey === key;
+				return h('div.clip-row' + (playing ? '.playing' : ''),
+					h('button.clip-play', { type: 'button', 'aria-label': (playing ? 'Stop ' : 'Play ') + clipName(c), onclick: () => (playing ? player.stop() : player.play(key, r.file, c.startMs, c.endMs)) }, icon(playing ? 'pause' : 'play', 22)),
+					h('button.clip-open', { type: 'button', onclick: () => { view.sheet = { clip: key }; view.sheetMode = 'clip'; render(); } },
+						h('span.clip-note' + (c.note ? '' : '.empty'), c.note || 'Add a note'), h('span.small', clipMeta(c))),
+					h('button.round.plain', { type: 'button', 'aria-label': 'More for ' + clipName(c), onclick: () => { view.sheet = { clip: key }; view.sheetMode = 'clip'; render(); } }, icon('more', 22)));
+			}),
+			settings.pcClipLists && r.savedOnPc ? h('div.rec-pc', icon('pc', 16), 'The clip list is saved on ' + r.savedOnPc + ' too, next to the recording.') : null);
+		return h('section.rec-card' + (r.live ? '.live' : ''), { id: 'rec-' + cssId(r.file) }, head, body);
+	};
+
+	const out = [h('div', h('h1.title', 'Recordings'),
+		h('div.sub', recordings.length ? clipsText(total) + ' in ' + withClips.length + (withClips.length === 1 ? ' recording' : ' recordings') + ' · kept in this browser' : 'Kept in this browser')),
+	!recordings.length && h('section.section', h('div.small', 'No recordings yet. Clips you mark while OBS records show up here, under their recording.')),
+	withClips.map(card),
+	empty.length ? h('button.fold', { type: 'button', 'aria-expanded': String(!!view.showEmpty), onclick: () => { view.showEmpty = !view.showEmpty; render(); } },
+		h('span.grow', empty.length === 1 ? '1 recording without clips' : empty.length + ' recordings without clips'), h('span.chev' + (view.showEmpty ? '.up' : '.down'), icon('chev'))) : null,
+	empty.length && view.showEmpty ? h('div.list', empty.map((r) => h('div.list-row',
+		h('span.grow', h('div', recordingTitle(r)), h('div.small', durationText(r.durationMs))),
+		h('button.round.plain', { type: 'button', 'aria-label': 'Delete ' + recordingTitle(r), style: { color: 'var(--rec-ink)' }, onclick: () => deleteRecording(r) }, icon('trash'))))) : null,
+	recordings.length ? h('button.btn.danger', { type: 'button', onclick: () => {
+		if (!confirm('Delete all recordings and clips in this browser? Their notes and saved audio go too. The recordings on the PC are not touched. A recording OBS is making now keeps going, without its clips.')) return;
+		player.stop();
+		const live = recordings.filter((r) => r.live);
+		for (const r of recordings) if (!r.live) idb.remove(r.file);
+		recordings = live.map((r) => Object.assign(r, { clips: [] }));
 		saveRecordings();
-		toast('Recording deleted');
-	} }, icon('trash', 18), 'Delete this recording'));
-	if (view.exporting) out.push(exportDialog(r));
+		toast('Deleted');
+	} }, icon('trash', 18), 'Delete all recordings and clips') : null];
+
+	/* Undo, then the small player, floating at the bottom so nothing in the list moves */
+	const dock = h('div.rec-dock',
+		undoing ? h('div.undo-snack', { role: 'status' }, h('span.grow', undoing.text),
+			h('button', { type: 'button', onclick: () => { const u = undoing; clearTimeout(undoTimer); undoing = null; u.undo(); render(); } }, 'Undo')) : null,
+		playingKey ? miniPlayer(playingKey) : null);
+	if (dock.childNodes.length) out.push(dock);
+	if (view.sheet) out.push(recordingSheet());
 	return out;
 }
 
-function clipActions(r, c, key, playing) {
-	const action = (label, ic, t, onclick) => h('button.action', { type: 'button', style: { background: `var(--${t}-tint)`, color: `var(--${t}-ink)` }, onclick }, icon(ic, 22), label);
-	if (view.mode === 'adjust') return adjustPanel(r, c);
-	if (view.mode === 'note') {
-		const input = h('input', { type: 'text', value: c.note || '', maxlength: 140, 'aria-label': 'Note' });
-		const save = () => { c.note = input.value.trim(); view.mode = 'actions'; saveRecordings(); render(); };
-		input.addEventListener('keydown', (e) => { if (e.key === 'Enter') save(); });
-		setTimeout(() => input.focus(), 0);
-		return [input, h('div.row', h('button.btn.outline', { type: 'button', onclick: () => { view.mode = 'actions'; render(); } }, 'Cancel'), h('button.btn.primary', { type: 'button', onclick: save }, 'Save note'))];
+const cssId = (s) => s.replace(/[^\w-]/g, '_');
+
+/** The player at the bottom while a clip plays: which clip, how far, and Stop. */
+function miniPlayer(key) {
+	const r = recordings.find((x) => key.startsWith(x.file + ':'));
+	const c = r && r.clips.find((x) => clipKey(r, x) === key);
+	const fill = h('div.mini-fill');
+	const span = () => Math.max(1, player.toMs - player.fromMs);
+	const done = () => Math.min(span(), Math.max(0, player.posMs() - player.fromMs));
+	const time = bind(h('span.small'), () => len(done()) + ' of ' + len(span()) + (r ? ' · ' + recordingTitle(r) : ''));
+	live.push([fill, null, () => { fill.style.width = (done() / span() * 100).toFixed(1) + '%'; }]);
+	fill.style.width = (done() / span() * 100).toFixed(1) + '%';
+	return h('div.mini-player',
+		h('div.mini-row', h('span.grow', h('div.mini-title', c ? clipName(c) : 'Playing'), time),
+			h('button.mini-stop', { type: 'button', 'aria-label': 'Stop', onclick: () => player.stop() }, icon('stop', 18))),
+		h('div.mini-track', fill));
+}
+
+/** One sheet for a clip (Play, Trim, Note, Download, Delete) or a recording (Export, Delete). */
+function recordingSheet() {
+	const dlg = h('dialog.sheet', { 'aria-labelledby': 'sheet-title' });
+	const close = () => { if (view.sheetMode === 'trim' && player.key === 'trim') player.stop(); view.sheet = null; view.sheetMode = 'clip'; view.trim = null; dlg.close(); render(); };
+	let title = '', sub = '', body = [];
+	if (view.sheet.clip) {
+		const key = view.sheet.clip;
+		const r = recordings.find((x) => key.startsWith(x.file + ':'));
+		const c = r && r.clips.find((x) => clipKey(r, x) === key);
+		if (!c) { view.sheet = null; return null; }
+		const mode = view.sheetMode || 'clip';
+		title = mode === 'trim' ? 'Trim clip' : mode === 'note' ? 'Note' : clipName(c);
+		sub = clipMeta(c) + ' · ' + recordingTitle(r);
+		const tile = (label, ic, t, onclick) => h('button.sheet-tile', { type: 'button', style: { background: `var(--${t}-tint)`, color: `var(--${t}-ink)` }, onclick }, icon(ic, 22), label);
+		if (mode === 'trim') {
+			if (!view.trim) view.trim = { start: c.startMs, end: c.endMs };
+			const t = view.trim;
+			const from = Math.max(0, Math.min(t.start, c.startMs) - 30000), to = Math.max(t.end, c.endMs) + 30000, sp = to - from;
+			const row = (label, which) => h('div.trim-row',
+				h('span.grow', h('span.small', label), h('div.trim-time', tc(t[which]))),
+				h('button', { type: 'button', 'aria-label': label + ': 5 seconds earlier', onclick: () => { t[which] = which === 'start' ? Math.max(0, t.start - 5000) : Math.max(t.start + 1000, t.end - 5000); render(); } }, '−5 s'),
+				h('button', { type: 'button', 'aria-label': label + ': 5 seconds later', onclick: () => { t[which] = which === 'start' ? Math.min(t.end - 1000, t.start + 5000) : t.end + 5000; render(); } }, '+5 s'));
+			const trimPlaying = player.key === 'trim';
+			body = [
+				h('div.trim-bar', { role: 'img', 'aria-label': 'Kept: ' + tc(t.start) + ' to ' + tc(t.end) },
+					h('div.trim-kept', { style: { left: ((t.start - from) / sp * 100).toFixed(1) + '%', width: ((t.end - t.start) / sp * 100).toFixed(1) + '%' } })),
+				row('Starts at', 'start'), row('Ends at', 'end'),
+				h('button.btn.outline', { type: 'button', onclick: () => (trimPlaying ? player.stop() : player.play('trim', r.file, t.start, t.end)) }, icon(trimPlaying ? 'stop' : 'play', 18), trimPlaying ? 'Stop' : 'Play ' + clipLength(t.end - t.start)),
+				h('div.row',
+					h('button.btn.outline.grow', { type: 'button', onclick: () => { if (trimPlaying) player.stop(); view.trim = null; view.sheetMode = 'clip'; render(); } }, 'Cancel'),
+					h('button.btn.primary.grow', { type: 'button', onclick: () => { player.stop(); c.startMs = t.start; c.endMs = t.end; r.clips.sort((a, b) => a.startMs - b.startMs); view.trim = null; view.sheetMode = 'clip'; saveRecordings(); toast('Clip trimmed to ' + clipLength(t.end - t.start)); render(); } }, 'Save'))];
+		} else if (mode === 'note') {
+			const input = h('input', { type: 'text', value: c.note || '', maxlength: 140, 'aria-label': 'Note for this clip', placeholder: 'What happens in this clip?' });
+			const save = () => { const v = input.value.trim(); c.note = v; view.sheetMode = 'clip'; saveRecordings(); toast(v ? 'Note saved' : 'Note removed'); render(); };
+			input.addEventListener('keydown', (e) => { if (e.key === 'Enter') save(); });
+			setTimeout(() => input.focus(), 0);
+			body = [input, h('div.row', h('button.btn.outline.grow', { type: 'button', onclick: () => { view.sheetMode = 'clip'; render(); } }, 'Cancel'), h('button.btn.primary.grow', { type: 'button', onclick: save }, 'Save'))];
+		} else {
+			body = [
+				h('button.btn.primary.big', { type: 'button', onclick: () => { player.play(key, r.file, c.startMs, c.endMs); close(); } }, icon('play', 18), player.key === key ? 'Playing…' : 'Play clip'),
+				h('div.sheet-tiles',
+					tile('Trim', 'tune', 'teal', () => { view.sheetMode = 'trim'; view.trim = null; render(); }),
+					tile('Note', 'edit', 'amber', () => { view.sheetMode = 'note'; render(); }),
+					tile('Download', 'down', 'purple', () => downloadClipAudio(r, c))),
+				h('button.btn.danger', { type: 'button', onclick: () => {
+					if (player.key === key) player.stop();
+					r.clips = r.clips.filter((x) => x.id !== c.id);
+					saveRecordings();
+					offerUndo('Clip deleted', () => { r.clips.push(c); r.clips.sort((a, b) => a.startMs - b.startMs); saveRecordings(); });
+					close();
+				} }, icon('trash', 18), 'Delete clip')];
+		}
+	} else {
+		const r = recordings.find((x) => x.file === view.sheet.rec);
+		if (!r) { view.sheet = null; return null; }
+		title = recordingTitle(r);
+		sub = recMeta(r) + ' · ' + r.file;
+		body = [
+			r.clips.length ? h('div.small', 'Export the clip list for your editor. Click a format to download it, or Copy to paste it.') : null,
+			r.clips.length ? h('div.export-list', Exporter.formats.map((f) => h('div.export-row',
+				h('button.export-main', { type: 'button', onclick: () => {
+					settings.exportFormat = f.id; saveSettings();
+					download(r.file.replace(/\.[^.]*$/, '') + '.' + Exporter.ext(f.id), new Blob([Exporter.export(r, f.id)], { type: 'text/plain' }));
+					close();
+				} },
+					h('span.tint-tile', { style: { width: '36px', height: '36px', background: `var(--${f.tint}-tint)`, color: `var(--${f.tint}-ink)`, fontSize: '12px', fontWeight: 700 } }, f.badge),
+					h('span.grow', h('div', f.label), h('div.small', f.hint))),
+				h('button.copy', { type: 'button', 'aria-label': 'Copy the ' + f.label + ' list', onclick: async () => {
+					try { await navigator.clipboard.writeText(Exporter.export(r, f.id)); toast('Copied'); } catch { toast("This browser didn't allow copying."); }
+				} }, 'Copy')))) : null,
+			r.live ? null : h('button.btn.danger', { type: 'button', onclick: () => { close(); deleteRecording(r); render(); } }, icon('trash', 18), 'Delete this recording'),
+			r.live ? null : h('div.small', { style: { textAlign: 'center' } }, 'Only from this browser. The recording on the PC isn’t touched.')];
 	}
-	return [h('div.actions',
-		action(playing ? 'Stop' : 'Play', playing ? 'stop' : 'play', 'blue', () => (playing ? player.stop() : player.play(key, r.file, c.startMs, c.endMs))),
-		action('Adjust start and end', 'tune', 'teal', () => { view.mode = 'adjust'; render(); }),
-		action('Edit note', 'edit', 'amber', () => { view.mode = 'note'; render(); }),
-		action('Download audio', 'down', 'purple', () => downloadClipAudio(r, c))),
-	h('button.btn.danger', { type: 'button', onclick: () => { player.stop(); r.clips = r.clips.filter((x) => x.id !== c.id); removed = { file: r.file, clip: c }; view.open = null; saveRecordings();
-		clearTimeout(undoTimer); undoTimer = setTimeout(() => { removed = null; render(); }, 8000); } }, icon('trash', 18), 'Delete clip')];
-}
-
-function adjustPanel(r, c) {
-	const edit = { start: c.startMs, end: c.endMs };
-	const startT = h('div', { style: { fontSize: '20px' } }), endT = h('div', { style: { fontSize: '20px' } }), lenT = h('div', { style: { fontSize: '20px' } });
-	const show = () => {
-		startT.textContent = tc(edit.start) + '.' + Math.floor((edit.start % 1000) / 100);
-		endT.textContent = tc(edit.end) + '.' + Math.floor((edit.end % 1000) / 100);
-		lenT.textContent = len(edit.end - edit.start);
-	};
-	const nudges = (which) => h('div.nudges', [-10000, -1000, -100, 100, 1000, 10000].map((d) => h('button', { type: 'button',
-		'aria-label': 'Move ' + which + ' ' + (d > 0 ? 'later' : 'earlier') + ' by ' + Math.abs(d) / 1000 + ' seconds',
-		onclick: () => {
-			if (which === 'start') edit.start = Math.max(0, Math.min(edit.end - 1000, edit.start + d));
-			else edit.end = Math.max(edit.start + 1000, edit.end + d);
-			show();
-		} }, (d > 0 ? '+' : '−') + (Math.abs(d) >= 1000 ? Math.abs(d) / 1000 : '0.' + Math.abs(d) / 100))));
-	show();
-	return [h('div.label', 'Start'), startT, nudges('start'), h('div.label', 'End'), endT, nudges('end'), h('div.label', 'Length'), lenT,
-		h('div.row',
-			h('button.btn.primary', { type: 'button', onclick: () => player.play('adj', r.file, edit.start, edit.end) }, icon('play', 18), 'Play clip'),
-			h('button.btn.outline', { type: 'button', onclick: () => player.play('adj', r.file, Math.max(0, edit.start - 1500), edit.start + 1500) }, 'Hear start'),
-			h('button.btn.outline', { type: 'button', onclick: () => player.play('adj', r.file, Math.max(0, edit.end - 1500), edit.end + 1500) }, 'Hear end')),
-		h('div.row',
-			h('button.btn.outline', { type: 'button', onclick: () => { player.stop(); view.mode = 'actions'; render(); } }, 'Cancel'),
-			h('button.btn.primary', { type: 'button', onclick: () => { player.stop(); c.startMs = edit.start; c.endMs = edit.end; r.clips.sort((a, b) => a.startMs - b.startMs); view.mode = 'actions'; saveRecordings(); toast('Clip saved. The export uses the new times.'); } }, icon('check', 18), 'Save')),
-		h('div.small', 'The chapter in the recording file marks where you clicked Start clip. Changed times go in the export.')];
-}
-
-function exportDialog(r) {
-	let format = settings.exportFormat;
-	const dlg = h('dialog', { 'aria-labelledby': 'export-title' });
-	const list = h('div', { role: 'radiogroup', 'aria-label': 'Format', style: { display: 'flex', flexDirection: 'column', gap: '10px' } });
-	const draw = () => {
-		list.replaceChildren(...Exporter.formats.map((f) => h('button.format', { type: 'button', role: 'radio', 'aria-checked': String(f.id === format), onclick: () => { format = f.id; draw(); } },
-			h('span.tint-tile', { style: { width: '36px', height: '36px', background: `var(--${f.tint}-tint)`, color: `var(--${f.tint}-ink)`, fontSize: '12px', fontWeight: 700 } }, f.badge),
-			h('span.grow', h('div', { style: { fontWeight: 500 } }, f.label), h('div.small', f.hint)))));
-	};
-	draw();
-	const close = () => { view.exporting = false; dlg.close(); render(); };
-	dlg.append(h('div', { style: { display: 'flex', flexDirection: 'column', gap: '12px' } },
-		h('h2.card-title#export-title', { style: { fontSize: '19px', fontWeight: 700 } }, 'Export clips'),
-		h('div.small', clipsText(r.clips.length) + ' from ' + recordingTitle(r)),
-		list,
-		h('div.row', { style: { marginTop: '6px' } },
-			h('button.btn.outline.grow', { type: 'button', onclick: async () => {
-				try { await navigator.clipboard.writeText(Exporter.export(r, format)); toast('Copied'); } catch { toast("This browser didn't allow copying."); }
-			} }, 'Copy'),
-			h('button.btn.primary.grow', { type: 'button', onclick: () => {
-				settings.exportFormat = format; saveSettings();
-				download(r.file.replace(/\.[^.]*$/, '') + '.' + Exporter.ext(format), new Blob([Exporter.export(r, format)], { type: 'text/plain' }));
-				close();
-			} }, icon('down', 18), 'Download')),
-		h('button.btn.outline', { type: 'button', onclick: close }, 'Close')));
+	dlg.append(h('div.sheet-body',
+		h('div', h('h2.card-title#sheet-title', title), h('div.small', sub)),
+		body));
 	dlg.addEventListener('cancel', (e) => { e.preventDefault(); close(); });
+	dlg.addEventListener('click', (e) => { if (e.target === dlg) close(); });
 	setTimeout(() => { if (dlg.isConnected && !dlg.open) dlg.showModal(); }, 0);
 	return dlg;
 }
@@ -1845,7 +1893,7 @@ function settingsPage() {
 				tile, h('span.grow', label), h('span.switch', { 'aria-checked': String(on), 'aria-hidden': 'true' }));
 		}
 		if (kind === 'choice') {
-			const sel = h('select.choice', { 'aria-label': label, onchange: (e) => { const o = options[e.target.selectedIndex]; settings[key] = o[0]; saveSettings(); if (key === 'touchSound' || key === 'haptics') feedback.tap(); if (key === 'haptics') feedback.buzz([40, 80, 40]); render(); } },
+			const sel = h('select.choice', { 'aria-label': label, onchange: (e) => { const o = options[e.target.selectedIndex]; settings[key] = o[0]; saveSettings(); if (key === 'touchSound' || key === 'haptics') feedback.tap(); if (key === 'haptics') feedback.buzz([60, 90, 60]); render(); } },
 				options.map(([v, l]) => h('option', { selected: settings[key] === v }, l)));
 			return h('label.setting', base, tile, h('span.grow', label), sel);
 		}

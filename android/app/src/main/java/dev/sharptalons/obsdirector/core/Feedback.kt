@@ -12,9 +12,11 @@ import dev.sharptalons.obsdirector.ui.FeedbackTokens
 
 /**
  * What a tap feels and sounds like: a short tap sound at the volume chosen in Settings
- * (Touch sound), and a vibration tick at the strength chosen there (Vibration). The sound is one
- * clean tap cut from the supplied recording (res/raw/touch_tap.wav, 60 ms). It stays quiet when
- * the phone is on silent or vibrate, as system touch sounds do.
+ * (Touch sound), and a short vibration at the strength chosen there (Vibration). The sound is one
+ * clean tap cut from the supplied recording (res/raw/touch_tap.wav, 60 ms). It plays on the media
+ * volume, the one the volume buttons set while listening, so it is as loud as the phone is turned
+ * up rather than at the quieter system-sounds volume. It stays quiet when the phone is on silent or
+ * vibrate, as system touch sounds do.
  */
 object Feedback {
     private var pool: SoundPool? = null
@@ -27,7 +29,7 @@ object Feedback {
         pool = SoundPool.Builder()
             .setMaxStreams(FeedbackTokens.TAP_STREAMS)
             .setAudioAttributes(AudioAttributes.Builder()
-                .setUsage(AudioAttributes.USAGE_ASSISTANCE_SONIFICATION)
+                .setUsage(AudioAttributes.USAGE_MEDIA)
                 .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build())
             .build().also { p ->
                 p.setOnLoadCompleteListener { _, _, status -> loaded = status == 0 }
@@ -48,16 +50,22 @@ object Feedback {
         if (volume <= 0 || !loaded) return
         val am = app.getSystemService(Context.AUDIO_SERVICE) as AudioManager
         if (am.ringerMode != AudioManager.RINGER_MODE_NORMAL) return
-        val v = (volume.coerceIn(0, 100) / 100f) * FeedbackTokens.TAP_MAX_GAIN
+        val v = FeedbackTokens.tapGain(volume)
         pool?.play(tapId, v, v, 1, 0, 1f)
     }
 
-    /** The vibration tick for a tap, at strength 0..3 (off, light, medium, strong). */
+    /**
+     * The vibration for a tap, at strength 0..3 (off, light, medium, strong): a short, firm pulse.
+     * Android's own "click" effects are too faint on many phones, so this sets the length and, where
+     * the phone can, the strength itself.
+     */
     fun tick(level: Int) {
         if (level <= 0) return
         val vib = ContextCompat.getSystemService(app, Vibrator::class.java) ?: return
+        val k = level.coerceIn(1, 3) - 1
         runCatching {
-            vib.vibrate(VibrationEffect.createPredefined(FeedbackTokens.TAP_HAPTIC[level.coerceIn(1, 3) - 1]))
+            val amp = if (vib.hasAmplitudeControl()) FeedbackTokens.TAP_AMPLITUDE[k] else VibrationEffect.DEFAULT_AMPLITUDE
+            vib.vibrate(VibrationEffect.createOneShot(FeedbackTokens.TAP_MS[k], amp))
         }
     }
 }

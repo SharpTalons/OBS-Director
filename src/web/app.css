@@ -329,12 +329,25 @@ dialog.sheet { padding: 0; }
 .btn.big { min-height: 52px; font-size: 16px; }
 .sheet-tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
 .sheet-tile { height: 76px; border: 0; border-radius: 14px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; font: inherit; font-size: 14px; font-weight: 500; }
-.trim-bar { position: relative; height: 40px; border-radius: 10px; background: var(--sunken); overflow: hidden; }
-.trim-kept { position: absolute; top: 0; bottom: 0; background: var(--teal-tint); border-left: 2px solid var(--teal-ink); border-right: 2px solid var(--teal-ink); }
-.trim-row { display: flex; align-items: center; gap: 8px; min-height: 56px; padding: 0 6px 0 14px; border-radius: 14px; background: var(--sunken); }
-.trim-row .grow { display: flex; flex-direction: column; gap: 2px; }
-.trim-time { font-size: 17px; font-weight: 500; }
-.trim-row button { width: 48px; height: 48px; border: 0; border-radius: 12px; background: var(--control); color: var(--text); font: inherit; font-size: 14px; font-weight: 500; }
+/* the trimmer: the sound with the kept part lit, a handle at each end */
+.trimmer { position: relative; height: 84px; border-radius: 12px; background: var(--sunken); overflow: hidden; touch-action: none; user-select: none; -webkit-user-select: none; cursor: pointer; }
+.trim-wave { position: absolute; inset: 0; width: 100%; height: 100%; }
+.trim-kept { position: absolute; top: 0; bottom: 0; background: var(--teal-tint); opacity: .85; }
+.trim-handle { position: absolute; top: 0; bottom: 0; width: 44px; margin-left: -22px; display: flex; align-items: center; justify-content: center; cursor: ew-resize; }
+.trim-handle::before { content: ""; position: absolute; top: 0; bottom: 0; left: 21px; width: 2px; background: var(--teal-ink); }
+.trim-handle .grip { position: relative; width: 12px; height: 32px; border-radius: 4px; background: var(--teal-ink); box-shadow: inset 2px 0 0 -1px var(--sunken), inset -2px 0 0 -1px var(--sunken); }
+.trim-handle.active::before, .trim-handle.active .grip { background: var(--text); }
+.trim-handle:focus-visible { outline: none; }
+.trim-handle:focus-visible .grip { outline: 2px solid var(--blue-ink); outline-offset: 2px; }
+.trim-times { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 8px; }
+.trim-edge { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-height: 48px; padding: 4px 6px; border: 0; border-bottom: 2px solid transparent; border-radius: 10px 10px 0 0; background: transparent; color: var(--text-2); font: inherit; }
+.trim-edge:last-child { align-items: flex-end; }
+.trim-edge.active { color: var(--text); border-bottom-color: var(--blue-ink); }
+.trim-edge.active .small { color: var(--blue-ink); }
+.trim-time { font-size: 16px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.trim-len { font-size: 15px; font-weight: 500; text-align: center; font-variant-numeric: tabular-nums; }
+.trim-nudge { display: flex; align-items: center; gap: 8px; }
+.trim-nudge button { width: 64px; height: 48px; border: 0; border-radius: 12px; background: var(--control); color: var(--text); font: inherit; font-size: 14px; font-weight: 500; }
 .export-list { background: var(--sunken); border-radius: 14px; overflow: hidden; }
 .export-row { display: flex; align-items: center; border-top: 1px solid var(--rule); }
 .export-row:first-child { border-top: 0; }

@@ -106,7 +106,7 @@ One screen, clips first, the same in the app and the browser version.
 
 - **A card per recording**, with its clips inside. The recording OBS is making comes first, then the newest. That one and the two newest others start open; the rest fold. Tapping a heading opens or folds it; ⋯ opens Export and Delete.
 - **A clip row** is its Play button (48, round), its note with "length · at start time" under it (or, without a note, "Clip at 00:52:00" with "No note · length"), and ⋯. The row turns blue while it plays.
-- **One sheet** for a clip: Play, then three tiles (Trim in teal, Note in amber, Share or Download in purple), then Delete clip. Trim is two rows, Start and End, each with −5, −1, +1 and +5 s, over the sound around the clip with the kept part lit.
+- **One sheet** for a clip: Play, then three tiles (Trim in teal, Note in amber, Share or Download in purple), then Delete clip. Trim is a trimmer like a phone's video trimmer (rules in `audio/Trim.kt`, and `Trim` in the browser): an 84-high waveform of the clip with 15 s either side, the kept part on the teal tint with its bars in teal ink, and a handle at each end (2 wide line, 12×32 grip with two ridges; white for the end ±1 s moves). Drag an end or the lit part; tap elsewhere to bring the nearer end there. Letting go settles the end in the quietest 100 ms within 0.5 s if it is under 60% of the level where it was let go, and plays 2 s at that edge. Below: Start, the length, End (the selected end underlined in blue), ±1 s, Play, then Reset, Cancel and Save. The minimum clip is 1 s.
 - **At the bottom**, floating so the list never moves: Undo after a delete (6 s), then a small player with the clip's name, its progress and Stop.
 - **Recordings without clips** fold into one line at the end.
 

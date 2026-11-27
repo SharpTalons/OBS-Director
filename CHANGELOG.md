@@ -12,7 +12,6 @@ Fixes from design audits and reviews of the app, the browser version and the OBS
 ### Android app
 - **Connection status off Monitor:** Recordings, Desk, Settings and Stream show a slim amber line at the top while the connection is lost or connecting (tap it to connect), since they have no top bar.
 - **Clip titles:** a clip without a note is named by its time ("Clip at 00:52:00") with "No note" under it, instead of "Add a note", which read like a button.
-- **Trim in 1 s steps too:** each edge has −5, −1, +1 and +5 s.
 - **Volume in words:** the line under the slider says how loud in plain terms, such as "About twice as loud (+12 dB)".
 - **Delay and Bluetooth:** the Delay choices are now Auto, 20, 40, 80 and 160 ms, and on Bluetooth the row says it uses 160 ms there.
 - Recordings uses more of a tablet's width (840 dp). Stage mode names itself to screen readers properly.
@@ -22,7 +21,14 @@ Fixes from design audits and reviews of the app, the browser version and the OBS
 - **How it works:** a short guide under Settings, About.
 - **Hold to stop** is a filled button now, not one that looks switched off.
 - **On phones:** the header shows on Monitor (and anywhere while the connection needs attention), and the Stream tab is labelled "Stream" so it fits.
-- Clip titles and Trim match the app.
+- Clip titles match the app.
+
+### A new trimmer (app and browser)
+- **Trim the way phones trim video.** The sound of the clip is drawn with 15 s either side and the kept part lit. Drag the handle at either end to move it, or drag the lit part to move the whole clip; tap anywhere else to bring the nearer end there.
+- **Hear each cut:** letting go of an end plays a moment of sound at that edge.
+- **Cuts land between words:** an end you let go settles in the nearest pause within half a second (when the session audio is saved).
+- **Fine-tune:** ±1 s moves whichever end you last touched; tap Start or End under the trimmer to pick one. In the browser the ends are sliders too: arrow keys move them 1 s, Page Up and Page Down 5 s.
+- Dragging an end to the side of the view widens it. **Reset** puts the clip back; nothing changes until **Save**.
 
 ### OBS plugin: update check
 - **Tells you when a new version is out.** Once a day, shortly after OBS starts, the plugin asks GitHub for the newest release (nothing about the PC is sent). If it's newer, OBS offers **Download** (the Windows installer), **Skip this version** or **Later**, with the release notes under **Show Details**.

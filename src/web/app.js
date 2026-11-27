@@ -1797,6 +1797,170 @@ function miniPlayer(key) {
 		h('div.mini-track', fill));
 }
 
+/* ---------- trim ----------
+ * The way phones trim video: the sound of the clip with 15 s either side, the kept part lit, and a
+ * handle at each end. Drag a handle to move that end, or the lit part to move the whole clip;
+ * click elsewhere to bring the nearer end there. The handles are sliders too: arrow keys move
+ * them 1 s, Page Up and Down 5 s. Letting go settles an end in the nearest pause and plays a
+ * moment at that edge, so you hear the cut. Nothing changes until Save. The same rules as the
+ * app (audio/Trim.kt). */
+const Trim = {
+	MIN: 1000, PAD: 15000, SNAP: 500, STEP: 100,
+	window(s, e, dur) { const from = Math.max(0, s - this.PAD); let to = e + this.PAD; if (dur > 0) to = Math.min(to, dur); return [from, Math.max(to, from + this.MIN)]; },
+	moveStart(s, e, to) { return Math.max(0, Math.min(e - this.MIN, to)); },
+	moveEnd(s, e, to, dur) { let v = Math.max(s + this.MIN, to); return dur > 0 ? Math.min(v, dur) : v; },
+	moveBoth(s, e, d, dur) { const len = e - s, max = dur > 0 ? dur - len : Infinity; return Math.max(0, Math.min(max, s + d)); },
+	/** env: loudness per 100 ms from envFrom; the quietest point within half a second, if clearly quieter */
+	snap(ms, env, envFrom) {
+		if (!env || !env.length) return ms;
+		const at = Math.floor((ms - envFrom) / this.STEP);
+		if (at < 0 || at >= env.length) return ms;
+		const reach = this.SNAP / this.STEP;
+		let best = at;
+		for (let i = Math.max(0, at - reach); i <= Math.min(env.length - 1, at + reach); i++)
+			if (env[i] < env[best] || (env[i] === env[best] && Math.abs(i - at) < Math.abs(best - at))) best = i;
+		return best !== at && env[best] < env[at] * 0.6 ? Math.round(envFrom + best * this.STEP + this.STEP / 2) : ms;
+	},
+};
+
+/** The loudness of the saved audio around a clip, per 100 ms, for the trimmer's picture and pauses. */
+const trimWave = { key: '', env: null, from: 0, loading: false };
+async function loadTrimWave(r, from, to) {
+	const key = r.file + ':' + from + ':' + to;
+	if (trimWave.key === key || trimWave.loading) return;
+	trimWave.loading = true;
+	const got = await savedAudio(r.file, from, to);
+	const n = Math.ceil((to - from) / Trim.STEP), env = new Float32Array(n);
+	if (got) for (const p of got.pieces) {
+		const ch = p.buffer.getChannelData(0), rate = p.buffer.sampleRate;
+		const first = Math.floor(p.offsetS * rate), count = Math.floor(p.durS * rate), per = rate * Trim.STEP / 1000;
+		for (let k = 0; k < count; k++) {
+			const bin = Math.floor((p.atMs - from) / Trim.STEP + k / per);
+			const v = Math.abs(ch[first + k] || 0);
+			if (bin >= 0 && bin < n && v > env[bin]) env[bin] = v;
+		}
+	}
+	Object.assign(trimWave, { key, env: got ? env : null, from, loading: false });
+	if (view.sheetMode === 'trim') render();
+}
+
+function trimmer(r, c) {
+	const dur = r.live ? nowFileTimeMs() : r.durationMs || 0;
+	if (!view.trim) {
+		const [from, to] = Trim.window(c.startMs, c.endMs, dur);
+		view.trim = { start: c.startMs, end: c.endMs, active: 'start', from, to };
+	}
+	const t = view.trim;
+	loadTrimWave(r, t.from, t.to);
+	const env = trimWave.key === r.file + ':' + t.from + ':' + t.to ? trimWave.env : null;
+	const trimPlaying = player.key === 'trim';
+	const hear = (edge) => (edge === 'start' ? player.play('trim', r.file, t.start, Math.min(t.start + 2000, t.end)) : player.play('trim', r.file, Math.max(t.start, t.end - 2000), t.end));
+	const settle = (edge) => {
+		if (edge === 'start') t.start = Trim.moveStart(t.start, t.end, Trim.snap(t.start, env, t.from));
+		if (edge === 'end') t.end = Trim.moveEnd(t.start, t.end, Trim.snap(t.end, env, t.from), dur);
+		/* an end pushed to the side of the view: show more */
+		if (t.start - t.from < 1500 || t.to - t.end < 1500) [t.from, t.to] = Trim.window(t.start, t.end, dur);
+	};
+
+	const canvas = h('canvas.trim-wave', { 'aria-hidden': 'true' });
+	const kept = h('div.trim-kept');
+	const handle = (which) => h('div.trim-handle.' + which + (t.active === which ? '.active' : ''), {
+		role: 'slider', tabindex: '0', 'aria-label': which === 'start' ? 'Start of the clip' : 'End of the clip',
+		'aria-valuemin': String(t.from), 'aria-valuemax': String(t.to), 'aria-valuenow': String(t[which]), 'aria-valuetext': tc(t[which]),
+		onkeydown: (e) => {
+			const d = { ArrowLeft: -1000, ArrowDown: -1000, ArrowRight: 1000, ArrowUp: 1000, PageDown: -5000, PageUp: 5000 }[e.key];
+			if (!d) return;
+			e.preventDefault();
+			/* moved in place, without rebuilding the sheet, so focus and quick repeats are kept */
+			t.active = which;
+			if (which === 'start') t.start = Trim.moveStart(t.start, t.end, t.start + d); else t.end = Trim.moveEnd(t.start, t.end, t.end + d, dur);
+			place();
+		},
+	}, h('span.grip'));
+	const hs = handle('start'), he = handle('end');
+	const box = h('div.trimmer', kept, canvas, hs, he);
+	const place = () => {
+		const sp = t.to - t.from;
+		const sx = (t.start - t.from) / sp * 100, ex = (t.end - t.from) / sp * 100;
+		kept.style.left = sx + '%'; kept.style.width = (ex - sx) + '%';
+		hs.style.left = sx + '%'; he.style.left = ex + '%';
+		startT.textContent = tc(t.start); endT.textContent = tc(t.end); lenT.textContent = clipLength(t.end - t.start);
+		for (const [el, v] of [[hs, t.start], [he, t.end]]) { el.setAttribute('aria-valuenow', String(Math.round(v))); el.setAttribute('aria-valuetext', tc(v)); }
+		/* which end ±1 s moves, and the length on Play */
+		hs.classList.toggle('active', t.active === 'start'); he.classList.toggle('active', t.active === 'end');
+		for (const [b, w] of [[edgeS, 'start'], [edgeE, 'end']]) { b.classList.toggle('active', t.active === w); b.setAttribute('aria-pressed', String(t.active === w)); }
+		nudgeLabel.textContent = 'Move the ' + t.active;
+		if (player.key !== 'trim') playLabel.textContent = 'Play ' + clipLength(t.end - t.start);
+		draw();
+	};
+	const draw = () => {
+		const w = canvas.clientWidth, hgt = canvas.clientHeight, dpr = window.devicePixelRatio || 1;
+		if (!w) return;
+		canvas.width = Math.round(w * dpr); canvas.height = Math.round(hgt * dpr);
+		const g = canvas.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0);
+		const bars = Math.max(20, Math.floor(w / 6)), bw = w / bars, sp = t.to - t.from;
+		for (let k = 0; k < bars; k++) {
+			const at = t.from + sp * k / bars;
+			const a = Math.max(0.06, Math.min(1, env ? env[Math.floor((at - t.from) / Trim.STEP)] * 1.6 || 0.06 : 0.12));
+			const bh = a * hgt * 0.7;
+			g.fillStyle = tokenColour(at >= t.start && at <= t.end ? '--teal-ink' : '--line-strong');
+			g.fillRect(k * bw + bw * 0.25, (hgt - bh) / 2, bw * 0.5, bh);
+		}
+		if (trimPlaying) { g.fillStyle = '#fff'; g.fillRect((player.posMs() - t.from) / sp * w - 1, 0, 2, hgt); }
+	};
+	/* drag: an end, the kept part (both), or elsewhere (the nearer end jumps there) */
+	box.addEventListener('pointerdown', (e) => {
+		const rect = box.getBoundingClientRect(), sp = t.to - t.from;
+		const msAt = (x) => Math.round(t.from + (Math.max(0, Math.min(rect.width, x - rect.left)) / rect.width) * sp);
+		const sx = rect.left + (t.start - t.from) / sp * rect.width, ex = rect.left + (t.end - t.from) / sp * rect.width;
+		const x0 = e.clientX, grab = 22;
+		let target;
+		if (Math.abs(x0 - sx) <= grab && Math.abs(x0 - sx) <= Math.abs(x0 - ex)) target = 'start';
+		else if (Math.abs(x0 - ex) <= grab) target = 'end';
+		else if (x0 > sx && x0 < ex) target = 'both';
+		else if (Math.abs(x0 - sx) < Math.abs(x0 - ex)) { target = 'start'; t.start = Trim.moveStart(t.start, t.end, msAt(x0)); }
+		else { target = 'end'; t.end = Trim.moveEnd(t.start, t.end, msAt(x0), dur); }
+		if (target !== 'both') t.active = target;
+		if (player.key === 'trim') player.stop();
+		const s0 = t.start, len = t.end - t.start;
+		box.setPointerCapture(e.pointerId);
+		const moveAt = (ev) => {
+			if (target === 'start') t.start = Trim.moveStart(t.start, t.end, msAt(ev.clientX));
+			else if (target === 'end') t.end = Trim.moveEnd(t.start, t.end, msAt(ev.clientX), dur);
+			else { t.start = Trim.moveBoth(s0, s0 + len, Math.round((ev.clientX - x0) / rect.width * sp), dur); t.end = t.start + len; }
+			place();
+		};
+		const up = () => {
+			box.removeEventListener('pointermove', moveAt); box.removeEventListener('pointerup', up); box.removeEventListener('pointercancel', up);
+			if (target !== 'both') { settle(target); hear(target); }
+			render();
+		};
+		box.addEventListener('pointermove', moveAt); box.addEventListener('pointerup', up); box.addEventListener('pointercancel', up);
+		place();
+		e.preventDefault();
+	});
+	const edgeTime = (which, label) => h('button.trim-edge' + (t.active === which ? '.active' : ''), { type: 'button', 'aria-pressed': String(t.active === which), onclick: () => { t.active = which; render(); } },
+		h('span.small', label), which === 'start' ? startT : endT);
+	const startT = h('span.trim-time'), endT = h('span.trim-time'), lenT = h('span.trim-len');
+	const nudge = (d) => { if (t.active === 'start') t.start = Trim.moveStart(t.start, t.end, t.start + d); else t.end = Trim.moveEnd(t.start, t.end, t.end + d, dur); hear(t.active); render(); };
+	const edgeS = edgeTime('start', 'Start'), edgeE = edgeTime('end', 'End');
+	const nudgeLabel = h('span.small.grow');
+	const playLabel = h('span', trimPlaying ? 'Stop' : '');
+	setTimeout(place, 0);
+	return [
+		box,
+		h('div.trim-times', edgeS, lenT, edgeE),
+		h('div.trim-nudge', nudgeLabel,
+			h('button', { type: 'button', 'aria-label': '1 second earlier', onclick: () => nudge(-1000) }, '−1 s'),
+			h('button', { type: 'button', 'aria-label': '1 second later', onclick: () => nudge(1000) }, '+1 s')),
+		h('div.small', 'Drag the ends, or the lit part to move the whole clip' + (env ? '. Each end settles in the nearest pause.' : '.')),
+		h('button.btn.outline', { type: 'button', onclick: () => (trimPlaying ? player.stop() : player.play('trim', r.file, t.start, t.end)) }, icon(trimPlaying ? 'stop' : 'play', 18), playLabel),
+		h('div.row',
+			h('button.btn.outline.grow', { type: 'button', disabled: t.start === c.startMs && t.end === c.endMs, onclick: () => { view.trim = null; render(); } }, 'Reset'),
+			h('button.btn.outline.grow', { type: 'button', onclick: () => { if (trimPlaying) player.stop(); view.trim = null; view.sheetMode = 'clip'; render(); } }, 'Cancel'),
+			h('button.btn.primary.grow', { type: 'button', onclick: () => { player.stop(); c.startMs = t.start; c.endMs = t.end; r.clips.sort((a, b) => a.startMs - b.startMs); view.trim = null; view.sheetMode = 'clip'; saveRecordings(); toast('Clip trimmed to ' + clipLength(t.end - t.start)); render(); } }, 'Save'))];
+}
+
 /** One sheet for a clip (Play, Trim, Note, Download, Delete) or a recording (Export, Delete). */
 function recordingSheet() {
 	const dlg = h('dialog.sheet', { 'aria-labelledby': 'sheet-title' });
@@ -1812,24 +1976,7 @@ function recordingSheet() {
 		sub = clipMeta(c) + ' · ' + recordingTitle(r);
 		const tile = (label, ic, t, onclick) => h('button.sheet-tile', { type: 'button', style: { background: `var(--${t}-tint)`, color: `var(--${t}-ink)` }, onclick }, icon(ic, 22), label);
 		if (mode === 'trim') {
-			if (!view.trim) view.trim = { start: c.startMs, end: c.endMs };
-			const t = view.trim;
-			const from = Math.max(0, Math.min(t.start, c.startMs) - 30000), to = Math.max(t.end, c.endMs) + 30000, sp = to - from;
-			/* each edge moves 5 s or 1 s either way */
-			const move = (which, d) => { t[which] = which === 'start' ? Math.max(0, Math.min(t.end - 1000, t.start + d)) : Math.max(t.start + 1000, t.end + d); render(); };
-			const row = (label, which) => h('div.trim-row',
-				h('span.grow', h('span.small', label), h('div.trim-time', tc(t[which]))),
-				[-5000, -1000, 1000, 5000].map((d) => h('button', { type: 'button', 'aria-label': label + ': ' + Math.abs(d) / 1000 + (Math.abs(d) === 1000 ? ' second ' : ' seconds ') + (d > 0 ? 'later' : 'earlier'), onclick: () => move(which, d) },
-					(d > 0 ? '+' : '−') + Math.abs(d) / 1000 + ' s')));
-			const trimPlaying = player.key === 'trim';
-			body = [
-				h('div.trim-bar', { role: 'img', 'aria-label': 'Kept: ' + tc(t.start) + ' to ' + tc(t.end) },
-					h('div.trim-kept', { style: { left: ((t.start - from) / sp * 100).toFixed(1) + '%', width: ((t.end - t.start) / sp * 100).toFixed(1) + '%' } })),
-				row('Starts at', 'start'), row('Ends at', 'end'),
-				h('button.btn.outline', { type: 'button', onclick: () => (trimPlaying ? player.stop() : player.play('trim', r.file, t.start, t.end)) }, icon(trimPlaying ? 'stop' : 'play', 18), trimPlaying ? 'Stop' : 'Play ' + clipLength(t.end - t.start)),
-				h('div.row',
-					h('button.btn.outline.grow', { type: 'button', onclick: () => { if (trimPlaying) player.stop(); view.trim = null; view.sheetMode = 'clip'; render(); } }, 'Cancel'),
-					h('button.btn.primary.grow', { type: 'button', onclick: () => { player.stop(); c.startMs = t.start; c.endMs = t.end; r.clips.sort((a, b) => a.startMs - b.startMs); view.trim = null; view.sheetMode = 'clip'; saveRecordings(); toast('Clip trimmed to ' + clipLength(t.end - t.start)); render(); } }, 'Save'))];
+			body = trimmer(r, c);
 		} else if (mode === 'note') {
 			const input = h('input', { type: 'text', value: c.note || '', maxlength: 140, 'aria-label': 'Note for this clip', placeholder: 'What happens in this clip?' });
 			const save = () => { const v = input.value.trim(); c.note = v; view.sheetMode = 'clip'; saveRecordings(); toast(v ? 'Note saved' : 'Note removed'); render(); };

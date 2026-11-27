@@ -24,6 +24,11 @@ Fixes from design audits and reviews of the app, the browser version and the OBS
 - **On phones:** the header shows on Monitor (and anywhere while the connection needs attention), and the Stream tab is labelled "Stream" so it fits.
 - Clip titles and Trim match the app.
 
+### OBS plugin: update check
+- **Tells you when a new version is out.** Once a day, shortly after OBS starts, the plugin asks GitHub for the newest release (nothing about the PC is sent). If it's newer, OBS offers **Download** (the Windows installer), **Skip this version** or **Later**, with the release notes under **Show Details**.
+- **Never mid-show:** while streaming or recording it only leaves a note in the dock, and asks once both have stopped.
+- **Tools, OBS Director** shows how the last check went, has **Check now**, and a switch to turn the daily check off.
+
 ### OBS dock
 - The status line at the top uses the chat's dark colours, so there's no light strip in light OBS themes.
 - The empty chat says how to write: Enter for a new line, Ctrl+Enter to send.

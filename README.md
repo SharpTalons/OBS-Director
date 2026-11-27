@@ -91,6 +91,8 @@ What a browser keeps (settings, clips and the session audio for playing clips ba
 
 **Tools, OBS Director** in OBS shows the PC's address and lists the phones and browsers you've allowed. Select one and press **Remove** to stop it connecting; it would have to be allowed again.
 
+**Updates:** once a day, shortly after OBS starts, the plugin asks GitHub whether a newer OBS Director is out (nothing about your PC is sent). If one is, OBS offers **Download** (the Windows installer), **Skip this version** or **Later**. It never interrupts a stream or a recording: it leaves a note in the dock and asks once both have stopped. **Tools, OBS Director** has **Check now**, and a switch to turn the daily check off. The phone app checks for its own updates the same way.
+
 ### Troubleshooting
 
 - **The PC doesn't appear in the app**: check that both are on the same network and press **Search** in the connect pop-up. If it still isn't listed, tap **Enter the IP address yourself** and type the address from **Tools, OBS Director**. Some guest or office networks block devices from seeing each other; use a different network if so.

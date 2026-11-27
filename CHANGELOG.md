@@ -5,6 +5,30 @@ All notable changes to OBS Director (plugin and Android app). The project follow
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-11-27
+
+Fixes from design audits and reviews of the app, the browser version and the OBS dock.
+
+### Android app
+- **Connection status off Monitor:** Recordings, Desk, Settings and Stream show a slim amber line at the top while the connection is lost or connecting (tap it to connect), since they have no top bar.
+- **Clip titles:** a clip without a note is named by its time ("Clip at 00:52:00") with "No note" under it, instead of "Add a note", which read like a button.
+- **Trim in 1 s steps too:** each edge has −5, −1, +1 and +5 s.
+- **Volume in words:** the line under the slider says how loud in plain terms, such as "About twice as loud (+12 dB)".
+- **Delay and Bluetooth:** the Delay choices are now Auto, 20, 40, 80 and 160 ms, and on Bluetooth the row says it uses 160 ms there.
+- Recordings uses more of a tablet's width (840 dp). Stage mode names itself to screen readers properly.
+
+### Browser version
+- **Volume like the app:** 1 to 100% on the same loudness scale (50% as sent, +24 dB at 100%), a scale under the slider, the level in words, and a limiter in place of the old soft clip, so the boost is really louder. A saved 300% becomes 70%.
+- **How it works:** a short guide under Settings, About.
+- **Hold to stop** is a filled button now, not one that looks switched off.
+- **On phones:** the header shows on Monitor (and anywhere while the connection needs attention), and the Stream tab is labelled "Stream" so it fits.
+- Clip titles and Trim match the app.
+
+### OBS dock
+- The status line at the top uses the chat's dark colours, so there's no light strip in light OBS themes.
+- The empty chat says how to write: Enter for a new line, Ctrl+Enter to send.
+- Phones and browsers in Tools, OBS Director read out with the date they were allowed.
+
 ## [0.8.0] - 2026-11-27
 
 A simpler Recordings tab, in the app and the browser version.

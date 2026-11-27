@@ -140,10 +140,35 @@ function defaultName() {
 	return browser + ' on ' + os;
 }
 
+/**
+ * The volume slider's scale, the same as the app's (audio/Loudness.kt). 1-100%, an even step in
+ * loudness each: 1% is -40 dB, 25% -20 dB, 50% the mix as OBS sends it, 75% +12 dB, 100% +24 dB.
+ */
+const Loudness = {
+	AS_SENT: 50, MIN_DB: -40, MAX_DB: 24,
+	marks: ['−40 dB', '−20', 'As sent', '+12', '+24 dB'],
+	db(p) { p = Math.max(1, Math.min(100, p)); return p <= 50 ? this.MIN_DB - this.MIN_DB * (p - 1) / 49 : this.MAX_DB * (p - 50) / 50; },
+	gain(p) { return Math.pow(10, this.db(p) / 20); },
+	/** for volumes saved before this scale (a gain of 0-3) */
+	fromGain(g) {
+		if (!(g > 0)) return 1;
+		const d = 20 * Math.log10(g);
+		return Math.max(1, Math.min(100, Math.round(d <= 0 ? 1 + (d - this.MIN_DB) / -this.MIN_DB * 49 : 50 + d / this.MAX_DB * 50)));
+	},
+	describe(p) {
+		const d = Math.round(this.db(p)), t = Math.pow(2, d / 10);
+		if (d === 0) return 'As OBS sends it';
+		const words = t >= 1.8 ? 'About ' + (t < 2.5 ? 'twice' : t < 3.5 ? '3 times' : t < 4.5 ? '4 times' : '5 times') + ' as loud' : t > 1.05 ? 'A little louder'
+			: t <= 0.12 ? 'Very quiet' : t <= 0.3 ? 'About a quarter as loud' : t <= 0.6 ? 'About half as loud' : 'A little quieter';
+		return words + ' (' + (d > 0 ? '+' : '−') + Math.abs(d) + ' dB)' + (d > 0 ? '. A limiter keeps loud parts clean.' : '');
+	},
+};
+
 const settings = Object.assign({
 	deviceName: defaultName(),
 	autoListen: true,
-	volume: 1,
+	/** the volume slider, 1-100% on the loudness scale; 50 = as OBS sends it */
+	volumePct: null,
 	saveAudio: true,
 	keepDays: 30,
 	leadMinutes: 1,
@@ -162,6 +187,9 @@ const settings = Object.assign({
 	allowStreamStop: false,
 	spaceForClip: true,
 }, store.get('settings', {}));
+/* before 0.8.1 the volume was a gain of 0-3; carry it over onto the loudness scale */
+if (settings.volumePct == null) settings.volumePct = 'volume' in settings ? Loudness.fromGain(settings.volume) : 50;
+delete settings.volume;
 function saveSettings() { store.set('settings', settings); }
 
 let deviceId = store.get('deviceId', '');
@@ -545,11 +573,17 @@ const audio = {
 		if (!C) return null;
 		this.ctx = new C({ latencyHint: 'interactive' });
 		this.gain = this.ctx.createGain();
-		this.shaper = this.ctx.createWaveShaper();
-		this.gain.connect(this.shaper);
-		this.shaper.connect(this.ctx.destination);
+		/* a limiter after the gain, as in the app: boosted peaks are held just under full scale */
+		this.limiter = this.ctx.createDynamicsCompressor();
+		this.limiter.threshold.value = -0.5;
+		this.limiter.knee.value = 0;
+		this.limiter.ratio.value = 20;
+		this.limiter.attack.value = 0.001;
+		this.limiter.release.value = 0.1;
+		this.gain.connect(this.limiter);
+		this.limiter.connect(this.ctx.destination);
 		try { this.recDest = this.ctx.createMediaStreamDestination(); } catch { this.recDest = null; }
-		this.setVolume(settings.volume);
+		this.setVolume(settings.volumePct);
 		return this.ctx;
 	},
 	/** Called from a click: browsers only let a page make sound after one. */
@@ -558,21 +592,10 @@ const audio = {
 		this.ctx.resume();
 		this.unlocked = true;
 	},
-	setVolume(v) {
-		settings.volume = Math.max(0, Math.min(3, v));
-		if (!this.gain) return;
-		this.gain.gain.value = settings.volume;
-		/* above 100% a soft limiter keeps peaks from crackling, as on the phone */
-		if (settings.volume > 1) {
-			const n = 1024, curve = new Float32Array(n);
-			for (let i = 0; i < n; i++) {
-				const x = (i / (n - 1)) * 2 - 1, a = Math.abs(x);
-				curve[i] = a <= 0.7 ? x : Math.sign(x) * (0.7 + 0.3 * Math.tanh((a - 0.7) / 0.3));
-			}
-			this.shaper.curve = curve;
-		} else {
-			this.shaper.curve = null;
-		}
+	/** 1-100% on the loudness scale (see Loudness). */
+	setVolume(percent) {
+		settings.volumePct = Math.max(1, Math.min(100, Math.round(percent)));
+		if (this.gain) this.gain.gain.value = Loudness.gain(settings.volumePct);
 	},
 	async start() {
 		this.unlock();
@@ -1262,13 +1285,16 @@ const tint = (name) => ({ bg: `var(--${name}-tint)`, ink: `var(--${name}-ink)` }
 
 function structureKey() {
 	const s = state.status || {};
-	return [state.link, view.name, view.recording, view.open, view.mode, view.streamTab, view.exporting, JSON.stringify(view.sheet), view.sheetMode, !!undoing, s.recActive, s.recPaused, s.streamActive,
+	return [state.link, view.name, view.recording, view.open, view.mode, view.streamTab, view.exporting, !!view.help, JSON.stringify(view.sheet), view.sheetMode, !!undoing, s.recActive, s.recPaused, s.streamActive,
 		state.clipStart !== null, state.listening, state.video, state.desk.length, state.desk.map((m) => m.state).join(''), state.deskUnread, state.deskAlert, state.alerts.map((a) => a.id).join(), !!state.lastSaved, settings.allowStreamStop,
 		player.key, recordings.length].join('|');
 }
 
 /** Rebuild the screen. Whatever is being typed (text, cursor, focus) carries over. */
 function render() {
+	/* lets the stylesheet hide the header on a phone off Monitor while all is well */
+	document.body.dataset.view = view.name;
+	document.body.dataset.link = state.link;
 	const a = document.activeElement;
 	const keep = a && /^(INPUT|TEXTAREA)$/.test(a.tagName) && a.type !== 'range' && $('#view').contains(a) && a.getAttribute('aria-label')
 		? { label: a.getAttribute('aria-label'), value: a.value, start: a.selectionStart, end: a.selectionEnd } : null;
@@ -1374,7 +1400,7 @@ function appView() {
 	return h('div.app',
 		h('nav.nav', { 'aria-label': 'Main' },
 			nav.map(([id, label, sw]) => h('button', { type: 'button', 'aria-current': current === id ? 'page' : 'false', onclick: () => { view.name = id; view.open = null; render(); } },
-				h('span.swatch', { style: { background: `var(--${sw}-ink)` } }), label,
+				h('span.swatch', { style: { background: `var(--${sw}-ink)` } }), id === 'stream' ? [h('span.long', label), h('span.short', 'Stream')] : label,
 				id === 'recordings' && recordings.some((r) => r.live) ? h('span.badge', h('span.dot', { style: { background: 'var(--rec)' } }), h('span.sr', ', recording now')) : null,
 				id === 'desk' && state.deskUnread ? h('span.count' + (state.deskAlert === 2 ? '.severe' : state.deskAlert === 1 ? '.alert' : ''),
 					{ 'aria-label': state.deskUnread + ' unread' + (state.deskAlert === 2 ? ', including a severe alert' : state.deskAlert === 1 ? ', including an alert' : '') },
@@ -1467,20 +1493,24 @@ function meterBlock(dim) {
 function listenSection() {
 	const sw = h('button.switch', { type: 'button', role: 'switch', 'aria-checked': String(state.listening), 'aria-label': 'Listen in this browser',
 		onclick: () => (state.listening ? audio.stop() : audio.start()) });
-	const vol = h('input', { type: 'range', min: 0, max: 300, step: 5, value: Math.round(settings.volume * 100), 'aria-label': 'Volume' });
-	if (settings.volume > 1) vol.classList.add('boost');
-	const volLabel = h('span.small', Math.round(settings.volume * 100) + '%');
+	const pct = settings.volumePct;
+	const vol = h('input', { type: 'range', min: 1, max: 100, step: 1, value: pct, 'aria-label': 'Volume', 'aria-valuetext': pct + ' percent. ' + Loudness.describe(pct) });
+	if (pct > Loudness.AS_SENT) vol.classList.add('boost');
+	const volLabel = h('span.small.vol-value' + (pct > Loudness.AS_SENT ? '.boost' : ''), pct + '%');
+	/* always there, so dragging changes the words, not the layout */
+	const hint = h('div.small.vol-hint' + (pct > Loudness.AS_SENT ? '.boost' : ''), Loudness.describe(pct));
 	vol.addEventListener('input', () => {
-		audio.setVolume(vol.value / 100);
-		volLabel.textContent = vol.value + '%';
-		vol.classList.toggle('boost', vol.value > 100);
-		boostHint.textContent = vol.value > 100 ? boostText : baseText;
-		boostHint.style.color = vol.value > 100 ? 'var(--amber-ink)' : 'var(--muted)';
+		const p = Number(vol.value);
+		audio.setVolume(p);
+		volLabel.textContent = p + '%';
+		vol.setAttribute('aria-valuetext', p + ' percent. ' + Loudness.describe(p));
+		vol.classList.toggle('boost', p > Loudness.AS_SENT);
+		hint.classList.toggle('boost', p > Loudness.AS_SENT);
+		volLabel.classList.toggle('boost', p > Loudness.AS_SENT);
+		hint.textContent = Loudness.describe(p);
 	});
 	vol.addEventListener('change', saveSettings);
-	/* always there, so dragging past 100% changes the words, not the layout */
-	const boostText = 'Above 100% is louder in this browser only. A soft limiter stops crackles.', baseText = 'Up to 300% for quiet rooms.';
-	const boostHint = h('div.small', { style: { color: settings.volume > 1 ? 'var(--amber-ink)' : 'var(--muted)' } }, settings.volume > 1 ? boostText : baseText);
+	const scale = h('div.vol-scale', { 'aria-hidden': 'true' }, Loudness.marks.map((m, k) => h('span' + (k === 2 ? '.mid' : ''), m)));
 	return h('section.section', { 'aria-label': 'Listening' },
 		h('div.row', h('span.tint-tile', { style: { background: 'var(--teal-tint)', color: 'var(--teal-ink)' } }, icon('head', 18)),
 			h('div.grow', h('h2.card-title', 'Listen in this browser'),
@@ -1488,8 +1518,9 @@ function listenSection() {
 			sw),
 		bind(h('div.small'), () => meters.label()),
 		meterBlock(false),
-		h('div.row', h('span.small', 'Volume'), h('div.grow', vol), volLabel),
-		boostHint,
+		h('div.vol-head', h('span.small', 'Volume'), volLabel),
+		vol, scale,
+		hint,
 		bind(h('div.small'), () => networkLine()));
 }
 
@@ -1712,7 +1743,7 @@ function recordingsPage() {
 				return h('div.clip-row' + (playing ? '.playing' : ''),
 					h('button.clip-play', { type: 'button', 'aria-label': (playing ? 'Stop ' : 'Play ') + clipName(c), onclick: () => (playing ? player.stop() : player.play(key, r.file, c.startMs, c.endMs)) }, icon(playing ? 'pause' : 'play', 22)),
 					h('button.clip-open', { type: 'button', onclick: () => { view.sheet = { clip: key }; view.sheetMode = 'clip'; render(); } },
-						h('span.clip-note' + (c.note ? '' : '.empty'), c.note || 'Add a note'), h('span.small', clipMeta(c))),
+						h('span.clip-note', clipName(c)), h('span.small', c.note ? clipMeta(c) : 'No note · ' + clipLength(c.endMs - c.startMs) + ' long')),
 					h('button.round.plain', { type: 'button', 'aria-label': 'More for ' + clipName(c), onclick: () => { view.sheet = { clip: key }; view.sheetMode = 'clip'; render(); } }, icon('more', 22)));
 			}),
 			settings.pcClipLists && r.savedOnPc ? h('div.rec-pc', icon('pc', 16), 'The clip list is saved on ' + r.savedOnPc + ' too, next to the recording.') : null);
@@ -1784,10 +1815,12 @@ function recordingSheet() {
 			if (!view.trim) view.trim = { start: c.startMs, end: c.endMs };
 			const t = view.trim;
 			const from = Math.max(0, Math.min(t.start, c.startMs) - 30000), to = Math.max(t.end, c.endMs) + 30000, sp = to - from;
+			/* each edge moves 5 s or 1 s either way */
+			const move = (which, d) => { t[which] = which === 'start' ? Math.max(0, Math.min(t.end - 1000, t.start + d)) : Math.max(t.start + 1000, t.end + d); render(); };
 			const row = (label, which) => h('div.trim-row',
 				h('span.grow', h('span.small', label), h('div.trim-time', tc(t[which]))),
-				h('button', { type: 'button', 'aria-label': label + ': 5 seconds earlier', onclick: () => { t[which] = which === 'start' ? Math.max(0, t.start - 5000) : Math.max(t.start + 1000, t.end - 5000); render(); } }, '−5 s'),
-				h('button', { type: 'button', 'aria-label': label + ': 5 seconds later', onclick: () => { t[which] = which === 'start' ? Math.min(t.end - 1000, t.start + 5000) : t.end + 5000; render(); } }, '+5 s'));
+				[-5000, -1000, 1000, 5000].map((d) => h('button', { type: 'button', 'aria-label': label + ': ' + Math.abs(d) / 1000 + (Math.abs(d) === 1000 ? ' second ' : ' seconds ') + (d > 0 ? 'later' : 'earlier'), onclick: () => move(which, d) },
+					(d > 0 ? '+' : '−') + Math.abs(d) / 1000 + ' s')));
 			const trimPlaying = player.key === 'trim';
 			body = [
 				h('div.trim-bar', { role: 'img', 'aria-label': 'Kept: ' + tc(t.start) + ' to ' + tc(t.end) },
@@ -1915,7 +1948,28 @@ function settingsPage() {
 					try { indexedDB.deleteDatabase('obsdirector'); } catch { /* fine */ }
 					location.reload();
 				}
-			} }, 'Forget this browser'), h('button.btn.outline', { type: 'button', onclick: () => location.reload() }, 'Replay the connect step')))];
+			} }, 'Forget this browser'), h('button.btn.outline', { type: 'button', onclick: () => location.reload() }, 'Replay the connect step'),
+				h('button.btn.outline', { type: 'button', onclick: () => { view.help = true; render(); } }, 'How OBS Director works'))),
+		view.help ? helpDialog() : null];
+}
+
+/** A short guide to the whole page, from Settings, About. */
+function helpDialog() {
+	const dlg = h('dialog', { 'aria-labelledby': 'help-title' });
+	const close = () => { view.help = false; dlg.close(); render(); };
+	const step = (n, title, body) => h('div.how-step', h('span.how-n', n), h('div', h('div', { style: { fontWeight: 500 } }, title), h('div.small', body)));
+	dlg.append(h('div', { style: { display: 'flex', flexDirection: 'column', gap: '14px' } },
+		h('h2.card-title#help-title', { style: { fontSize: '19px', fontWeight: 700 } }, 'How OBS Director works'),
+		step('1', 'Connect', 'This page comes from the OBS Director plugin on the PC. The first time, someone at the PC clicks Allow in OBS.'),
+		step('2', 'Listen', 'Switch on Listen in this browser on Monitor to hear the OBS mix. Browsers only play sound after a click.'),
+		step('3', 'Mark clips', 'Click Start clip (or press Space) when something good happens and End when it\u2019s over. The clip starts a little before your click.'),
+		step('4', 'Use the clips', 'Recordings lists each recording with its clips. Play, trim, add a note, download the audio, or export the list for your editor.'),
+		step('5', 'Talk to the desk', 'Desk is a group chat with the OBS dock and the phones. Alerts, like a full disk, show up there too.'),
+		step('6', 'Stage mode', 'The masks button at the top shows a big, dim timer and Clip button for use beside a stage.'),
+		h('button.btn.primary', { type: 'button', onclick: close }, 'Done')));
+	dlg.addEventListener('cancel', (e) => { e.preventDefault(); close(); });
+	setTimeout(() => { if (dlg.isConnected && !dlg.open) dlg.showModal(); }, 0);
+	return dlg;
 }
 
 /* ---------- stage mode ---------- */

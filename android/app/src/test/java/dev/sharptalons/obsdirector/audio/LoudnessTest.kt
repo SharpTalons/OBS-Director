@@ -19,6 +19,13 @@ class LoudnessTest {
         for (p in 2..100) assertTrue(Loudness.gain(p) > Loudness.gain(p - 1))
     }
 
+    @Test fun wordsForEachLevel() {
+        assertEquals("As OBS sends it", Loudness.describe(50))
+        assertTrue(Loudness.describe(75), Loudness.describe(75).startsWith("About twice as loud (+12 dB)"))
+        assertTrue(Loudness.describe(25), Loudness.describe(25).startsWith("About a quarter as loud (−20 dB)"))
+        assertTrue(Loudness.describe(100), Loudness.describe(100).startsWith("About 5 times as loud (+24 dB)"))
+    }
+
     @Test fun oldVolumesCarryOver() {
         assertEquals(50, Loudness.fromGain(1f))
         assertEquals(1, Loudness.fromGain(0f))

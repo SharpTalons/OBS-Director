@@ -38,14 +38,21 @@ object Loudness {
         return p.roundToInt().coerceIn(1, 100)
     }
 
-    /** "As OBS sends it", "6 dB quieter", "+4 dB". */
+    /** In plain words, with the dB after: "As OBS sends it", "About half as loud (−10 dB)", "About twice as loud (+12 dB)". */
     fun describe(percent: Int): String {
         val d = db(percent).roundToInt()
-        return when {
-            d == 0 -> "As OBS sends it"
-            d < 0 -> "${-d} dB quieter than OBS sends it"
-            else -> "+$d dB louder. A limiter keeps loud parts from distorting."
+        // to the ear, every 10 dB is twice (or half) as loud
+        val times = 2.0.pow(d / 10.0)
+        val words = when {
+            d == 0 -> return "As OBS sends it"
+            times >= 1.8 -> "About ${if (times < 2.5) "twice" else if (times < 3.5) "3 times" else if (times < 4.5) "4 times" else "5 times"} as loud"
+            times > 1.05 -> "A little louder"
+            times <= 0.12 -> "Very quiet"
+            times <= 0.3 -> "About a quarter as loud"
+            times <= 0.6 -> "About half as loud"
+            else -> "A little quieter"
         }
+        return "$words (${if (d > 0) "+" else "−"}${kotlin.math.abs(d)} dB)" + (if (d > 0) ". A limiter keeps loud parts clean." else "")
     }
 }
 

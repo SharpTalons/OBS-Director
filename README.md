@@ -80,7 +80,7 @@ Volunteers see your phone's name in the OBS dock while you're connected. To chan
 
 **In a browser instead:** open the address under **In a browser** in **Tools, OBS Director** (it looks like `http://192.168.1.24:4470`) in Chrome, Edge or Firefox on any computer on the same network, the OBS PC included. OBS asks **Allow "Chrome on Windows" to connect?** once, the same as for a phone. Everything the app does works there:
 
-- listening through that computer's sound output, with the same meters and volume up to 300%
+- listening through that computer's sound output, with the same meters and the same 1–100% loudness scale as the app
 - the live picture
 - Start clip (or press **Space**), and Stage mode (**Esc** leaves it)
 - recordings, with Play, Adjust, Note, Download audio and Delete for each clip

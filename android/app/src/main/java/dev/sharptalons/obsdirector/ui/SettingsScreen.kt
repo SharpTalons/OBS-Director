@@ -86,6 +86,7 @@ fun SettingsScreen(onConnect: () -> Unit) {
     var choosingOutput by rememberSaveable { mutableStateOf(false) }
     var confirmClear by rememberSaveable { mutableStateOf(false) }
     val outputs by Director.router.available.collectAsState()
+    val onBluetooth = remember(output) { !Director.router.current().lowLatency }
     val recordings by dev.sharptalons.obsdirector.core.ClipStore.recordings.collectAsState()
     val chosen = outputs.firstOrNull { it.key == s.outputPref }
     val playThrough = when {
@@ -107,7 +108,10 @@ fun SettingsScreen(onConnect: () -> Unit) {
             Row.Action(Icons.Outlined.Headphones, "Play through", playThrough) { choosingOutput = true },
             Row.Action(Icons.AutoMirrored.Outlined.VolumeUp, "Play a test sound", "Play") { dev.sharptalons.obsdirector.audio.TestSound.play(Director.router) },
             Row.Switch(Icons.Outlined.PlayArrow, "Start listening when connected", s.autoListen) { x, v -> x.copy(autoListen = v) },
-            Row.Choice(Icons.Outlined.Schedule, "Delay", if (s.bufferMs == 0) "Auto" else "${s.bufferMs} ms", listOf("Auto", "10 ms", "20 ms", "40 ms")) { x, v ->
+            // Bluetooth always keeps at least 160 ms queued to play smoothly; say so beside the choice
+            Row.Choice(Icons.Outlined.Schedule, "Delay",
+                (if (s.bufferMs == 0) "Auto" else "${s.bufferMs} ms") + (if (onBluetooth && s.bufferMs < dev.sharptalons.obsdirector.audio.AudioEngine.BT_CUSHION_MS) " · 160 ms on Bluetooth" else ""),
+                listOf("Auto", "20 ms", "40 ms", "80 ms", "160 ms")) { x, v ->
                 x.copy(bufferMs = if (v == "Auto") 0 else v.removeSuffix(" ms").toInt())
             },
         )),

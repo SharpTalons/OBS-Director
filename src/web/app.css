@@ -100,6 +100,7 @@ svg { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; 
 .nav { flex: 0 0 220px; padding: 16px 12px; display: flex; flex-direction: column; gap: 4px; border-right: 1px solid var(--rule); }
 .nav button { min-height: 44px; border-radius: 12px; border: 0; background: transparent; color: var(--text-2); font-size: 15px; font-weight: 500; display: flex; align-items: center; gap: 12px; padding: 0 12px; text-align: left; }
 .nav button[aria-current="page"] { background: var(--nav-current); color: var(--text); }
+.nav .short { display: none; }
 .nav .swatch { width: 10px; height: 10px; border-radius: 3px; flex: none; }
 .nav .badge { margin-left: auto; display: inline-flex; }
 .nav .badge .dot { width: 8px; height: 8px; }
@@ -150,6 +151,11 @@ svg { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; 
 	.nav-foot { display: none; }
 	.main { padding: 16px; }
 	.head-browser { display: none; }
+	/* like the app: the header (connection, Stage) belongs to Monitor; other pages start with their title
+	   while connected, and keep the header while the connection needs attention */
+	body:not([data-view="monitor"])[data-link="connected"] .head { display: none; }
+	.nav .long { display: none; }
+	.nav .short { display: inline; }
 }
 
 .banners { display: flex; flex-direction: column; gap: 8px; padding: 0 20px; }
@@ -180,6 +186,8 @@ svg { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; 
 .btn.primary { background: var(--blue); color: #fff; }
 .btn.outline { background: transparent; color: var(--text); border: 1px solid var(--line-strong); }
 .btn.danger { background: transparent; color: var(--rec-ink); border: 1px solid var(--rec-tint); }
+/* Hold to stop: a real, filled button, not one that looks switched off */
+.btn.danger.hold { background: var(--rec-tint); border-color: var(--rec-ink); color: var(--rec-ink); }
 .btn.small-btn { min-height: 44px; padding: 0 14px; font-size: 14px; }
 .btn svg { width: 18px; height: 18px; }
 
@@ -234,6 +242,15 @@ input[type=range] { -webkit-appearance: none; appearance: none; width: 100%; hei
 input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 22px; height: 22px; border-radius: 50%; background: #fff; border: 0; }
 input[type=range]::-moz-range-thumb { width: 22px; height: 22px; border-radius: 50%; background: #fff; border: 0; }
 input[type=range].boost { background: var(--amber-tint); }
+/* the volume: its value, the slider, the loudness scale under it, and a line in words */
+.vol-head { display: flex; align-items: center; justify-content: space-between; }
+.vol-value { font-variant-numeric: tabular-nums; color: var(--text); }
+.vol-scale { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; margin-top: -4px; }
+.vol-scale .mid { color: var(--text-2); }
+.vol-hint { min-height: 2.6em; }
+.vol-hint.boost, .vol-value.boost { color: var(--amber-ink); }
+.how-step { display: flex; gap: 12px; }
+.how-n { width: 28px; height: 28px; flex: none; border-radius: 14px; background: var(--blue-tint); color: var(--blue-ink); display: inline-flex; align-items: center; justify-content: center; font-weight: 700; font-size: 13px; }
 
 input[type=text], textarea { background: var(--sunken); border: 1px solid var(--line-strong); border-radius: 12px; padding: 12px 14px; min-height: 48px; width: 100%; }
 input[type=text]::placeholder, textarea::placeholder { color: var(--muted); opacity: 1; }
@@ -291,7 +308,6 @@ button.list-row:hover { background: var(--surface-2); }
 .clip-row.playing .clip-play { background: var(--blue-ink); color: var(--ground); }
 .clip-open { flex: 1; min-width: 0; min-height: 52px; display: flex; flex-direction: column; justify-content: center; gap: 3px; padding: 4px 0; border: 0; border-radius: 10px; background: transparent; color: var(--text); text-align: left; font: inherit; }
 .clip-note { font-size: 15px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.clip-note.empty { color: var(--muted); font-weight: 400; }
 .rec-pc { display: flex; align-items: center; gap: 8px; padding: 4px 16px 14px; color: var(--ok-ink); font-size: 12px; }
 /* Undo and the small player float at the bottom, so the list never moves */
 .rec-dock { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); width: min(560px, calc(100% - 16px)); z-index: 20; display: flex; flex-direction: column; gap: 8px; }
@@ -318,7 +334,7 @@ dialog.sheet { padding: 0; }
 .trim-row { display: flex; align-items: center; gap: 8px; min-height: 56px; padding: 0 6px 0 14px; border-radius: 14px; background: var(--sunken); }
 .trim-row .grow { display: flex; flex-direction: column; gap: 2px; }
 .trim-time { font-size: 17px; font-weight: 500; }
-.trim-row button { width: 64px; height: 48px; border: 0; border-radius: 12px; background: var(--control); color: var(--text); font: inherit; font-size: 14px; font-weight: 500; }
+.trim-row button { width: 48px; height: 48px; border: 0; border-radius: 12px; background: var(--control); color: var(--text); font: inherit; font-size: 14px; font-weight: 500; }
 .export-list { background: var(--sunken); border-radius: 14px; overflow: hidden; }
 .export-row { display: flex; align-items: center; border-top: 1px solid var(--rule); }
 .export-row:first-child { border-top: 0; }

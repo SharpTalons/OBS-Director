@@ -86,8 +86,8 @@ The app is dark only. It's used in dim rooms beside a stage.
 - **Confirmations:** a snackbar at the bottom, above the tabs (Android's own in the app; `role="status"` in the browser version).
 - **OBS dock text** follows the PC's text size: the body is OBS's own font size, names 92% of it, notes 85%, times 78%.
 - **OBS dock colours**, for dark screens: background `#0B141A`; others' bubbles `#2B3B45` edged `#3D4E59`; your own `#005C4B` edged `#0A7A63`; message text white (at least 6.5:1); times and notes `#C9D3D8` (at least 5.5:1); sender names from a light set, each at least 6:1 on its bubble.
-- **Top bar:** only on Monitor. Recordings, Desk, Settings and Stream start with their own title.
-- **Volume:** 1–100% on a loudness scale (`Loudness` in the app): 1% is −40 dB, 25% −20 dB, 50% the mix as sent, 75% +12 dB, 100% +24 dB. The scale shows under the slider; above 50% the slider and its caption turn amber, and the caption says when the phone's own media volume is below 70%. The boost goes through a limiter with a 98% ceiling and a 100 ms release.
+- **Top bar:** only on Monitor. Recordings, Desk, Settings and Stream start with their own title; while the connection is lost or connecting they show a slim amber line at the top instead. The browser version does the same at phone width.
+- **Volume:** 1–100% on a loudness scale (`Loudness` in the app): 1% is −40 dB, 25% −20 dB, 50% the mix as sent, 75% +12 dB, 100% +24 dB. The same in the browser version. The scale shows under the slider, and the line under it says the level in words ("About twice as loud (+12 dB)"); above 50% the slider and that line turn amber, and in the app the line says when the phone's own media volume is below 70%. The boost goes through a limiter: in the app 98% ceiling and 100 ms release, in the browser a Web Audio compressor at −0.5 dB, ratio 20, 1 ms attack and 100 ms release.
 - **Rounding:**
 
 | Element | Radius |
@@ -105,8 +105,8 @@ The app is dark only. It's used in dim rooms beside a stage.
 One screen, clips first, the same in the app and the browser version.
 
 - **A card per recording**, with its clips inside. The recording OBS is making comes first, then the newest. That one and the two newest others start open; the rest fold. Tapping a heading opens or folds it; ⋯ opens Export and Delete.
-- **A clip row** is its Play button (48, round), its note (or "Add a note" in muted text) with "length · at start time" under it, and ⋯. The row turns blue while it plays.
-- **One sheet** for a clip: Play, then three tiles (Trim in teal, Note in amber, Share or Download in purple), then Delete clip. Trim is two rows, Start and End, each with −5 s and +5 s, over the sound around the clip with the kept part lit.
+- **A clip row** is its Play button (48, round), its note with "length · at start time" under it (or, without a note, "Clip at 00:52:00" with "No note · length"), and ⋯. The row turns blue while it plays.
+- **One sheet** for a clip: Play, then three tiles (Trim in teal, Note in amber, Share or Download in purple), then Delete clip. Trim is two rows, Start and End, each with −5, −1, +1 and +5 s, over the sound around the clip with the kept part lit.
 - **At the bottom**, floating so the list never moves: Undo after a delete (6 s), then a small player with the clip's name, its progress and Stop.
 - **Recordings without clips** fold into one line at the end.
 

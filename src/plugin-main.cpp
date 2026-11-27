@@ -118,6 +118,10 @@ static void showConnectInfo(void *)
 							 text("OBSDirector.Tools.AllowedOn").arg(when),
 				list);
 			item->setData(Qt::UserRole, t.id);
+			item->setData(Qt::AccessibleTextRole,
+				      when.isEmpty() ? t.name
+						     : t.name + QStringLiteral(", ") +
+							       text("OBSDirector.Tools.AllowedOn").arg(when));
 		}
 		bool none = list->count() == 0;
 		list->setVisible(!none);

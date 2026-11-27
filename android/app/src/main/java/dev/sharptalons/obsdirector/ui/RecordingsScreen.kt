@@ -325,10 +325,9 @@ private fun RecordingCard(r: Recording, open: Boolean, playingKey: String?, save
                     }
                     Column(Modifier.weight(1f).heightIn(min = 52.dp).clip(RoundedCornerShape(10.dp)).clickable(role = Role.Button, onClickLabel = "Open") { onOpenClip(c) }
                         .padding(vertical = 4.dp), verticalArrangement = Arrangement.Center) {
-                        Text(c.note.ifBlank { "Add a note" }, style = Type.body.copy(fontSize = 15.sp,
-                            fontWeight = if (c.note.isBlank()) FontWeight.Normal else FontWeight.Medium, color = if (c.note.isBlank()) T.muted else T.text),
-                            maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(clipMeta(c), style = Type.small.copy(fontSize = 13.sp))
+                        // its note as the title; a clip without one is named by its time, "No note" under it
+                        Text(clipName(c), style = Type.body.copy(fontSize = 15.sp, fontWeight = FontWeight.Medium), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(if (c.note.isBlank()) "No note · ${clipLength(c.lengthMs)} long" else clipMeta(c), style = Type.small.copy(fontSize = 13.sp))
                     }
                     Box(Modifier.size(48.dp).clip(CircleShape).clickable(role = Role.Button) { onOpenClip(c) }
                         .semantics { contentDescription = "More for ${clipName(c)}" }, contentAlignment = Alignment.Center) {
@@ -415,7 +414,7 @@ private fun SheetTile(label: String, icon: ImageVector, tint: Tint, modifier: Mo
     }
 }
 
-/** Trim: the sound around the clip with the kept part lit, then Start and End, 5 s at a time. */
+/** Trim: the sound around the clip with the kept part lit, then Start and End, 5 s or 1 s at a time. */
 @Composable
 private fun TrimPanel(r: Recording, c: Clip, onDone: () -> Unit) {
     var start by remember(c.id) { mutableLongStateOf(c.startMs) }
@@ -445,9 +444,8 @@ private fun TrimPanel(r: Recording, c: Clip, onDone: () -> Unit) {
             drawRect(Color.White, Offset(px, 0f), Size(2f, size.height))
         }
     }
-    TrimRow("Starts at", start, onEarlier = { start = (start - 5000).coerceAtLeast(0) }, onLater = { start = minOf(start + 5000, end - 1000) })
-    TrimRow("Ends at", end, onEarlier = { end = maxOf(end - 5000, start + 1000) },
-        onLater = { end = if (duration > 0) minOf(end + 5000, duration) else end + 5000 })
+    TrimRow("Starts at", start) { d -> start = (start + d).coerceIn(0, end - 1000) }
+    TrimRow("Ends at", end) { d -> end = (end + d).coerceAtLeast(start + 1000).let { if (duration > 0) it.coerceAtMost(duration) else it } }
     OutlineButton(if (trimPlaying) "Stop" else "Play ${Director.len(end - start)}", if (trimPlaying) Icons.Outlined.Stop else Icons.Outlined.PlayArrow,
         Modifier.fillMaxWidth()) { if (trimPlaying) ClipPlayer.stop() else playClip(r, c, "trim", start, end) }
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -461,18 +459,20 @@ private fun TrimPanel(r: Recording, c: Clip, onDone: () -> Unit) {
     }
 }
 
+/** One edge of the clip: its time, and steps of 5 s and 1 s either way. */
 @Composable
-private fun TrimRow(label: String, ms: Long, onEarlier: () -> Unit, onLater: () -> Unit) {
+private fun TrimRow(label: String, ms: Long, onMove: (Long) -> Unit) {
     Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).clip(RoundedCornerShape(14.dp)).background(T.sunken).padding(start = 14.dp, end = 6.dp),
-        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         Column(Modifier.weight(1f)) {
             Text(label, style = Type.small.copy(fontSize = 13.sp))
             Text(Director.tc(ms), style = Type.body.copy(fontSize = 17.sp, fontWeight = FontWeight.Medium))
         }
-        listOf(Triple("−5 s", "5 seconds earlier", onEarlier), Triple("+5 s", "5 seconds later", onLater)).forEach { (t, said, go) ->
-            Box(Modifier.width(64.dp).height(48.dp).clip(RoundedCornerShape(12.dp)).background(T.raised)
-                .clickable(role = Role.Button, onClick = go).semantics { contentDescription = "$label: $said" },
-                contentAlignment = Alignment.Center) { Text(t, style = Type.body.copy(fontSize = 14.sp, fontWeight = FontWeight.Medium)) }
+        listOf(-5000L to "−5", -1000L to "−1", 1000L to "+1", 5000L to "+5").forEach { (d, t) ->
+            Box(Modifier.width(48.dp).height(48.dp).clip(RoundedCornerShape(12.dp)).background(T.raised)
+                .clickable(role = Role.Button) { onMove(d) }
+                .semantics { contentDescription = "$label: ${kotlin.math.abs(d) / 1000} second${if (kotlin.math.abs(d) == 1000L) "" else "s"} ${if (d > 0) "later" else "earlier"}" },
+                contentAlignment = Alignment.Center) { Text(t + " s", style = Type.body.copy(fontSize = 13.sp, fontWeight = FontWeight.Medium)) }
         }
     }
 }

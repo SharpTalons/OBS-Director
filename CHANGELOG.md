@@ -5,6 +5,20 @@ All notable changes to OBS Director (plugin and Android app). The project follow
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-11-27
+
+A simpler Recordings tab, in the app and the browser version.
+
+### Recordings, clips first
+- **One screen.** Each recording is a card with its clips listed inside, so there is no second page to open and come back from. Tap a heading to open or fold it. The recording OBS is making and the two newest others start open.
+- **Play from the list.** Every clip has its own Play button. While one plays, a small player shows at the bottom with its progress and Stop.
+- **One sheet for a clip.** Tap a clip for Play, Trim, Note, Share (Download in the browser) and Delete.
+- **Simpler trim:** Start and End, 5 seconds at a time, over the sound around the clip, with a button to hear the result.
+- **Export and delete** are in each recording's ⋯ menu. In the app, tap a format to share it or the arrow to save it to the phone; in the browser, click a format to download it, or Copy.
+- **Undo** after deleting a clip or a recording, for six seconds.
+- **Monitor's "See all"** opens Recordings at that recording.
+- Recordings without clips stay folded at the end, each with its own delete button.
+
 ## [0.7.2] - 2026-11-27
 
 Fixes from design audits of the OBS plugin, the browser version and the app.

@@ -124,7 +124,7 @@ fun AppShell() {
     // goes to the background (with the predictive back-to-home preview) and keeps listening and
     // recording, with the bubble and notification to come back.
     androidx.activity.compose.BackHandler(enabled = screen != "monitor") {
-        screen = when (screen) { "recording" -> "recordings"; else -> "monitor" }
+        screen = "monitor"
     }
 
     if (screen == "stage") {
@@ -165,17 +165,8 @@ fun AppShell() {
             // the content keeps a phone's reading width
             val content = Modifier.fillMaxHeight().widthIn(max = 640.dp).fillMaxWidth()
             when (screen) {
-                // on wide windows the list and the open recording sit side by side
-                "recording", "recordings" -> if (wide) Row(Modifier.fillMaxHeight().widthIn(max = 1100.dp).fillMaxWidth()) {
-                    RecordingsScreen(Modifier.weight(0.42f).fillMaxHeight(), top, selected = if (screen == "recording") openFile else null,
-                        onOpen = { openFile = it; screen = "recording" })
-                    androidx.compose.material3.VerticalDivider(color = T.rule)
-                    if (screen == "recording") RecordingScreen(openFile, Modifier.weight(0.58f).fillMaxHeight(), top, onBack = { screen = "recordings" })
-                    else Box(Modifier.weight(0.58f).fillMaxHeight(), contentAlignment = Alignment.Center) {
-                        Text("Choose a recording to see its clips", style = Type.body.copy(color = T.muted))
-                    }
-                } else if (screen == "recording") RecordingScreen(openFile, content, top, onBack = { screen = "recordings" })
-                else RecordingsScreen(content, top, onOpen = { openFile = it; screen = "recording" })
+                // one screen for recordings and their clips; "recording" opens one of them
+                "recording", "recordings" -> RecordingsScreen(content, top, focus = if (screen == "recording") openFile else null)
                 "desk" -> DeskScreen(content)
                 else -> Column(content.verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     top?.invoke()

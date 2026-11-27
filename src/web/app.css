@@ -206,10 +206,6 @@ svg { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; 
 .line-action { min-height: 44px; padding: 0 12px; border: 0; border-radius: 10px; background: transparent; color: var(--blue-ink); font-weight: 500; flex: none; }
 .line-action:hover { background: var(--surface-2); }
 .controls > * { flex: 1 1 0; }
-.undo-bar { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); width: min(520px, calc(100% - 32px)); z-index: 20;
-	display: flex; align-items: center; gap: 12px; padding: 8px 8px 8px 16px; border-radius: 16px; background: var(--control);
-	box-shadow: 0 8px 24px rgba(0, 0, 0, .45); }
-@media (max-width: 760px) { .undo-bar { bottom: 84px; } }
 .clip-left { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
 
 .hold { position: relative; overflow: hidden; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
@@ -276,23 +272,58 @@ button.list-row:hover { background: var(--surface-2); }
 .date-tile small { font-size: 11px; font-weight: 500; }
 .chev { color: var(--muted); width: 20px; height: 20px; flex: none; }
 
-.clip-card { background: var(--surface); border-radius: 18px; border: 1px solid var(--surface); }
-.clip-card.open { border-color: var(--blue-ink); }
-.clip-head { display: flex; align-items: center; gap: 14px; padding: 10px 8px 10px 14px; min-height: 64px; }
-.num { width: 36px; height: 36px; border-radius: 12px; display: inline-flex; align-items: center; justify-content: center; font-weight: 700; flex: none; }
-.plus { width: 44px; height: 44px; border-radius: 22px; border: 0; background: var(--control); display: inline-flex; align-items: center; justify-content: center; flex: none; }
-.plus svg { transition: transform .15s; }
-.clip-card.open .plus { background: var(--blue); }
-.clip-card.open .plus svg { transform: rotate(45deg); }
-@media (prefers-reduced-motion: reduce) { .plus svg { transition: none; } }
-.clip-body { padding: 0 14px 14px; display: flex; flex-direction: column; gap: 10px; }
-.actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 8px; }
-.action { min-height: 64px; border-radius: 14px; border: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; font-size: 13px; font-weight: 500; }
-.action svg { width: 22px; height: 22px; }
-.wave { width: 100%; height: 72px; display: block; border-radius: 10px; background: var(--sunken); }
-.nudges { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; }
-.nudges button { min-height: 48px; border-radius: 10px; border: 1px solid var(--control); background: transparent; font-size: 13px; }
-
+/* recordings: one card per recording, its clips inside */
+.rec-card { background: var(--surface); border-radius: 18px; overflow: hidden; }
+.rec-card.live { box-shadow: inset 0 0 0 1px var(--rec-tint); }
+.rec-head { display: flex; align-items: center; min-height: 64px; padding-right: 6px; }
+.rec-toggle { flex: 1; min-width: 0; display: flex; align-items: center; gap: 12px; padding: 12px 4px 12px 16px; border: 0; background: transparent; color: var(--text); text-align: left; font: inherit; }
+.rec-toggle .grow { display: flex; flex-direction: column; gap: 2px; }
+.rec-title { margin: 0; font-size: 16px; font-weight: 500; }
+.rec-pill { flex: none; height: 22px; padding: 0 8px; border-radius: 11px; background: var(--rec-tint); color: var(--rec-ink); font-size: 12px; font-weight: 700; display: inline-flex; align-items: center; gap: 5px; }
+.rec-pill .dot { width: 7px; height: 7px; }
+.chev.down svg { transform: rotate(90deg); }
+.chev.up svg { transform: rotate(-90deg); }
+.rec-card .round, .list-row .round { width: 48px; height: 48px; border-radius: 24px; background: transparent; color: var(--text-2); }
+.rec-body { border-top: 1px solid var(--rule); }
+.clip-row { display: flex; align-items: center; gap: 12px; padding: 8px 6px 8px 12px; }
+.clip-row.playing { background: var(--blue-tint); }
+.clip-play { flex: none; width: 48px; height: 48px; border-radius: 24px; border: 0; background: var(--control); color: var(--text); display: inline-flex; align-items: center; justify-content: center; }
+.clip-row.playing .clip-play { background: var(--blue-ink); color: var(--ground); }
+.clip-open { flex: 1; min-width: 0; min-height: 52px; display: flex; flex-direction: column; justify-content: center; gap: 3px; padding: 4px 0; border: 0; border-radius: 10px; background: transparent; color: var(--text); text-align: left; font: inherit; }
+.clip-note { font-size: 15px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.clip-note.empty { color: var(--muted); font-weight: 400; }
+.rec-pc { display: flex; align-items: center; gap: 8px; padding: 4px 16px 14px; color: var(--ok-ink); font-size: 12px; }
+/* Undo and the small player float at the bottom, so the list never moves */
+.rec-dock { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); width: min(560px, calc(100% - 16px)); z-index: 20; display: flex; flex-direction: column; gap: 8px; }
+@media (max-width: 760px) { .rec-dock { bottom: 80px; } }
+.page:has(.rec-dock) { padding-bottom: 140px; }
+.undo-snack { display: flex; align-items: center; gap: 8px; min-height: 48px; padding: 0 4px 0 16px; border-radius: 12px; background: var(--text); color: #000; font-weight: 500; }
+.undo-snack button { min-height: 44px; padding: 0 14px; border: 0; border-radius: 10px; background: transparent; color: var(--blue); font: inherit; font-weight: 700; }
+.mini-player { background: var(--control); border-radius: 16px; overflow: hidden; box-shadow: 0 6px 24px rgba(0, 0, 0, .45); }
+.mini-row { display: flex; align-items: center; gap: 12px; padding: 8px 8px 8px 14px; }
+.mini-title { font-size: 14px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mini-stop { width: 48px; height: 48px; border-radius: 24px; border: 0; background: var(--text); color: var(--ground); display: inline-flex; align-items: center; justify-content: center; flex: none; }
+.mini-track { height: 3px; background: var(--line-strong); }
+.mini-fill { height: 3px; background: var(--blue-ink); width: 0; }
+/* the sheet: from the bottom on a phone, centred on a computer */
+dialog.sheet { padding: 0; }
+@media (max-width: 760px) { dialog.sheet { margin: auto 0 0; width: 100%; max-width: 100%; border-radius: 22px 22px 0 0; } }
+.sheet-body { display: flex; flex-direction: column; gap: 14px; padding: 20px 16px 22px; }
+.sheet-body .card-title { margin: 0 0 3px; font-size: 18px; font-weight: 500; }
+.btn.big { min-height: 52px; font-size: 16px; }
+.sheet-tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.sheet-tile { height: 76px; border: 0; border-radius: 14px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; font: inherit; font-size: 14px; font-weight: 500; }
+.trim-bar { position: relative; height: 40px; border-radius: 10px; background: var(--sunken); overflow: hidden; }
+.trim-kept { position: absolute; top: 0; bottom: 0; background: var(--teal-tint); border-left: 2px solid var(--teal-ink); border-right: 2px solid var(--teal-ink); }
+.trim-row { display: flex; align-items: center; gap: 8px; min-height: 56px; padding: 0 6px 0 14px; border-radius: 14px; background: var(--sunken); }
+.trim-row .grow { display: flex; flex-direction: column; gap: 2px; }
+.trim-time { font-size: 17px; font-weight: 500; }
+.trim-row button { width: 64px; height: 48px; border: 0; border-radius: 12px; background: var(--control); color: var(--text); font: inherit; font-size: 14px; font-weight: 500; }
+.export-list { background: var(--sunken); border-radius: 14px; overflow: hidden; }
+.export-row { display: flex; align-items: center; border-top: 1px solid var(--rule); }
+.export-row:first-child { border-top: 0; }
+.export-main { flex: 1; min-width: 0; min-height: 60px; display: flex; align-items: center; gap: 12px; padding: 0 8px 0 14px; border: 0; background: transparent; color: var(--text); text-align: left; font: inherit; }
+.export-row .copy { min-height: 44px; margin-right: 6px; padding: 0 14px; border: 1px solid var(--line-strong); border-radius: 22px; background: transparent; color: var(--text); font: inherit; font-size: 14px; }
 .note-ok { background: var(--ok-tint); color: var(--ok-ink); border-radius: 14px; padding: 12px 14px; font-size: 14px; display: flex; gap: 10px; }
 
 /* settings */

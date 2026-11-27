@@ -83,7 +83,6 @@ The app is dark only. It's used in dim rooms beside a stage.
 - **Touch targets:** at least 48 dp, everywhere. Buttons are 48 dp tall, round icon buttons 48 dp across; switches are 52×30 with a 48 dp touch area.
 - **Navigation:** tabs along the bottom on phones; a 88 dp rail down the side when the window is 600 dp wide or more. Content keeps a 640 dp reading width.
 - **Unread badge on Desk:** green with the count; amber when an alert is unread, red for a severe one. The same in the app and the browser version. Connection notes don't count.
-- **Two panes:** on wide windows, Recordings shows the list and the open recording side by side.
 - **Confirmations:** a snackbar at the bottom, above the tabs (Android's own in the app; `role="status"` in the browser version).
 - **OBS dock text** follows the PC's text size: the body is OBS's own font size, names and quick replies 92% of it, notes 85%, times 78%.
 - **Quick replies** in the dock wait 3 s before sending; clicking again cancels.
@@ -98,6 +97,16 @@ The app is dark only. It's used in dim rooms beside a stage.
 
 - **Spacing:** 16 dp page margins, 12 dp between cards, 8–10 dp inside groups.
 - **Fixed slots:** controls that come and go (the status line under the Clip button, chips, captions) have a fixed place and height, so nothing else moves.
+
+## Recordings
+
+One screen, clips first, the same in the app and the browser version.
+
+- **A card per recording**, with its clips inside. The recording OBS is making comes first, then the newest. That one and the two newest others start open; the rest fold. Tapping a heading opens or folds it; ⋯ opens Export and Delete.
+- **A clip row** is its Play button (48, round), its note (or "Add a note" in muted text) with "length · at start time" under it, and ⋯. The row turns blue while it plays.
+- **One sheet** for a clip: Play, then three tiles (Trim in teal, Note in amber, Share or Download in purple), then Delete clip. Trim is two rows, Start and End, each with −5 s and +5 s, over the sound around the clip with the kept part lit.
+- **At the bottom**, floating so the list never moves: Undo after a delete (6 s), then a small player with the clip's name, its progress and Stop.
+- **Recordings without clips** fold into one line at the end.
 
 ## Touch sound
 

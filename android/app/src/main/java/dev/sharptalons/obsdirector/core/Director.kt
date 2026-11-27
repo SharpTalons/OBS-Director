@@ -9,6 +9,7 @@ import android.os.Vibrator
 import android.view.Surface
 import androidx.core.content.ContextCompat
 import dev.sharptalons.obsdirector.audio.AudioEngine
+import dev.sharptalons.obsdirector.audio.Loudness
 import dev.sharptalons.obsdirector.audio.Levels
 import dev.sharptalons.obsdirector.audio.SessionRecorder
 import dev.sharptalons.obsdirector.net.Connection
@@ -344,7 +345,7 @@ object Director {
     private fun startAudio() {
         if (engine == null) {
             engine = AudioEngine { pcm, fileTimeUs, recording, gap -> onPcm(pcm, fileTimeUs, recording, gap) }.also { e ->
-                e.volume = Prefs.settings.value.volume
+                e.volume = Loudness.gain(Prefs.settings.value.volumePct)
                 e.router = router
                 e.targetBufferMs = Prefs.settings.value.bufferMs
                 e.listening = listenState.value
@@ -370,11 +371,11 @@ object Director {
         engine?.listening = on
     }
 
-    /** 0..3 (0–300%). Heard at once while dragging; saved with [save]. */
-    fun setVolume(v: Float, save: Boolean = true) {
-        val c = v.coerceIn(0f, 3f)
-        engine?.volume = c
-        if (save) Prefs.update { it.copy(volume = c) }
+    /** 1–100% on the loudness scale. Heard at once while dragging; saved with [save]. */
+    fun setVolume(percent: Int, save: Boolean = true) {
+        val p = percent.coerceIn(1, 100)
+        engine?.volume = Loudness.gain(p)
+        if (save) Prefs.update { it.copy(volumePct = p) }
     }
 
     fun setBuffer(ms: Int) {

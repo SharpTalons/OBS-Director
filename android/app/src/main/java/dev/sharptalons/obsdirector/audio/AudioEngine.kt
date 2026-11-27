@@ -41,8 +41,8 @@ class AudioEngine(private val onPcm: (pcm: ShortArray, fileTimeUs: Long, recordi
     private var track: AudioTrack? = null
 
     @Volatile var listening = true
-    /** 0..3: up to 1 is the player's own volume; above 1 the mix is boosted here, with a soft limiter. */
-    @Volatile var volume = 0.8f
+    /** A gain, from [Loudness]: up to 1 is the player's own volume; above 1 the mix is boosted here, through a limiter. */
+    @Volatile var volume = 1f
     /** Follows the phone's active output and says when to make a fresh track. */
     @Volatile var router: OutputRouter? = null
     private var boosted = ShortArray(0)
@@ -243,7 +243,7 @@ class AudioEngine(private val onPcm: (pcm: ShortArray, fileTimeUs: Long, recordi
             router?.reportRouted(it.routedDevice)
             it.addOnRoutingChangedListener({ r -> router?.reportRouted(r.routedDevice) }, android.os.Handler(android.os.Looper.getMainLooper()))
         }
-        val v = volume.coerceIn(0f, 3f)
+        val v = volume.coerceIn(0f, 10f)
         t.setVolume(v.coerceAtMost(1f))
         val out = if (v > 1f) boost(pcm, v) else pcm
 
@@ -284,25 +284,14 @@ class AudioEngine(private val onPcm: (pcm: ShortArray, fileTimeUs: Long, recordi
         latency.value = (bufferedMs() + 6 + outMs / 2).toInt()
     }
 
-    /**
-     * Louder than 100%: multiply by [gain], then a soft limiter above 70% of full scale rounds
-     * peaks off instead of clipping them. Only what you hear: saved audio is untouched.
-     */
+    /** Louder than the mix: the gain, then [Limiter]. Only what you hear: the saved audio is untouched. */
     private fun boost(pcm: ShortArray, gain: Float): ShortArray {
         if (boosted.size != pcm.size) boosted = ShortArray(pcm.size)
-        val knee = 0.7f
-        for (i in pcm.indices) {
-            var x = pcm[i] / 32768f * gain
-            val a = abs(x)
-            if (a > knee) {
-                val over = (a - knee) / (1f - knee)
-                val soft = knee + (1f - knee) * kotlin.math.tanh(over)
-                x = if (x < 0) -soft else soft
-            }
-            boosted[i] = (x * 32767f).toInt().coerceIn(-32768, 32767).toShort()
-        }
+        limiter.process(pcm, gain, boosted)
         return boosted
     }
+
+    private val limiter = Limiter()
 
     private fun toDb(peak: Int): Float = if (peak <= 0) -90f else (20 * log10(peak / 32768.0)).toFloat()
 

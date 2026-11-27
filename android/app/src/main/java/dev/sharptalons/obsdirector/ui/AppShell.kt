@@ -150,7 +150,9 @@ fun AppShell() {
     // The app draws edge to edge, so Android doesn't shrink it for the keyboard; this lifts the
     // screen above the keyboard instead, so the chat box stays in sight while typing.
     Column(Modifier.fillMaxSize().background(T.ground).windowInsetsPadding(WindowInsets.statusBars).imePadding()) {
-        HeadBar(link, pc, latency, awaiting, onStage = { screen = "stage" }, onConnect = { connectOpen = true })
+        // The top bar (connection, Stage mode, connect) belongs to Monitor. The other screens have
+        // their own title and give the room to their content; Settings has the OBS PC row.
+        if (screen == "monitor") HeadBar(link, pc, latency, awaiting, onStage = { screen = "stage" }, onConnect = { connectOpen = true })
         // Alerts don't sit on top of the screens: they notify, and show up in the Desk chat.
         val top: (@Composable () -> Unit)? = null
         Row(Modifier.weight(1f).fillMaxWidth()) {

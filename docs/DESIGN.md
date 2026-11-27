@@ -84,8 +84,10 @@ The app is dark only. It's used in dim rooms beside a stage.
 - **Navigation:** tabs along the bottom on phones; a 88 dp rail down the side when the window is 600 dp wide or more. Content keeps a 640 dp reading width.
 - **Unread badge on Desk:** green with the count; amber when an alert is unread, red for a severe one. The same in the app and the browser version. Connection notes don't count.
 - **Confirmations:** a snackbar at the bottom, above the tabs (Android's own in the app; `role="status"` in the browser version).
-- **OBS dock text** follows the PC's text size: the body is OBS's own font size, names and quick replies 92% of it, notes 85%, times 78%.
-- **Quick replies** in the dock wait 3 s before sending; clicking again cancels.
+- **OBS dock text** follows the PC's text size: the body is OBS's own font size, names 92% of it, notes 85%, times 78%.
+- **OBS dock colours**, for dark screens: background `#0B141A`; others' bubbles `#2B3B45` edged `#3D4E59`; your own `#005C4B` edged `#0A7A63`; message text white (at least 6.5:1); times and notes `#C9D3D8` (at least 5.5:1); sender names from a light set, each at least 6:1 on its bubble.
+- **Top bar:** only on Monitor. Recordings, Desk, Settings and Stream start with their own title.
+- **Volume:** 1–100% on a loudness scale (`Loudness` in the app): 1% is −40 dB, 25% −20 dB, 50% the mix as sent, 75% +10 dB, 100% +20 dB. The scale shows under the slider; above 50% the slider and its caption turn amber. The boost goes through a limiter with a 95% ceiling and a 150 ms release.
 - **Rounding:**
 
 | Element | Radius |

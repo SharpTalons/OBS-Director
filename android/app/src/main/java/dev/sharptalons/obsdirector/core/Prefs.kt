@@ -17,7 +17,8 @@ data class Settings(
     // audio
     val bufferMs: Int = 0, // 0 = auto
     val autoListen: Boolean = true,
-    val volume: Float = 0.8f,
+    /** The volume slider, 1–100% on the loudness scale ([dev.sharptalons.obsdirector.audio.Loudness]); 50 = as OBS sends it. */
+    val volumePct: Int = dev.sharptalons.obsdirector.audio.Loudness.AS_SENT,
     val saveAudio: Boolean = true,
     val keepDays: Int = 30, // 0 = forever
     // clips
@@ -77,7 +78,9 @@ object Prefs {
             lastPcName = sp.getString("lastPcName", "") ?: "",
             bufferMs = sp.getInt("bufferMs", d.bufferMs),
             autoListen = sp.getBoolean("autoListen", d.autoListen),
-            volume = sp.getFloat("volume", d.volume),
+            // before 0.8.0 the volume was a gain of 0–3; carry it over onto the loudness scale
+            volumePct = if (sp.contains("volumePct")) sp.getInt("volumePct", d.volumePct)
+                else if (sp.contains("volume")) dev.sharptalons.obsdirector.audio.Loudness.fromGain(sp.getFloat("volume", 1f)) else d.volumePct,
             saveAudio = sp.getBoolean("saveAudio", d.saveAudio),
             keepDays = sp.getInt("keepDays", d.keepDays),
             leadMinutes = sp.getInt("leadMinutes", d.leadMinutes),
@@ -117,7 +120,7 @@ object Prefs {
             putString("lastPcName", s.lastPcName)
             putInt("bufferMs", s.bufferMs)
             putBoolean("autoListen", s.autoListen)
-            putFloat("volume", s.volume)
+            putInt("volumePct", s.volumePct)
             putBoolean("saveAudio", s.saveAudio)
             putInt("keepDays", s.keepDays)
             putInt("leadMinutes", s.leadMinutes)

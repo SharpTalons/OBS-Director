@@ -174,7 +174,7 @@ svg { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; 
 .row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .grow { flex: 1; min-width: 0; }
 .cols { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start; }
-.cols > * { flex: 1 1 360px; }
+.cols > * { flex: 1 1 360px; min-width: 0; }
 .title { font-size: 26px; font-weight: 700; }
 .sub { font-size: 14px; color: var(--muted); margin-top: 4px; }
 .label { font-size: 12px; color: var(--muted); }
@@ -209,7 +209,7 @@ svg { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; 
 .clip.running .hint { color: var(--on-rec); font-weight: 500; }
 .clip.running .len { font-size: 44px; font-weight: 700; letter-spacing: -1px; }
 .status-line { height: 48px; display: flex; align-items: center; gap: 4px; font-size: 14px; color: var(--text-2); }
-.status-line > .grow { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.status-line > .grow { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .status-line input[type=text] { min-height: 44px; padding: 8px 12px; }
 .line-action { min-height: 44px; padding: 0 12px; border: 0; border-radius: 10px; background: transparent; color: var(--blue-ink); font-weight: 500; flex: none; }
 .line-action:hover { background: var(--surface-2); }
@@ -259,7 +259,9 @@ input[type=text]:focus-visible, textarea:focus-visible { border-color: var(--blu
 /* meters, as OBS draws them */
 .meter { display: flex; flex-direction: column; gap: 4px; }
 .meter canvas { width: 100%; height: 26px; display: block; }
-.meter .scale { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); }
+.meter .scale { position: relative; display: flex; justify-content: space-between; font-size: 10px; color: var(--muted); padding-top: 5px; font-variant-numeric: tabular-nums;
+	/* a tick every 5 dB above the numbers */
+	background: repeating-linear-gradient(to right, var(--muted) 0 1px, transparent 1px calc((100% - 1px) / 12)) top left / 100% 4px no-repeat; }
 
 .video { background: var(--video); border-radius: 14px; aspect-ratio: 16 / 9; width: 100%; display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 13px; overflow: hidden; }
 .video video { width: 100%; height: 100%; object-fit: contain; display: block; }
@@ -319,8 +321,10 @@ button.list-row:hover { background: var(--surface-2); }
 .mini-row { display: flex; align-items: center; gap: 12px; padding: 8px 8px 8px 14px; }
 .mini-title { font-size: 14px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .mini-stop { width: 48px; height: 48px; border-radius: 24px; border: 0; background: var(--text); color: var(--ground); display: inline-flex; align-items: center; justify-content: center; flex: none; }
-.mini-track { height: 3px; background: var(--line-strong); }
-.mini-fill { height: 3px; background: var(--blue-ink); width: 0; }
+.mini-play { width: 48px; height: 48px; border-radius: 24px; border: 0; background: var(--blue-ink); color: var(--ground); display: inline-flex; align-items: center; justify-content: center; flex: none; }
+.mini-bar { display: flex; align-items: center; gap: 10px; padding: 0 14px 10px; }
+.mini-seek { flex: 1; min-width: 0; }
+.mini-time { font-size: 12px; color: var(--text-2); font-variant-numeric: tabular-nums; }
 /* the sheet: from the bottom on a phone, centred on a computer */
 dialog.sheet { padding: 0; }
 @media (max-width: 760px) { dialog.sheet { margin: auto 0 0; width: 100%; max-width: 100%; border-radius: 22px 22px 0 0; } }
@@ -330,10 +334,10 @@ dialog.sheet { padding: 0; }
 .sheet-tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
 .sheet-tile { height: 76px; border: 0; border-radius: 14px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; font: inherit; font-size: 14px; font-weight: 500; }
 /* the trimmer: the sound with the kept part lit, a handle at each end */
-.trimmer { position: relative; height: 84px; border-radius: 12px; background: var(--sunken); overflow: hidden; touch-action: none; user-select: none; -webkit-user-select: none; cursor: pointer; }
+.trimmer { position: relative; height: 128px; border-radius: 12px; background: var(--sunken); overflow: hidden; touch-action: none; user-select: none; -webkit-user-select: none; cursor: pointer; }
 .trim-wave { position: absolute; inset: 0; width: 100%; height: 100%; }
-.trim-kept { position: absolute; top: 0; bottom: 0; background: var(--teal-tint); opacity: .85; }
-.trim-handle { position: absolute; top: 0; bottom: 0; width: 44px; margin-left: -22px; display: flex; align-items: center; justify-content: center; cursor: ew-resize; }
+.trim-kept { position: absolute; top: 0; bottom: 22px; background: var(--teal-tint); opacity: .85; }
+.trim-handle { position: absolute; top: 0; bottom: 22px; width: 44px; margin-left: -22px; display: flex; align-items: center; justify-content: center; cursor: ew-resize; }
 .trim-handle::before { content: ""; position: absolute; top: 0; bottom: 0; left: 21px; width: 2px; background: var(--teal-ink); }
 .trim-handle .grip { position: relative; width: 12px; height: 32px; border-radius: 4px; background: var(--teal-ink); box-shadow: inset 2px 0 0 -1px var(--sunken), inset -2px 0 0 -1px var(--sunken); }
 .trim-handle.active::before, .trim-handle.active .grip { background: var(--text); }
@@ -346,8 +350,22 @@ dialog.sheet { padding: 0; }
 .trim-edge.active .small { color: var(--blue-ink); }
 .trim-time { font-size: 16px; font-weight: 500; font-variant-numeric: tabular-nums; }
 .trim-len { font-size: 15px; font-weight: 500; text-align: center; font-variant-numeric: tabular-nums; }
-.trim-nudge { display: flex; align-items: center; gap: 8px; }
-.trim-nudge button { width: 64px; height: 48px; border: 0; border-radius: 12px; background: var(--control); color: var(--text); font: inherit; font-size: 14px; font-weight: 500; }
+.trim-head { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: #fff; pointer-events: none; }
+.trim-head::before { content: ""; position: absolute; top: 0; left: -5px; border: 6px solid transparent; border-top: 7px solid #fff; border-bottom: 0; }
+.trim-head::after { content: ""; position: absolute; bottom: 5px; left: -5px; width: 12px; height: 12px; border-radius: 6px; background: #fff; }
+.trim-top { display: flex; align-items: center; gap: 4px; }
+.trim-mid { display: flex; flex-direction: column; align-items: center; }
+.trim-headtime { font-size: 17px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.trim-transport { display: flex; align-items: center; justify-content: space-evenly; }
+.trim-round { width: 48px; height: 48px; border-radius: 24px; border: 0; background: transparent; color: var(--text); display: inline-flex; align-items: center; justify-content: center; }
+.trim-round:hover { background: var(--control); }
+.trim-round.big { width: 60px; height: 60px; border-radius: 30px; }
+.trim-round.play { background: var(--blue-ink); color: var(--ground); }
+.trim-tools { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.trim-tool { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; height: 60px; border: 0; border-radius: 12px; background: var(--control); color: var(--teal-ink); font: inherit; }
+.trim-tool span:last-child { font-size: 12px; color: var(--text); }
+.trim-tool:disabled { color: var(--muted); }
+.trim-tool:disabled span:last-child { color: var(--muted); }
 .export-list { background: var(--sunken); border-radius: 14px; overflow: hidden; }
 .export-row { display: flex; align-items: center; border-top: 1px solid var(--rule); }
 .export-row:first-child { border-top: 0; }
@@ -366,7 +384,8 @@ dialog.sheet { padding: 0; }
 .fold { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 48px; padding: 0 6px; border: 0; border-radius: 12px; background: transparent; color: var(--text-2); font: inherit; text-align: left; }
 .fold .chev.down svg { transform: rotate(90deg); }
 .fold .chev.up svg { transform: rotate(-90deg); }
-.setting .value { font-size: 14px; }
+.setting .value { font-size: 14px; text-align: right; overflow-wrap: anywhere; max-width: 55%; }
+.setting > .grow { min-width: min(9em, 40%); }
 select.choice { background: var(--sunken); border: 1px solid var(--line-strong); border-radius: 10px; min-height: 44px; padding: 0 10px; }
 
 /* dialog (export) */
@@ -433,3 +452,6 @@ hr.rule { border: 0; border-top: 1px solid var(--rule); margin: 4px 0; width: 10
 .aac-saved.playing { background: var(--blue-tint); }
 .setting.with-range { flex-direction: column; align-items: stretch; gap: 8px; }
 .setting.with-range input[type=range] { width: 100%; }
+
+/* a long line of text is cut short, never widens the page */
+.app, .view { min-width: 0; }

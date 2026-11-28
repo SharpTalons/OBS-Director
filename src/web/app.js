@@ -110,6 +110,15 @@ function icon(name, size = 20) {
 		tap: '<path d="M9 11V5a2 2 0 0 1 4 0v6M13 10a2 2 0 0 1 4 0v4a6 6 0 0 1-6 6h-1a6 6 0 0 1-5-3l-1.5-3a1.6 1.6 0 0 1 2.8-1.6L9 15"/>',
 		vibrate: '<rect x="8" y="4" width="8" height="16" rx="2"/><path d="M4 8v8M20 8v8"/>',
 		more: '<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',
+		zoomIn: '<circle cx="11" cy="11" r="7"/><path d="M21 21l-5-5M8 11h6M11 8v6"/>',
+		zoomOut: '<circle cx="11" cy="11" r="7"/><path d="M21 21l-5-5M8 11h6"/>',
+		first: '<path d="M6 5v14M18 6l-7 6 7 6"/>',
+		last: '<path d="M18 5v14M6 6l7 6-7 6"/>',
+		back5: '<path d="M4 12a8 8 0 1 0 2.4-5.7L4 8.5"/><path d="M4 4v4.5h4.5"/><path d="M13.5 9h-3l-.5 3c.5-.4 1.2-.5 1.8-.5a1.8 1.8 0 0 1 0 3.6c-.8 0-1.5-.4-1.8-1"/>',
+		fwd5: '<path d="M20 12a8 8 0 1 1-2.4-5.7L20 8.5"/><path d="M20 4v4.5h-4.5"/><path d="M13.5 9h-3l-.5 3c.5-.4 1.2-.5 1.8-.5a1.8 1.8 0 0 1 0 3.6c-.8 0-1.5-.4-1.8-1"/>',
+		setStart: '<path d="M4 4v16M8 7h12M8 12h8M8 17h12"/>',
+		setEnd: '<path d="M20 4v16M4 7h12M8 12h8M4 17h12"/>',
+		restore: '<path d="M4 12a8 8 0 1 0 2.4-5.7L4 8.5"/><path d="M4 4v4.5h4.5M12 8v4l3 2"/>',
 	};
 	return h('span', { 'aria-hidden': 'true', style: { display: 'inline-flex' }, html: `<svg width="${size}" height="${size}" viewBox="0 0 24 24">${paths[name] || ''}</svg>` });
 }
@@ -184,9 +193,10 @@ const settings = Object.assign({
 	haptics: 2,
 	allowStreamStop: false,
 	spaceForClip: true,
-	/** how much the live mix is lowered while a saved clip plays, 0-100% */
+	/** how much the live mix is lowered while a saved clip plays, 50-100% */
 	duckPct: 80,
 }, store.get('settings', {}));
+settings.duckPct = Math.max(50, Math.min(100, Number(settings.duckPct) || 80));
 /* before 0.8.1 the volume was a gain of 0-3; carry it over onto the loudness scale */
 if (settings.volumePct == null) settings.volumePct = 'volume' in settings ? Loudness.fromGain(settings.volume) : 50;
 delete settings.volume;
@@ -283,6 +293,8 @@ function trackObs(s) {
 	if (!r) return;
 	session.lastSeen = Date.now();
 	r.durationMs = Math.round(sessionNowMs());
+	/* the session's length, kept every few seconds, so a clip running when the page closes knows where it ended */
+	if (Date.now() - (trackObs.kept || 0) > 5000) { trackObs.kept = Date.now(); store.set('recordings', recordings); }
 	const t = heardMs();
 	const heardFile = state.listening && audio.ctx ? audio.fileMsNow() : null;
 	const fileMs = heardFile === null ? nowFileTimeMs() : heardFile;
@@ -851,12 +863,16 @@ const audio = {
 		let rec;
 		try { rec = new MediaRecorder(this.recDest.stream, mime ? { mimeType: mime, audioBitsPerSecond: 96000 } : undefined); } catch { return; }
 		const seg = { id: newId(), file: session.id, startMs: Math.round(sessMs), ctxStart: this.ctx.currentTime, started: performance.now(), mime: rec.mimeType, chunks: [] };
-		rec.ondataavailable = (e) => { if (e.data && e.data.size) seg.chunks.push(e.data); };
-		rec.onstop = () => {
+		/* Saved every second as it is recorded, not only when the piece ends, so a page that is closed,
+		 * crashes or loses power keeps all but the last moments. Each save replaces the last. */
+		const keep = () => {
 			const blob = new Blob(seg.chunks, { type: seg.mime || 'audio/webm' });
-			if (blob.size) idb.put({ id: seg.id, file: seg.file, startMs: seg.startMs, durMs: seg.durMs, mime: blob.type, blob, at: Date.now() });
+			const durMs = seg.durMs != null ? seg.durMs : Math.round((this.ctx.currentTime - seg.ctxStart) * 1000);
+			if (blob.size) idb.put({ id: seg.id, file: seg.file, startMs: seg.startMs, durMs, mime: blob.type, blob, at: Date.now() });
 		};
-		rec.start();
+		rec.ondataavailable = (e) => { if (e.data && e.data.size) { seg.chunks.push(e.data); if (rec.state === 'recording') keep(); } };
+		rec.onstop = keep;
+		rec.start(1000);
 		seg.rec = rec;
 		this.segment = seg;
 	},
@@ -892,33 +908,56 @@ async function savedAudio(file, fromMs, toMs) {
 	return pieces.length ? { sampleRate: pieces[0].buffer.sampleRate, pieces } : null;
 }
 
+/**
+ * Plays saved audio: a clip, a stretch of the trimmer, or an AAC file. It can pause and move to any
+ * point ([seek]); the live mix is lowered only while it sounds.
+ */
 const player = {
 	key: null,
 	sources: [],
 	startedAt: 0,
+	base: 0,
 	fromMs: 0,
 	toMs: 0,
-	async play(key, file, fromMs, toMs) {
+	paused: false,
+	pausedAt: 0,
+	got: null,
+	async play(key, file, fromMs, toMs, atMs = fromMs) {
 		this.stop();
 		audio.unlock();
 		const got = await savedAudio(file, fromMs, toMs);
 		if (!got) return toast('No audio saved in this browser for that part. Listen in this browser to keep it.');
+		this.got = got;
+		this.key = key;
+		this.fromMs = fromMs;
+		this.toMs = toMs;
+		this.startAt(Math.max(fromMs, Math.min(toMs, atMs)));
+		audio.duck(true);
+		/* the bars and times update in place (see tick); this only notices the end */
+		this.timer = setInterval(() => { if (!this.paused && (!audio.ctx || audio.ctx.currentTime >= this.endAt)) this.stop(); }, 250);
+		render();
+	},
+	/** Schedules the decoded pieces from [ms] on. */
+	startAt(ms) {
+		this.stopSources();
 		const ctx = audio.ctx, t0 = ctx.currentTime + 0.05;
-		for (const p of got.pieces) {
+		for (const p of this.got.pieces) {
+			const pEnd = p.atMs + p.durS * 1000;
+			if (pEnd <= ms) continue;
+			const skip = Math.max(0, ms - p.atMs) / 1000;
 			const src = ctx.createBufferSource();
 			src.buffer = p.buffer;
 			src.connect(audio.gain);
-			src.start(t0 + (p.atMs - fromMs) / 1000, p.offsetS, p.durS);
+			src.start(t0 + Math.max(0, p.atMs - ms) / 1000, p.offsetS + skip, p.durS - skip);
 			this.sources.push(src);
 		}
-		this.key = key;
-		audio.duck(true);
 		this.startedAt = t0;
-		this.fromMs = fromMs;
-		this.toMs = toMs;
-		const end = t0 + (toMs - fromMs) / 1000;
-		this.timer = setInterval(() => { if (!audio.ctx || audio.ctx.currentTime >= end) this.stop(); render(); }, 250);
-		render();
+		this.base = ms;
+		this.endAt = t0 + (this.toMs - ms) / 1000;
+	},
+	stopSources() {
+		for (const s of this.sources) { try { s.stop(); } catch { /* done */ } }
+		this.sources = [];
 	},
 	/** An OBS recording's AAC file saved in this browser. Too long to decode at once, so it streams from an <audio>. */
 	async playAac(file) {
@@ -935,19 +974,47 @@ const player = {
 		el.addEventListener('ended', () => this.stop());
 		try { await el.play(); } catch { this.stop(); return toast('This browser couldn’t play the AAC file.'); }
 		audio.duck(true);
-		this.timer = setInterval(render, 500);
 		render();
 	},
 	posMs() {
+		if (!this.key) return 0;
+		if (this.paused) return this.pausedAt;
 		if (this.el) return this.el.currentTime * 1000;
-		return this.key && audio.ctx ? this.fromMs + Math.max(0, audio.ctx.currentTime - this.startedAt) * 1000 : 0;
+		return audio.ctx ? Math.min(this.toMs, this.base + Math.max(0, audio.ctx.currentTime - this.startedAt) * 1000) : 0;
 	},
+	/** Moves to [ms] of what is playing, playing on (or staying paused) from there. */
+	seek(ms) {
+		if (!this.key) return;
+		ms = Math.max(this.fromMs, Math.min(this.toMs, ms));
+		if (this.paused) this.pausedAt = ms;
+		else if (this.el) this.el.currentTime = ms / 1000;
+		else if (this.got) this.startAt(ms);
+		render();
+	},
+	pause() {
+		if (!this.key || this.paused) return;
+		this.pausedAt = this.posMs();
+		this.paused = true;
+		if (this.el) this.el.pause(); else this.stopSources();
+		audio.duck(false);
+		render();
+	},
+	resume() {
+		if (!this.key || !this.paused) return;
+		this.paused = false;
+		if (this.el) { this.el.currentTime = this.pausedAt / 1000; this.el.play().catch(() => {}); } else this.startAt(this.pausedAt);
+		audio.duck(true);
+		render();
+	},
+	toggle() { if (this.paused) this.resume(); else this.pause(); },
 	stop() {
 		if (this.el) { try { this.el.pause(); } catch { /* fine */ } URL.revokeObjectURL(this.url); this.el = null; this.url = null; }
-		for (const s of this.sources) { try { s.stop(); } catch { /* done */ } }
-		this.sources = [];
+		this.stopSources();
+		this.got = null;
 		clearInterval(this.timer);
-		if (this.key) { this.key = null; audio.duck(false); render(); }
+		const was = this.key, paused = this.paused;
+		this.paused = false;
+		if (was) { this.key = null; if (!paused) audio.duck(false); render(); }
 	},
 };
 
@@ -1265,6 +1332,8 @@ function startClip() {
 	if (state.noteFor) skipNote(); /* the clip before still waiting for its note: its end marker goes in now */
 	state.clipStart = Math.max(0, heardMs());
 	state.clipName = nextClip();
+	/* noted, so the clip is saved even if the page is closed or the browser stops before it ends */
+	store.set('runningClip', { file: session.id, startMs: Math.round(state.clipStart), name: state.clipName.name, number: state.clipName.number });
 	state.lastSaved = '';
 	/* a chapter only goes in while OBS records */
 	if (settings.chapters && s && s.recActive) command('chapter.add', { name: 'Clip ' + state.clipName.number });
@@ -1280,6 +1349,7 @@ function endClip(why = '', auto = false) {
 	const n = state.clipName || nextClip();
 	state.clipStart = null;
 	state.clipName = null;
+	store.set('runningClip', null);
 	const s = state.status || {};
 	const c = { id: newId(), startMs: Math.round(start), endMs: Math.round(end), note: '', createdAt: Date.now(), name: n.name, number: n.number };
 	r.clips.push(c);
@@ -1311,7 +1381,7 @@ function saveNote(c, text) {
 function skipNote() { state.noteFor = null; writeEndMarker(''); }
 function endClipIfRunning(why) { if (state.clipStart !== null) endClip(why, true); }
 function toggleClip() { if (state.clipStart === null) startClip(); else endClip(); }
-function cancelClip() { state.clipStart = null; state.clipName = null; state.lastSaved = 'Clip cancelled. Nothing saved.'; render(); }
+function cancelClip() { store.set('runningClip', null); state.clipStart = null; state.clipName = null; state.lastSaved = 'Clip cancelled. Nothing saved.'; render(); }
 
 /* =============================================================== OBS recordings, and their sound as AAC */
 
@@ -1546,6 +1616,8 @@ const feedback = {
 		}
 		if (settings.haptics > 0) this.buzz([[18, 28, 40][settings.haptics - 1]], true);
 	},
+	/** A slider reached a set point (the volume at "as set in OBS"): a vibration only, no sound. */
+	detent() { if (settings.haptics > 0) this.buzz([[18, 28, 40][settings.haptics - 1]], true); },
 	/* Browsers can't set vibration strength, only length, so stronger settings buzz longer. A tap
 	 * is already sized for its level; patterns are scaled. */
 	buzz(pattern, sized) {
@@ -1619,7 +1691,7 @@ function structureKey() {
 	const s = state.status || {};
 	return [state.link, view.name, view.recording, view.open, view.mode, view.streamTab, view.exporting, !!view.help, JSON.stringify(view.sheet), view.sheetMode, !!undoing, s.recActive, s.recPaused, s.streamActive,
 		state.clipStart !== null, state.listening, state.video, state.desk.length, state.desk.map((m) => m.state).join(''), state.deskUnread, state.deskAlert, state.alerts.map((a) => a.id).join(), !!state.lastSaved, settings.allowStreamStop,
-		player.key, recordings.length].join('|');
+		player.key, player.paused, recordings.length].join('|');
 }
 
 /** Rebuild the screen. Whatever is being typed (text, cursor, focus) carries over. */
@@ -1864,7 +1936,8 @@ function meterBlock(dim) {
 	const canvas = h('canvas', { role: 'img', 'aria-label': 'Mix level' });
 	meterCanvases.push([canvas, dim]);
 	live.push([canvas, null, () => canvas.setAttribute('aria-label', 'Mix level, ' + meters.label())]);
-	return h('div.meter', canvas, !dim && h('div.scale', ['-60', '-40', '-20', '-9', '0 dB'].map((t) => h('span', t))));
+	/* a tick every 5 dB and a number every 10 dB, like the scale beside OBS's own meter */
+	return h('div.meter', canvas, !dim && h('div.scale', { 'aria-hidden': 'true' }, ['−60', '−50', '−40', '−30', '−20', '−10', '0'].map((t) => h('span', t))));
 }
 
 function listenSection() {
@@ -1876,8 +1949,12 @@ function listenSection() {
 	const volLabel = h('span.small.vol-value' + (pct > Loudness.AS_SENT ? '.boost' : ''), pct + '%');
 	/* always there, so dragging changes the words, not the layout */
 	const hint = h('div.small.vol-hint' + (pct > Loudness.AS_SENT ? '.boost' : ''), Loudness.describe(pct));
+	let lastVol = pct;
 	vol.addEventListener('input', () => {
-		const p = Number(vol.value);
+		let p = Number(vol.value);
+		if (Math.abs(p - Loudness.AS_SENT) <= 1) { p = Loudness.AS_SENT; vol.value = p; }
+		if (p !== lastVol && (p === Loudness.AS_SENT || (lastVol - Loudness.AS_SENT) * (p - Loudness.AS_SENT) < 0)) feedback.detent();
+		lastVol = p;
 		audio.setVolume(p);
 		volLabel.textContent = p + '%';
 		vol.setAttribute('aria-valuetext', p + ' percent. ' + Loudness.describe(p));
@@ -2074,7 +2151,7 @@ function drawHealth(canvas) {
  * recording's ⋯ opens Export and Delete. Recordings without clips stay folded at the end. */
 const clipKey = (r, c) => r.file + ':' + c.id;
 const clipName = (c, r) => fullName(c) || c.note || 'Clip at ' + clockAt(r, c.startMs);
-const clipMeta = (c, r) => clipLength(c.endMs - c.startMs) + ' long · at ' + clockAt(r, c.startMs);
+const clipMeta = (c, r) => clipLength(c.endMs - c.startMs) + ' long · at ' + clockAt(r, c.startMs) + (c.recovered ? ' · saved after the page closed' : '');
 function recMeta(r) {
 	if (!r.session) return (r.live ? 'Recording now' : durationText(r.durationMs)) + ' · ' + clipsText(r.clips.length);
 	const n = obsFiles(withOpen(r)).length;
@@ -2204,21 +2281,33 @@ function recordingsPage() {
 
 const cssId = (s) => s.replace(/[^\w-]/g, '_');
 
-/** The player at the bottom while a clip plays: which clip, how far, and Stop. */
+const playTime = (ms) => { const t = Math.floor(ms / 1000); return t >= 3600 ? Math.floor(t / 3600) + ':' + pad2(Math.floor(t / 60) % 60) + ':' + pad2(t % 60) : Math.floor(t / 60) + ':' + pad2(t % 60); };
+
+/** The player at the bottom while something plays: which, pause, stop, and a bar to move through it. */
 function miniPlayer(key) {
 	const isAac = key.startsWith('aac:');
 	const r = isAac ? null : recordings.find((x) => key.startsWith(x.file + ':'));
 	const c = r && r.clips.find((x) => clipKey(r, x) === key);
-	const fill = h('div.mini-fill');
+	const title = isAac ? fileBase(key.slice(4)) + '.m4a' : c ? clipName(c, r) : 'Playing';
 	const span = () => Math.max(1, player.toMs - player.fromMs);
 	const done = () => Math.min(span(), Math.max(0, player.posMs() - player.fromMs));
-	const time = bind(h('span.small'), () => len(done()) + ' of ' + len(span()) + (settings.duckPct ? ' · live mix lowered ' + settings.duckPct + '%' : ''));
-	live.push([fill, null, () => { fill.style.width = (done() / span() * 100).toFixed(1) + '%'; }]);
-	fill.style.width = (done() / span() * 100).toFixed(1) + '%';
+	/* while the bar is dragged it shows where it will go; the sound moves there on release */
+	let dragging = false;
+	const bar = h('input.mini-seek', { type: 'range', min: 0, max: span(), step: 100, value: done(), 'aria-label': 'Position in ' + title });
+	const at = h('span.mini-time', playTime(done())), total = h('span.mini-time', playTime(span()));
+	bar.addEventListener('input', () => { dragging = true; at.textContent = playTime(Number(bar.value)); });
+	bar.addEventListener('change', () => { dragging = false; player.seek(player.fromMs + Number(bar.value)); });
+	live.push([bar, null, () => {
+		if (bar.max != span()) { bar.max = span(); total.textContent = playTime(span()); }
+		if (!dragging) { bar.value = done(); at.textContent = playTime(done()); }
+		bar.setAttribute('aria-valuetext', playTime(done()) + ' of ' + playTime(span()));
+	}]);
 	return h('div.mini-player',
-		h('div.mini-row', h('span.grow', h('div.mini-title', isAac ? fileBase(key.slice(4)) + '.m4a' : c ? clipName(c, r) : 'Playing'), time),
+		h('div.mini-row', h('span.grow', h('div.mini-title', title),
+			h('span.small', player.paused ? 'Paused · live mix at full level' : 'Live mix lowered ' + settings.duckPct + '%')),
+			h('button.mini-play', { type: 'button', 'aria-label': player.paused ? 'Play' : 'Pause', onclick: () => player.toggle() }, icon(player.paused ? 'play' : 'pause', 18)),
 			h('button.mini-stop', { type: 'button', 'aria-label': 'Stop', onclick: () => player.stop() }, icon('stop', 18))),
-		h('div.mini-track', fill));
+		h('div.mini-bar', at, bar, total));
 }
 
 /* ---------- trim ----------
@@ -2268,16 +2357,26 @@ async function loadTrimWave(r, from, to) {
 	if (view.sheetMode === 'trim') render();
 }
 
+/**
+ * The clip editor, the same as the app's: the clip with 15 s either side, the kept part lit, a
+ * handle at each end and a white playhead. Drag a handle (it settles in the nearest pause and plays
+ * a moment there), or set an end from the playhead; ‹ › nudge the chosen end. Click anywhere, or
+ * drag along the time strip, to move the playhead; while playing, the sound follows. Drag the lit
+ * part to move the whole clip. Zoom in and out around the playhead. Keys: the handles are
+ * sliders (arrows 1 s, Page Up/Down 5 s). Nothing changes until Save.
+ */
 function trimmer(r, c) {
 	const dur = r.live ? (r.session ? heardMs() : nowFileTimeMs()) : r.durationMs || 0;
 	if (!view.trim) {
 		const [from, to] = Trim.window(c.startMs, c.endMs, dur);
-		view.trim = { start: c.startMs, end: c.endMs, active: 'start', from, to };
+		view.trim = { start: c.startMs, end: c.endMs, active: 'start', from, to, head: c.startMs };
 	}
 	const t = view.trim;
 	loadTrimWave(r, t.from, t.to);
 	const env = trimWave.key === r.file + ':' + t.from + ':' + t.to ? trimWave.env : null;
 	const trimPlaying = player.key === 'trim';
+	const sounding = trimPlaying && !player.paused;
+	const RULER = 22;
 	const hear = (edge) => (edge === 'start' ? player.play('trim', r.file, t.start, Math.min(t.start + 2000, t.end)) : player.play('trim', r.file, Math.max(t.start, t.end - 2000), t.end));
 	const settle = (edge) => {
 		if (edge === 'start') t.start = Trim.moveStart(t.start, t.end, Trim.snap(t.start, env, t.from));
@@ -2285,9 +2384,22 @@ function trimmer(r, c) {
 		/* an end pushed to the side of the view: show more */
 		if (t.start - t.from < 1500 || t.to - t.end < 1500) [t.from, t.to] = Trim.window(t.start, t.end, dur);
 	};
+	/** the playhead to [ms]; the sound follows if it's playing */
+	const placeHead = (ms) => { t.head = Math.max(0, dur > 0 ? Math.min(dur, ms) : ms); if (player.key === 'trim') player.seek(t.head); place(); };
+	const playFromHead = () => { if (t.head < t.from || t.head > t.to) t.head = t.start; player.play('trim', r.file, t.from, t.to, t.head); };
+	const zoom = (factor) => {
+		const max = Math.max(4000, dur > 0 ? dur : 600000);
+		const span = Math.round(Math.max(4000, Math.min(max, (t.to - t.from) * factor)));
+		let a = t.head - span / 2;
+		if (dur > 0) a = Math.min(a, dur - span);
+		a = Math.max(0, Math.round(a));
+		t.from = a; t.to = a + span;
+		render();
+	};
 
 	const canvas = h('canvas.trim-wave', { 'aria-hidden': 'true' });
 	const kept = h('div.trim-kept');
+	const headEl = h('div.trim-head', { 'aria-hidden': 'true' });
 	const handle = (which) => h('div.trim-handle.' + which + (t.active === which ? '.active' : ''), {
 		role: 'slider', tabindex: '0', 'aria-label': which === 'start' ? 'Start of the clip' : 'End of the clip',
 		'aria-valuemin': String(t.from), 'aria-valuemax': String(t.to), 'aria-valuenow': String(t[which]), 'aria-valuetext': clockAt(r, t[which]),
@@ -2302,19 +2414,21 @@ function trimmer(r, c) {
 		},
 	}, h('span.grip'));
 	const hs = handle('start'), he = handle('end');
-	const box = h('div.trimmer', kept, canvas, hs, he);
+	const box = h('div.trimmer', kept, canvas, hs, he, headEl);
+	const startT = h('span.trim-time'), endT = h('span.trim-time'), headT = h('span.trim-headtime'), lenT = h('span.small');
 	const place = () => {
 		const sp = t.to - t.from;
 		const sx = (t.start - t.from) / sp * 100, ex = (t.end - t.from) / sp * 100;
 		kept.style.left = sx + '%'; kept.style.width = (ex - sx) + '%';
 		hs.style.left = sx + '%'; he.style.left = ex + '%';
-		startT.textContent = clockAt(r, t.start); endT.textContent = clockAt(r, t.end); lenT.textContent = clipLength(t.end - t.start);
+		headEl.style.left = ((t.head - t.from) / sp * 100) + '%';
+		headEl.hidden = t.head < t.from || t.head > t.to;
+		startT.textContent = clockAt(r, t.start); endT.textContent = clockAt(r, t.end);
+		headT.textContent = clockAt(r, t.head); lenT.textContent = 'Length ' + clipLength(t.end - t.start);
 		for (const [el, v] of [[hs, t.start], [he, t.end]]) { el.setAttribute('aria-valuenow', String(Math.round(v))); el.setAttribute('aria-valuetext', clockAt(r, v)); }
-		/* which end ±1 s moves, and the length on Play */
 		hs.classList.toggle('active', t.active === 'start'); he.classList.toggle('active', t.active === 'end');
 		for (const [b, w] of [[edgeS, 'start'], [edgeE, 'end']]) { b.classList.toggle('active', t.active === w); b.setAttribute('aria-pressed', String(t.active === w)); }
-		nudgeLabel.textContent = 'Move the ' + t.active;
-		if (player.key !== 'trim') playLabel.textContent = 'Play ' + clipLength(t.end - t.start);
+		setStartBtn.disabled = t.head > t.end - Trim.MIN; setEndBtn.disabled = t.head < t.start + Trim.MIN;
 		draw();
 	};
 	const draw = () => {
@@ -2322,65 +2436,100 @@ function trimmer(r, c) {
 		if (!w) return;
 		canvas.width = Math.round(w * dpr); canvas.height = Math.round(hgt * dpr);
 		const g = canvas.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0);
-		const bars = Math.max(20, Math.floor(w / 6)), bw = w / bars, sp = t.to - t.from;
+		const waveH = hgt - RULER, sp = t.to - t.from;
+		const bars = Math.max(20, Math.floor(w / 5)), bw = w / bars;
 		for (let k = 0; k < bars; k++) {
 			const at = t.from + sp * k / bars;
 			const a = Math.max(0.06, Math.min(1, env ? env[Math.floor((at - t.from) / Trim.STEP)] * 1.6 || 0.06 : 0.12));
-			const bh = a * hgt * 0.7;
+			const bh = a * waveH * 0.78;
 			g.fillStyle = tokenColour(at >= t.start && at <= t.end ? '--teal-ink' : '--line-strong');
-			g.fillRect(k * bw + bw * 0.25, (hgt - bh) / 2, bw * 0.5, bh);
+			g.fillRect(k * bw + bw * 0.2, (waveH - bh) / 2, bw * 0.6, bh);
 		}
-		if (trimPlaying) { g.fillStyle = '#fff'; g.fillRect((player.posMs() - t.from) / sp * w - 1, 0, 2, hgt); }
+		/* the time strip: a tick every step, a time under every other one */
+		g.fillStyle = tokenColour('--control');
+		g.fillRect(0, waveH, w, RULER);
+		const step = [1000, 2000, 5000, 10000, 15000, 30000, 60000, 120000, 300000].find((x) => (w * x) / sp >= 28) || 600000;
+		g.font = '10px ' + getComputedStyle(document.body).fontFamily;
+		g.textBaseline = 'top';
+		for (let n = Math.floor(t.from / step) + 1; n * step < t.to; n++) {
+			const x = ((n * step - t.from) / sp) * w, major = n % 2 === 0;
+			g.fillStyle = tokenColour('--muted');
+			g.fillRect(x - 0.5, waveH, 1, major ? 6 : 3);
+			if (major) {
+				const label = clockAt(r, n * step).replace(/^\d\d:(?=\d\d:\d\d$)/, '');
+				const lw = g.measureText(label).width;
+				g.fillText(label, Math.max(0, Math.min(w - lw, x - lw / 2)), waveH + 8);
+			}
+		}
 	};
-	/* drag: an end, the kept part (both), or elsewhere (the nearer end jumps there) */
+	/* drag: an end, the kept part (move it), or the time strip and elsewhere (the playhead); a click puts the playhead there */
 	box.addEventListener('pointerdown', (e) => {
+		if (e.target.closest('.trim-handle') && e.button !== 0) return;
 		const rect = box.getBoundingClientRect(), sp = t.to - t.from;
 		const msAt = (x) => Math.round(t.from + (Math.max(0, Math.min(rect.width, x - rect.left)) / rect.width) * sp);
 		const sx = rect.left + (t.start - t.from) / sp * rect.width, ex = rect.left + (t.end - t.from) / sp * rect.width;
-		const x0 = e.clientX, grab = 22;
+		const x0 = e.clientX, grab = 22, inRuler = e.clientY > rect.bottom - RULER;
 		let target;
-		if (Math.abs(x0 - sx) <= grab && Math.abs(x0 - sx) <= Math.abs(x0 - ex)) target = 'start';
+		if (inRuler) target = 'head';
+		else if (Math.abs(x0 - sx) <= grab && Math.abs(x0 - sx) <= Math.abs(x0 - ex)) target = 'start';
 		else if (Math.abs(x0 - ex) <= grab) target = 'end';
 		else if (x0 > sx && x0 < ex) target = 'both';
-		else if (Math.abs(x0 - sx) < Math.abs(x0 - ex)) { target = 'start'; t.start = Trim.moveStart(t.start, t.end, msAt(x0)); }
-		else { target = 'end'; t.end = Trim.moveEnd(t.start, t.end, msAt(x0), dur); }
-		if (target !== 'both') t.active = target;
-		if (player.key === 'trim') player.stop();
+		else target = 'head';
+		if (target === 'start' || target === 'end') { t.active = target; if (player.key === 'trim') player.stop(); }
+		if (target === 'head') { t.head = msAt(x0); place(); }
 		const s0 = t.start, len = t.end - t.start;
+		let moved = false;
 		box.setPointerCapture(e.pointerId);
 		const moveAt = (ev) => {
+			if (Math.abs(ev.clientX - x0) > 4) moved = true;
+			if (!moved) return;
 			if (target === 'start') t.start = Trim.moveStart(t.start, t.end, msAt(ev.clientX));
 			else if (target === 'end') t.end = Trim.moveEnd(t.start, t.end, msAt(ev.clientX), dur);
-			else { t.start = Trim.moveBoth(s0, s0 + len, Math.round((ev.clientX - x0) / rect.width * sp), dur); t.end = t.start + len; }
+			else if (target === 'head') t.head = msAt(ev.clientX);
+			else { if (player.key === 'trim') player.stop(); t.start = Trim.moveBoth(s0, s0 + len, Math.round((ev.clientX - x0) / rect.width * sp), dur); t.end = t.start + len; }
 			place();
 		};
 		const up = () => {
 			box.removeEventListener('pointermove', moveAt); box.removeEventListener('pointerup', up); box.removeEventListener('pointercancel', up);
-			if (target !== 'both') { settle(target); hear(target); }
+			if (!moved && target === 'both') target = 'head';
+			if ((target === 'start' || target === 'end') && moved) { settle(target); hear(target); }
+			if (target === 'head') placeHead(moved ? t.head : msAt(x0));
 			render();
 		};
 		box.addEventListener('pointermove', moveAt); box.addEventListener('pointerup', up); box.addEventListener('pointercancel', up);
-		place();
 		e.preventDefault();
 	});
+	/* the playhead follows the sound while it plays */
+	live.push([headEl, null, () => { if (player.key === 'trim' && !player.paused) { t.head = player.posMs(); place(); } }]);
 	const edgeTime = (which, label) => h('button.trim-edge' + (t.active === which ? '.active' : ''), { type: 'button', 'aria-pressed': String(t.active === which), onclick: () => { t.active = which; render(); } },
 		h('span.small', label), which === 'start' ? startT : endT);
-	const startT = h('span.trim-time'), endT = h('span.trim-time'), lenT = h('span.trim-len');
-	const nudge = (d) => { if (t.active === 'start') t.start = Trim.moveStart(t.start, t.end, t.start + d); else t.end = Trim.moveEnd(t.start, t.end, t.end + d, dur); hear(t.active); render(); };
 	const edgeS = edgeTime('start', 'Start'), edgeE = edgeTime('end', 'End');
-	const nudgeLabel = h('span.small.grow');
-	const playLabel = h('span', trimPlaying ? 'Stop' : '');
+	const nudge = (d) => { if (t.active === 'start') t.start = Trim.moveStart(t.start, t.end, t.start + d); else t.end = Trim.moveEnd(t.start, t.end, t.end + d, dur); hear(t.active); render(); };
+	const tool = (ic, label, aria, onclick) => h('button.trim-tool', { type: 'button', 'aria-label': aria, onclick }, icon(ic, 22), h('span', label));
+	const round = (ic, aria, onclick, big) => h('button.trim-round' + (big ? '.big' : ''), { type: 'button', 'aria-label': aria, onclick }, icon(ic, big ? 26 : 22));
+	const setStartBtn = tool('setStart', 'Start here', 'Start the clip at the playhead', () => { t.start = Trim.moveStart(t.start, t.end, t.head); t.active = 'start'; render(); });
+	const setEndBtn = tool('setEnd', 'End here', 'End the clip at the playhead', () => { t.end = Trim.moveEnd(t.start, t.end, t.head, dur); t.active = 'end'; render(); });
+	const which = t.active === 'start' ? 'start' : 'end';
 	setTimeout(place, 0);
 	return [
+		h('div.trim-top', h('span.small.grow', 'Showing ' + clipLength(t.to - t.from)),
+			round('zoomOut', 'Zoom out', () => zoom(2)), round('zoomIn', 'Zoom in', () => zoom(0.5))),
 		box,
-		h('div.trim-times', edgeS, lenT, edgeE),
-		h('div.trim-nudge', nudgeLabel,
-			h('button', { type: 'button', 'aria-label': '1 second earlier', onclick: () => nudge(-1000) }, '−1 s'),
-			h('button', { type: 'button', 'aria-label': '1 second later', onclick: () => nudge(1000) }, '+1 s')),
-		h('div.small', 'Drag the ends, or the lit part to move the whole clip' + (env ? '. Each end settles in the nearest pause.' : '.')),
-		h('button.btn.outline', { type: 'button', onclick: () => (trimPlaying ? player.stop() : player.play('trim', r.file, t.start, t.end)) }, icon(trimPlaying ? 'stop' : 'play', 18), playLabel),
+		h('div.trim-times', edgeS, h('div.trim-mid', headT, lenT), edgeE),
+		h('div.trim-transport',
+			round('first', 'Go to the start', () => placeHead(t.start)),
+			round('back5', 'Back 5 seconds', () => placeHead(Math.max(t.from, t.head - 5000))),
+			h('button.trim-round.big.play', { type: 'button', 'aria-label': sounding ? 'Pause' : 'Play from the playhead',
+				onclick: () => (sounding ? player.pause() : trimPlaying ? player.resume() : playFromHead()) }, icon(sounding ? 'pause' : 'play', 26)),
+			round('fwd5', 'Forward 5 seconds', () => placeHead(Math.min(t.to, t.head + 5000))),
+			round('last', 'Go to the end', () => placeHead(Math.max(t.start, t.end - 3000)))),
+		h('div.trim-tools', setStartBtn,
+			tool('back', '−0.5 s', 'Move the ' + which + ' half a second earlier', () => nudge(-500)),
+			tool('chev', '+0.5 s', 'Move the ' + which + ' half a second later', () => nudge(500)),
+			setEndBtn),
+		h('div.small', 'Click to place the playhead. Drag the ends' + (env ? ' (they settle in the nearest pause)' : '') + ', or the lit part to move the whole clip. ‹ › move the ' + which + '.'),
 		h('div.row',
-			h('button.btn.outline.grow', { type: 'button', disabled: t.start === c.startMs && t.end === c.endMs, onclick: () => { view.trim = null; render(); } }, 'Reset'),
+			h('button.btn.outline.grow', { type: 'button', disabled: t.start === c.startMs && t.end === c.endMs, onclick: () => { view.trim = null; render(); } }, icon('restore', 18), 'Reset'),
 			h('button.btn.outline.grow', { type: 'button', onclick: () => { if (trimPlaying) player.stop(); view.trim = null; view.sheetMode = 'clip'; render(); } }, 'Cancel'),
 			h('button.btn.primary.grow', { type: 'button', onclick: () => { player.stop(); c.startMs = t.start; c.endMs = t.end; r.clips.sort((a, b) => a.startMs - b.startMs); view.trim = null; view.sheetMode = 'clip'; saveRecordings(); toast('Clip trimmed to ' + clipLength(t.end - t.start)); render(); } }, 'Save'))];
 }
@@ -2396,7 +2545,7 @@ function recordingSheet() {
 		const c = r && r.clips.find((x) => clipKey(r, x) === key);
 		if (!c) { view.sheet = null; return null; }
 		const mode = view.sheetMode || 'clip';
-		title = mode === 'trim' ? 'Trim clip' : mode === 'note' ? 'Note' : clipName(c, r);
+		title = mode === 'trim' ? 'Edit clip' : mode === 'note' ? 'Note' : clipName(c, r);
 		sub = clipMeta(c, r) + ' · ' + recordingTitle(r);
 		const tile = (label, ic, t, onclick) => h('button.sheet-tile', { type: 'button', style: { background: `var(--${t}-tint)`, color: `var(--${t}-ink)` }, onclick }, icon(ic, 22), label);
 		if (mode === 'trim') {
@@ -2411,7 +2560,7 @@ function recordingSheet() {
 			body = [
 				h('button.btn.primary.big', { type: 'button', onclick: () => { player.play(key, r.file, c.startMs, c.endMs); close(); } }, icon('play', 18), player.key === key ? 'Playing…' : 'Play clip'),
 				h('div.sheet-tiles',
-					tile('Trim', 'tune', 'teal', () => { view.sheetMode = 'trim'; view.trim = null; render(); }),
+					tile('Edit', 'tune', 'teal', () => { view.sheetMode = 'trim'; view.trim = null; render(); }),
 					tile('Note', 'edit', 'amber', () => { view.sheetMode = 'note'; render(); }),
 					tile('Download', 'down', 'purple', () => downloadClipAudio(r, c))),
 				h('button.btn.danger', { type: 'button', onclick: () => {
@@ -2462,6 +2611,7 @@ function recordingSheet() {
 
 /* ---------- settings ---------- */
 function settingsPage() {
+	/* in the order you meet them: connect, listen, clip and play back, keep, run the show, be told, the device itself */
 	const groups = [
 		['Connection', 'ok', [
 			['info', 'pc', 'OBS PC', () => state.pc + ' · ' + location.host],
@@ -2469,13 +2619,21 @@ function settingsPage() {
 		]],
 		['Listening', 'teal', [
 			['switch', 'head', 'Start listening when connected', 'autoListen'],
-			['range', 'mute', 'Lower the mix while playing', 'duckPct', 'A clip or an OBS recording’s AAC plays over the live mix lowered this much. 100% silences it. Clipping and OBS carry on either way.'],
 		]],
-		['Clips', 'rec', [
+		['Clips and playback', 'rec', [
+			['range', 'mute', 'Lower the mix while playing', 'duckPct', 'A clip or an OBS recording’s AAC plays over the live mix lowered this much. 100% silences it. Clipping and OBS carry on either way.'],
 			['switch', 'bookmark', 'Chapter markers in the OBS recording', 'chapters'],
 			['switch', 'file', 'Save the clip list on the PC', 'pcClipLists'],
 			['choice', 'export', 'Export as', 'exportFormat', Exporter.formats.map((f) => [f.id, f.label])],
 			['switch', 'keyboard', 'Space starts and ends a clip', 'spaceForClip'],
+		]],
+		['Storage in this browser', 'purple', [
+			['switch', 'mic', 'Save the session audio, to play clips back', 'saveAudio'],
+			['choice', 'calendar', 'Keep it for', 'keepDays', [[7, '7 days'], [30, '30 days'], [0, 'Forever']]],
+		]],
+		['Recording and stream', 'amber', [
+			['choice', 'timer', 'Hold to stop recording', 'holdMs', [[500, '0.5 s'], [1000, '1 s'], [2000, '2 s']]],
+			['switch', 'power', 'Allow ending the stream', 'allowStreamStop'],
 		]],
 		['Alerts', 'orange', [
 			['choice', 'mute', 'Mix goes silent for', 'silenceSeconds', [[0, 'Off'], [10, '10 s'], [20, '20 s'], [30, '30 s']]],
@@ -2484,13 +2642,7 @@ function settingsPage() {
 			['choice', 'disk', 'Disk space below', 'diskHours', [[1, '1 h'], [2, '2 h'], [4, '4 h']]],
 			['choice', 'chart', 'Dropped frames over', 'dropsPerMinute', [[50, '50 a minute'], [100, '100 a minute'], [500, '500 a minute']]],
 		]],
-		['Audio in this browser', 'purple', [
-			['switch', 'mic', 'Save the session audio, to play clips back', 'saveAudio'],
-			['choice', 'calendar', 'Keep it for', 'keepDays', [[7, '7 days'], [30, '30 days'], [0, 'Forever']]],
-		]],
-		['Controls', 'amber', [
-			['choice', 'timer', 'Hold to stop recording', 'holdMs', [[500, '0.5 s'], [1000, '1 s'], [2000, '2 s']]],
-			['switch', 'power', 'Allow ending the stream', 'allowStreamStop'],
+		['This device', 'blue', [
 			['choice', 'tap', 'Touch sound', 'touchSound', [[0, 'Off'], [25, '25%'], [50, '50%'], [75, '75%'], [100, '100%']]],
 			['choice', 'vibrate', 'Vibration (phones only)', 'haptics', [[0, 'Off'], [1, 'Light'], [2, 'Medium'], [3, 'Strong']]],
 		]],
@@ -2509,9 +2661,9 @@ function settingsPage() {
 			return h('label.setting', base, tile, h('span.grow', label), sel);
 		}
 		if (kind === 'range') {
-			const val = h('span.value', { style: { color: `var(--${t}-ink)` } }, settings[key] ? settings[key] + '%' : 'Off');
-			const r = h('input', { type: 'range', min: 0, max: 100, step: 5, value: settings[key], 'aria-label': label, 'aria-valuetext': settings[key] + ' percent' });
-			r.addEventListener('input', () => { settings[key] = Number(r.value); val.textContent = settings[key] ? settings[key] + '%' : 'Off'; r.setAttribute('aria-valuetext', settings[key] + ' percent'); });
+			const val = h('span.value', { style: { color: `var(--${t}-ink)` } }, settings[key] + '%');
+			const r = h('input', { type: 'range', min: 50, max: 100, step: 5, value: settings[key], 'aria-label': label, 'aria-valuetext': settings[key] + ' percent' });
+			r.addEventListener('input', () => { settings[key] = Number(r.value); val.textContent = settings[key] + '%'; r.setAttribute('aria-valuetext', settings[key] + ' percent'); });
 			r.addEventListener('change', saveSettings);
 			return h('div.setting.with-range', base, h('div.row', tile, h('span.grow', label), val), r, h('div.small', options));
 		}
@@ -2619,7 +2771,37 @@ for (const ev of ['click', 'keydown']) {
 		setTimeout(() => { if (settings.autoListen && state.link === 'connected' && !state.listening) audio.start(); }, 0);
 	}, { capture: true });
 }
-window.addEventListener('beforeunload', () => { audio.endSegment(); });
+/* Closing the page (or the phone putting it away): a running clip ends and is saved. */
+function onLeave() {
+	endClipIfRunning(', ended when the page closed');
+	audio.endSegment();
+	store.set('recordings', recordings);
+}
+window.addEventListener('pagehide', onLeave);
+window.addEventListener('beforeunload', onLeave);
+
+/**
+ * A clip was running when the page last closed without ending it (a crash, a closed tab on a phone
+ * that never said so, power): it is saved now, ending where the saved sound of its session ends.
+ */
+async function recoverClip() {
+	const rc = store.get('runningClip', null);
+	if (!rc) return;
+	store.set('runningClip', null);
+	const r = recordings.find((x) => x.file === rc.file);
+	if (!r || r.clips.some((c) => c.startMs === rc.startMs)) return;
+	let end = r.durationMs || 0;
+	try { for (const sg of await idb.forFile(r.file)) end = Math.max(end, sg.startMs + (sg.durMs || 0)); } catch { /* no saved audio */ }
+	end = Math.max(rc.startMs + 1000, end);
+	const c = { id: newId(), startMs: rc.startMs, endMs: Math.round(end), note: '', createdAt: Date.now(), name: rc.name, number: rc.number, recovered: true };
+	r.clips.push(c);
+	r.clips.sort((a, b) => a.startMs - b.startMs);
+	r.durationMs = Math.max(r.durationMs || 0, Math.round(end));
+	state.lastSaved = fullName(c) + ' saved after the page closed, ' + len(end - rc.startMs);
+	saveRecordings();
+	toast(fullName(c) + ' was running when the page closed. It’s saved in Recordings.');
+}
+recoverClip();
 
 idb.prune(settings.keepDays);
 render();

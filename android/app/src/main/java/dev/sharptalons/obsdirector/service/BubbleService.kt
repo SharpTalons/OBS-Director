@@ -41,8 +41,8 @@ import kotlin.math.hypot
  * A floating bubble over other apps while connected, the way chat bubbles work: tap it to open
  * OBS Director; drag it anywhere and it settles against the nearest side; drag it onto the ✕
  * that appears at the bottom to put it away (it comes back the next time you leave the app).
- * It is the app's own icon. A small badge on its corner says OBS is recording (red) or paused
- * (amber); a red ring round it says a clip is running.
+ * It is the app's own icon. While a clip is recording, a red ring goes round it and a red record
+ * badge sits on its corner; OBS recording on its own shows nothing.
  */
 class BubbleService : Service() {
 
@@ -139,17 +139,13 @@ class BubbleService : Service() {
     private fun refresh() {
         val s = Director.status.value
         val clip = Director.clipStart.value != null
-        // a badge on the corner: red while OBS records, amber while paused
-        badge.visibility = if (s.recActive) View.VISIBLE else View.GONE
-        badge.background = oval(if (s.recPaused) T.warning.toArgb() else T.negative.toArgb(), T.ground.toArgb(), 2)
+        // the record badge on the corner: only while a clip is recording
+        badge.visibility = if (clip) View.VISIBLE else View.GONE
+        badge.background = oval(T.negative.toArgb(), T.ground.toArgb(), 2)
         // a red ring while a clip runs; otherwise a fine edge so it shows on dark screens too
         face.foreground = oval(0, if (clip) T.negative.toArgb() else T.control.toArgb(), if (clip) 3 else 1)
-        bubble.contentDescription = "OBS Director, " + when {
-            !s.recActive -> "not recording"
-            s.recPaused -> "recording paused"
-            clip -> "recording, clip running"
-            else -> "recording"
-        } + ". Tap to open the app."
+        bubble.contentDescription = "OBS Director, " + (if (clip) "recording a clip" else "connected") +
+            (if (s.recActive) if (s.recPaused) ", OBS recording paused" else ", OBS recording" else "") + ". Tap to open the app."
     }
 
     private fun screenWidth(): Int = if (Build.VERSION.SDK_INT >= 30) wm.currentWindowMetrics.bounds.width() else resources.displayMetrics.widthPixels

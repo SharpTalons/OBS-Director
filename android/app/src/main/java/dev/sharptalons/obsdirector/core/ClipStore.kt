@@ -37,6 +37,14 @@ object ClipStore {
 
     fun newId(): String = UUID.randomUUID().toString().take(8)
 
+    /** A new session, which becomes the live one. */
+    @Synchronized
+    fun startSession(id: String): Recording {
+        val rec = Recording(file = id, startedAt = System.currentTimeMillis(), live = true, session = true)
+        save(listOf(rec) + state.value.map { it.copy(live = false) })
+        return rec
+    }
+
     /** The recording for [fileName], created if this is the first we hear of it. */
     @Synchronized
     fun ensure(fileName: String, live: Boolean): Recording {
@@ -72,7 +80,7 @@ object ClipStore {
     @Synchronized
     fun removeRecording(fileName: String) {
         val list = state.value
-        list.firstOrNull { it.file == fileName }?.audioFile?.let { File(sessionsDir, it).delete() }
+        list.firstOrNull { it.file == fileName }?.let { deleteAudio(it) }
         save(list.filterNot { it.file == fileName })
     }
 
@@ -84,12 +92,17 @@ object ClipStore {
     fun clearAll(): Int {
         val list = state.value
         val (live, done) = list.partition { it.live }
-        done.forEach { r -> r.audioFile?.let { File(sessionsDir, it).delete() } }
+        done.forEach { deleteAudio(it) }
         save(live.map { it.copy(clips = emptyList()) })
         return done.size
     }
 
-    fun audioFileFor(rec: Recording): File? = rec.audioFile?.let { File(sessionsDir, it) }?.takeIf { it.exists() }
+    private fun deleteAudio(r: Recording) = r.audioSegments().forEach { File(sessionsDir, it.name).delete() }
+
+    /** The saved audio of [rec] that overlaps [fromMs]..[toMs], as files and where each starts. */
+    fun audioFor(rec: Recording, fromMs: Long, toMs: Long, segments: List<AudioSeg> = rec.audioSegments()): List<Pair<File, Long>> =
+        segments.filter { it.endMs > fromMs && it.startMs < toMs }.sortedBy { it.startMs }
+            .map { File(sessionsDir, it.name) to it.startMs }.filter { it.first.exists() }
 
     /** Session audio older than the chosen number of days is deleted; clips and notes stay. */
     fun pruneOldAudio(days: Int) {
@@ -98,10 +111,10 @@ object ClipStore {
         val list = state.value
         var changed = false
         val out = list.map { r ->
-            if (!r.live && r.startedAt < cutoff && r.audioFile != null) {
-                File(sessionsDir, r.audioFile).delete()
+            if (!r.live && r.startedAt < cutoff && r.audioSegments().isNotEmpty()) {
+                deleteAudio(r)
                 changed = true
-                r.copy(audioFile = null)
+                r.copy(audioFile = null, segments = emptyList())
             } else r
         }
         if (changed) save(out)

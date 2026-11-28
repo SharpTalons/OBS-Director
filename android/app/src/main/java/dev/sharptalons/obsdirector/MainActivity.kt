@@ -72,8 +72,8 @@ class MainActivity : ComponentActivity() {
             MainIntents.ACTION_CLIP -> {
                 MainIntents.startScreen = "monitor"
                 if (Director.clipStart.value == null) {
-                    if (Director.status.value.recActive && Director.link.value == LinkState.CONNECTED) Director.startClip()
-                    else Director.toast("Clips start while OBS is recording and this phone is connected")
+                    if (Director.link.value == LinkState.CONNECTED && Director.sessionId != null) Director.startClip()
+                    else Director.toast("Clips start once this phone is connected to OBS")
                 }
             }
         }

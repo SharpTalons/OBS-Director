@@ -32,6 +32,7 @@ class DeskDock;
 class QMessageBox;
 class UdpAudio;
 class VideoPreview;
+class AacExport;
 
 /*
  * The plugin's side of OBS Director (see docs/PROTOCOL.md):
@@ -183,6 +184,17 @@ private:
 	 * write next to one of these. */
 	QHash<QString, QString> recordedFiles;
 	void rememberRecording(const QString &path);
+	/* the name OBS would give a recording started now, without its extension */
+	QString nextRecordingName() const;
+
+	/* Save as AAC: OBS's FFmpeg takes a finished recording's sound out into <name>.m4a next to
+	 * it, then the phone or browser fetches it from GET /aac/<token> on the web port. */
+	AacExport *aac = nullptr;
+	QHash<QString, QString> aacTokens; /* token -> the .m4a's full path */
+	QHash<QString, QString> aacByFile; /* recording file name -> token */
+	QString aacToken(const QString &file, const QString &path);
+	QJsonObject aacReady(const QString &file, const QString &path);
+	void serveAac(QTcpSocket *sock, const QByteArray &token);
 
 	/* the desk chat: everyone connected sees every message (kept for this OBS session) */
 	struct ChatMessage {

@@ -29,6 +29,26 @@ set_target_properties(
 
 target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE ws2_32)
 
+# Save as AAC uses the FFmpeg that OBS ships (from obs-deps). It is loaded on first use
+# (delay-loaded), so OBS still loads the plugin if its FFmpeg is a different version.
+find_path(FFMPEG_INCLUDE_DIR NAMES libavcodec/avcodec.h REQUIRED)
+set(_ffmpeg_dlls)
+foreach(_lib IN ITEMS avutil avcodec avformat swresample)
+  find_library(FFMPEG_${_lib}_LIBRARY NAMES ${_lib} REQUIRED)
+  target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE "${FFMPEG_${_lib}_LIBRARY}")
+  string(TOUPPER "${_lib}" _upper)
+  set(_header "${FFMPEG_INCLUDE_DIR}/lib${_lib}/version_major.h")
+  if(NOT EXISTS "${_header}")
+    set(_header "${FFMPEG_INCLUDE_DIR}/lib${_lib}/version.h")
+  endif()
+  file(STRINGS "${_header}" _major REGEX "#define LIB${_upper}_VERSION_MAJOR[ \t]+[0-9]+")
+  string(REGEX REPLACE ".*VERSION_MAJOR[ \t]+([0-9]+).*" "\\1" _major "${_major}")
+  message(STATUS "OBS Director: FFmpeg ${_lib}-${_major}")
+  target_link_options(${CMAKE_PROJECT_NAME} PRIVATE "/DELAYLOAD:${_lib}-${_major}.dll")
+endforeach()
+target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE "${FFMPEG_INCLUDE_DIR}")
+target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE delayimp)
+
 target_sources(
   ${CMAKE_PROJECT_NAME}
   PRIVATE
@@ -44,6 +64,8 @@ target_sources(
     src/web-server.cpp
     src/update-check.cpp
     src/update-check.hpp
+    src/aac-export.cpp
+    src/aac-export.hpp
     src/web/web.qrc
 )
 

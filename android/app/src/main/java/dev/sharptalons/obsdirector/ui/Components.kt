@@ -49,6 +49,8 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
@@ -217,3 +219,54 @@ fun Banner(kind: PillKind, icon: ImageVector, title: String, body: String, onDis
     }
 }
 
+
+/**
+ * A round 48 dp icon button that acts only when held for [holdMs]: the button fills with [fill] as
+ * you hold, and letting go early does nothing. With a screen reader, a double tap acts.
+ */
+@Composable
+fun HoldIconButton(icon: ImageVector, label: String, holdMs: Int, fill: Color, enabled: Boolean = true, onDone: () -> Unit) {
+    val progress = remember { Animatable(0f) }
+    val scope = rememberCoroutineScope()
+    Box(
+        Modifier.size(48.dp).clip(CircleShape).background(T.raised)
+            .drawBehind { if (progress.value > 0f) drawArc(fill, -90f, 360f * progress.value, useCenter = true) }
+            .semantics {
+                contentDescription = label
+                role = Role.Button
+                if (enabled) onClick(label) { onDone(); true }
+            }
+            .pointerInput(enabled, holdMs) {
+                if (!enabled) return@pointerInput
+                awaitEachGesture {
+                    awaitFirstDown()
+                    val job = scope.launch {
+                        progress.snapTo(0f)
+                        progress.animateTo(1f, tween(holdMs, easing = LinearEasing))
+                        dev.sharptalons.obsdirector.core.Feedback.tap()
+                        onDone()
+                        progress.snapTo(0f)
+                    }
+                    waitForUpOrCancellation()
+                    if (progress.value < 1f) job.cancel()
+                    scope.launch { progress.animateTo(0f, tween(150)) }
+                }
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(icon, null, tint = if (!enabled) T.muted else if (progress.value > 0.5f) Color.White else T.text, modifier = Modifier.size(22.dp))
+    }
+}
+
+/** A round 48 dp icon button that acts on a tap; [filled] puts the icon on a light circle. */
+@Composable
+fun TapIconButton(icon: ImageVector, label: String, tint: Color, filled: Boolean = false, enabled: Boolean = true, onClick: () -> Unit) {
+    Box(
+        Modifier.size(48.dp).clip(CircleShape).background(if (filled) T.text else T.raised)
+            .clickable(enabled = enabled, role = Role.Button, onClickLabel = label, onClick = onClick)
+            .semantics { contentDescription = label },
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(icon, null, tint = if (!enabled) T.muted else tint, modifier = Modifier.size(22.dp))
+    }
+}

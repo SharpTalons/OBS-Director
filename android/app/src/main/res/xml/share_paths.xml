@@ -2,4 +2,5 @@
 <!-- Clip audio cut for sharing (Clips, Share audio). -->
 <paths>
     <files-path name="exports" path="exports/" />
+    <files-path name="aac" path="aac/" />
 </paths>

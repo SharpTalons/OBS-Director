@@ -102,19 +102,19 @@ The app is dark only. It's used in dim rooms beside a stage.
 
 ## Recordings
 
-One screen, clips first, the same in the app and the browser version.
+Two tabs, the same in the app and the browser version: **Clips** (made on the phone or browser) and **OBS recordings** (kept on the PC). They are kept apart on purpose.
 
-- **A card per recording**, with its clips inside. The recording OBS is making comes first, then the newest. That one and the two newest others start open; the rest fold. Tapping a heading opens or folds it; ⋯ opens Export and Delete.
-- **A clip row** is its Play button (48, round), its note with "length · at start time" under it (or, without a note, "Clip at 00:52:00" with "No note · length"), and ⋯. The row turns blue while it plays.
+- **Clips:** every clip, newest first, under a day heading, in one surface card per day. A clip's name is its OBS recording's name (or the one OBS would give), "clip N", and its note: "2026-11-28 19-02-11 clip 2 – Choir intro", up to two lines. Under it the length and start time, and a small tag: "OBS recording now" (rec), "In the OBS recording" (ok) or "Not recorded in OBS" (neutral).
+- **OBS recordings:** a card each, the one OBS is making first with a REC pill. Its time and length, its file name, its clip count, and its AAC: a blue Save as AAC button once it has stopped; while saving, a progress bar on the sunken fill (getting it ready on the PC fills the first fifth, copying the rest) with Cancel; once saved, a Play row. ⋯ opens its clip list export and Share or Download and Delete for the AAC.
+- **Monitor:** a compact OBS recording row (pill, 22 sp time, file or next name, 48 round icon buttons: Pause and Stop fill as they're held, Resume and Start act on a tap; Start is a red dot on white). Clipping sits in the Monitoring card under the listening controls, after a rule: the Clip button (its hint is the next clip's name), the status line, and the two latest clips with Play.
+- **A clip row** is its Play button (48, round), its name, "length · start time" and its tag, and ⋯. The row turns blue while it plays. A clip from before names goes by its note, or "Clip at 00:52:00".
 - **One sheet** for a clip: Play, then three tiles (Trim in teal, Note in amber, Share or Download in purple), then Delete clip. Trim is a trimmer like a phone's video trimmer (rules in `audio/Trim.kt`, and `Trim` in the browser): an 84-high waveform of the clip with 15 s either side, the kept part on the teal tint with its bars in teal ink, and a handle at each end (2 wide line, 12×32 grip with two ridges; white for the end ±1 s moves). Drag an end or the lit part; tap elsewhere to bring the nearer end there. Letting go settles the end in the quietest 100 ms within 0.5 s if it is under 60% of the level where it was let go, and plays 2 s at that edge. Below: Start, the length, End (the selected end underlined in blue), ±1 s, Play, then Reset, Cancel and Save. The minimum clip is 1 s.
-- **At the bottom**, floating so the list never moves: Undo after a delete (6 s), then a small player with the clip's name, its progress and Stop.
-- **Recordings without clips** fold into one line at the end.
+- **At the bottom**, floating so the list never moves: Undo after a delete (6 s), then a small player with the clip's (or the AAC's) name, its progress, how much the live mix is lowered, and Stop.
 
 ## Floating bubble
 
 - **The app icon**, 56 dp, cut to a circle: the launcher icon's foreground on its own `#121214` background, with a 1 dp `#2A2A30` edge.
-- **Badge:** 16 dp on its top right corner, red while OBS records, amber while paused, gone otherwise, with a 2 dp ground-coloured edge.
-- **Clip running:** a 3 dp red ring round it.
+- **Clip recording:** a 3 dp red ring round it and a 16 dp red record badge on its top right corner, with a 2 dp ground-coloured edge. Nothing else shows it: OBS recording on its own leaves the icon plain.
 
 ## Touch sound
 

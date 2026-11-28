@@ -42,6 +42,7 @@ object Protocol {
             renderLag = pc.num("renderLag").toLong(),
             encodeLag = pc.num("encodeLag").toLong(),
             scene = o.str("scene"),
+            nextName = rec.str("nextName"),
             receivedAt = receivedAt,
         )
     }

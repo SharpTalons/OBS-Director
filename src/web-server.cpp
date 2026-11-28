@@ -209,20 +209,20 @@ void DirectorServer::onHttpReadyRead(QTcpSocket *sock)
 			return respond(sock, 400, "text/plain", "WebSocket only\n");
 		return upgradeToWebSocket(sock, headers.value("sec-websocket-key"), rest);
 	}
-	if (path.startsWith("/mp3/"))
-		return serveMp3(sock, path.mid(5));
+	if (path.startsWith("/aac/"))
+		return serveAac(sock, path.mid(5));
 	serveFile(sock, path, host);
 }
 
-void DirectorServer::serveMp3(QTcpSocket *sock, const QByteArray &token)
+void DirectorServer::serveAac(QTcpSocket *sock, const QByteArray &token)
 {
-	/* An MP3 made by Save as MP3, for whoever has its token (given only to paired devices).
+	/* A recording's sound made by Save as AAC, for whoever has its token (given only to paired devices).
 	 * Sent in pieces as the connection takes them, so a long recording isn't read into memory. */
-	const QString path = mp3Tokens.value(QString::fromLatin1(token));
+	const QString path = aacTokens.value(QString::fromLatin1(token));
 	auto *file = new QFile(path, sock);
 	if (path.isEmpty() || !file->open(QIODevice::ReadOnly))
 		return respond(sock, 404, "text/plain", "Not found\n");
-	QByteArray head = "HTTP/1.1 200 OK\r\nContent-Type: audio/mpeg\r\nContent-Length: " +
+	QByteArray head = "HTTP/1.1 200 OK\r\nContent-Type: audio/mp4\r\nContent-Length: " +
 			  QByteArray::number(file->size()) +
 			  "\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\n"
 			  "Content-Disposition: attachment; filename=\"" +

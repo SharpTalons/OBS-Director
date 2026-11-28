@@ -29,7 +29,7 @@ set_target_properties(
 
 target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE ws2_32)
 
-# Save as MP3 uses the FFmpeg that OBS ships (from obs-deps, with LAME). It is loaded on first use
+# Save as AAC uses the FFmpeg that OBS ships (from obs-deps). It is loaded on first use
 # (delay-loaded), so OBS still loads the plugin if its FFmpeg is a different version.
 find_path(FFMPEG_INCLUDE_DIR NAMES libavcodec/avcodec.h REQUIRED)
 set(_ffmpeg_dlls)
@@ -64,8 +64,8 @@ target_sources(
     src/web-server.cpp
     src/update-check.cpp
     src/update-check.hpp
-    src/mp3-export.cpp
-    src/mp3-export.hpp
+    src/aac-export.cpp
+    src/aac-export.hpp
     src/web/web.qrc
 )
 

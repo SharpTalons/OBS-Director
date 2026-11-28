@@ -13,7 +13,7 @@ the Free Software Foundation; either version 2 of the License, or
 #include "desk-dock.hpp"
 #include "udp-audio.hpp"
 #include "video-preview.hpp"
-#include "mp3-export.hpp"
+#include "aac-export.hpp"
 
 #include <obs-module.h>
 #include <obs.h>
@@ -109,16 +109,16 @@ DirectorServer::DirectorServer(DeskDock *d, QObject *parent)
 {
 	loadConfig();
 
-	mp3 = new Mp3Export(this);
-	connect(mp3, &Mp3Export::progress, this, [this](const QString &file, int pct) {
-		event("mp3.progress", QJsonObject{{"file", file}, {"percent", pct}});
+	aac = new AacExport(this);
+	connect(aac, &AacExport::progress, this, [this](const QString &file, int pct) {
+		event("aac.progress", QJsonObject{{"file", file}, {"percent", pct}});
 	});
-	connect(mp3, &Mp3Export::finished, this, [this](const QString &file, bool ok, const QString &error) {
+	connect(aac, &AacExport::finished, this, [this](const QString &file, bool ok, const QString &error) {
 		if (ok && recordedFiles.contains(file)) {
 			QFileInfo rec(recordedFiles.value(file));
-			event("mp3.ready", mp3Ready(file, rec.absolutePath() + "/" + rec.completeBaseName() + ".mp3"));
+			event("aac.ready", aacReady(file, rec.absolutePath() + "/" + rec.completeBaseName() + ".m4a"));
 		} else {
-			event("mp3.failed", QJsonObject{{"file", file}, {"error", ok ? QStringLiteral("unknown_recording") : error}});
+			event("aac.failed", QJsonObject{{"file", file}, {"error", ok ? QStringLiteral("unknown_recording") : error}});
 		}
 	});
 
@@ -832,16 +832,16 @@ void DirectorServer::handleCommand(Client &c, int id, const QString &cmd, const 
 		bool ok = obs_frontend_recording_add_chapter(name.isEmpty() ? nullptr : name.toUtf8().constData());
 		return result(c, id, ok, {}, ok ? QString() : QStringLiteral("chapters_unsupported"));
 	}
-	if (cmd == "recording.mp3" || cmd == "recording.mp3.cancel") {
-		/* The sound of a finished recording as MP3, made on this PC with OBS's own FFmpeg.
-		 * The result says "converting" (then mp3.progress and mp3.ready or mp3.failed follow,
+	if (cmd == "recording.aac" || cmd == "recording.aac.cancel") {
+		/* The sound of a finished recording as AAC (.m4a), taken out on this PC with OBS's own FFmpeg.
+		 * The result says "converting" (then aac.progress and aac.ready or aac.failed follow,
 		 * to everyone) or "ready" with the token to fetch it by. */
 		QString file = args.value("file").toString();
 		if (file.isEmpty() || file != QFileInfo(file).fileName() || !recordedFiles.contains(file))
 			return result(c, id, false, {}, "unknown_recording");
-		if (cmd == "recording.mp3.cancel") {
-			if (mp3->busy() && mp3->file() == file)
-				mp3->cancel();
+		if (cmd == "recording.aac.cancel") {
+			if (aac->busy() && aac->file() == file)
+				aac->cancel();
 			return result(c, id, true);
 		}
 		if (obs_frontend_recording_active() && QFileInfo(lastFile).fileName() == file)
@@ -849,19 +849,19 @@ void DirectorServer::handleCommand(Client &c, int id, const QString &cmd, const 
 		QFileInfo rec(recordedFiles.value(file));
 		if (!rec.exists())
 			return result(c, id, false, {}, "recording_missing");
-		const QString out = rec.absolutePath() + "/" + rec.completeBaseName() + ".mp3";
+		const QString out = rec.absolutePath() + "/" + rec.completeBaseName() + ".m4a";
 		QFileInfo made(out);
 		if (made.exists() && made.size() > 0 && made.lastModified() >= rec.lastModified()) {
-			QJsonObject d = mp3Ready(file, out);
+			QJsonObject d = aacReady(file, out);
 			d["state"] = "ready";
 			return result(c, id, true, d);
 		}
-		if (mp3->busy())
-			return mp3->file() == file ? result(c, id, true, QJsonObject{{"state", "converting"}})
+		if (aac->busy())
+			return aac->file() == file ? result(c, id, true, QJsonObject{{"state", "converting"}})
 						   : result(c, id, false, {}, "busy");
-		if (!Mp3Export::available())
-			return result(c, id, false, {}, "mp3_unavailable");
-		if (!mp3->start(file, rec.absoluteFilePath(), out))
+		if (!AacExport::available())
+			return result(c, id, false, {}, "aac_unavailable");
+		if (!aac->start(file, rec.absoluteFilePath(), out))
 			return result(c, id, false, {}, "busy");
 		return result(c, id, true, QJsonObject{{"state", "converting"}});
 	}
@@ -962,23 +962,23 @@ void DirectorServer::postChat(const ChatMessage &m)
 	dock->addMessage(m.id, m.from, m.text, m.at, m.fromDevice.isEmpty());
 }
 
-QString DirectorServer::mp3Token(const QString &file, const QString &path)
+QString DirectorServer::aacToken(const QString &file, const QString &path)
 {
-	QString token = mp3ByFile.value(file);
+	QString token = aacByFile.value(file);
 	if (token.isEmpty()) {
 		token = QString::number(QRandomGenerator::global()->generate64(), 16) +
 			QString::number(QRandomGenerator::global()->generate64(), 16);
-		mp3ByFile.insert(file, token);
+		aacByFile.insert(file, token);
 	}
-	mp3Tokens.insert(token, path);
+	aacTokens.insert(token, path);
 	return token;
 }
 
-QJsonObject DirectorServer::mp3Ready(const QString &file, const QString &path)
+QJsonObject DirectorServer::aacReady(const QString &file, const QString &path)
 {
 	QJsonObject d;
 	d["file"] = file;
-	d["token"] = mp3Token(file, path);
+	d["token"] = aacToken(file, path);
 	d["port"] = int(kWebPort);
 	d["bytes"] = double(QFileInfo(path).size());
 	d["name"] = QFileInfo(path).fileName();

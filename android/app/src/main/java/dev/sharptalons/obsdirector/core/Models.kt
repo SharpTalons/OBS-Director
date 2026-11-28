@@ -16,6 +16,8 @@ data class Clip(
     val name: String = "",
     /** its number among the clips with that [name]: 1, 2, 3… */
     val number: Int = 0,
+    /** saved after the app closed while the clip ran: it ends where the saved sound ends */
+    val recovered: Boolean = false,
 ) {
     val lengthMs: Long get() = endMs - startMs
 

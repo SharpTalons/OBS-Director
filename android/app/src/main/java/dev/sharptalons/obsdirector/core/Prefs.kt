@@ -84,7 +84,7 @@ object Prefs {
             volumePct = if (sp.contains("volumePct")) sp.getInt("volumePct", d.volumePct)
                 else if (sp.contains("volume")) dev.sharptalons.obsdirector.audio.Loudness.fromGain(sp.getFloat("volume", 1f)) else d.volumePct,
             saveAudio = sp.getBoolean("saveAudio", d.saveAudio),
-            duckPct = sp.getInt("duckPct", d.duckPct),
+            duckPct = sp.getInt("duckPct", d.duckPct).coerceIn(50, 100),
             keepDays = sp.getInt("keepDays", d.keepDays),
             leadMinutes = sp.getInt("leadMinutes", d.leadMinutes),
             padSeconds = sp.getInt("padSeconds", d.padSeconds),

@@ -5,6 +5,25 @@ All notable changes to OBS Director (plugin and Android app). The project follow
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-11-28
+
+### Clips
+- **A clip survives the app closing.** The phone now saves the mix as it comes in (raw AAC, readable up to the last moment), and notes a running clip as it starts. If the app is closed, killed, or the phone switches off in the middle of a clip, the clip is saved the next time the app opens, ending where the saved sound ends, and marked "saved after the app closed". Swiping the app away from recent apps ends and saves the clip at once. The browser does the same: it saves the sound every second and saves a running clip when the page closes, or on the next visit if it couldn't.
+- **The clip editor** (Edit, which was Trim) has a playhead: tap to place it, drag along the time strip to scrub, and play from it; the sound follows while it plays. Zoom in and out, skip 5 s, go to either end, set the start or end at the playhead, and nudge the chosen end by half a second. Icons throughout.
+- **Seek and pause** in the player: a bar to move through the clip or AAC file, and Pause. The live mix goes back up while paused.
+
+### Listening
+- **Lower the mix while playing** now runs from 50% to 100%.
+- **The volume slider** clicks into place at 50% (the mix as set in OBS) with a vibration.
+- **The meter** is numbered every 10 dB (−60, −50, −40 … 0) with a tick every 5 dB.
+
+### Settings
+- **Grouped in the order you use them:** Connection, Listening, Clips and playback, Storage, Recording and stream, Alerts, This phone.
+- **Long values** (like the Bluetooth headphones you play through) go under the setting's name instead of squeezing it into a column of letters.
+
+### Browser
+- A long line (like a saved clip's name) no longer widens the page on a phone.
+
 ## [0.9.0] - 2026-11-28
 
 OBS recordings and clips are now two separate things, and neither gets in the other's way.
@@ -352,7 +371,8 @@ First release of the plugin and the Android app.
 - The browser version (WebRTC and WebSocket modes) is not built yet; the app uses Direct UDP.
 - Audio missing from the phone's copy during a Wi-Fi drop is not yet refilled from the PC.
 
-[Unreleased]: https://github.com/SharpTalons/OBS-Director/compare/v0.6.2...HEAD
+[Unreleased]: https://github.com/SharpTalons/OBS-Director/compare/v0.9.1...HEAD
+[0.9.1]: https://github.com/SharpTalons/OBS-Director/compare/v0.9.0...v0.9.1
 [0.6.1]: https://github.com/SharpTalons/OBS-Director/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/SharpTalons/OBS-Director/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/SharpTalons/OBS-Director/compare/v0.5.0...v0.5.1

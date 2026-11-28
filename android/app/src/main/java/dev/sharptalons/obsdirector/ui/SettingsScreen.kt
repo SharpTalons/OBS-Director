@@ -110,51 +110,47 @@ fun SettingsScreen(onConnect: () -> Unit) {
         onPauseOrDispose { }
     }
 
+    // In the order you meet them: connect, listen, clip and play back, keep, run the show, be told, the phone itself.
     val groups = listOf(
+        Group("Connection", Tints.ok, listOf(
+            Row.Action(Icons.Outlined.DesktopWindows, "OBS PC",
+                if (link == LinkState.DISCONNECTED) "Find PCs" else pc?.name ?: pc?.ip ?: "OBS PC", onConnect),
+            Row.Action(Icons.Outlined.PhoneAndroid, "This phone in OBS", s.deviceName) { renaming = true },
+        )),
         Group("Listening", Tints.teal, listOf(
             Row.Action(Icons.Outlined.Headphones, "Play through", playThrough) { choosingOutput = true },
-            Row.Action(Icons.AutoMirrored.Outlined.VolumeUp, "Play a test sound", "Play") { dev.sharptalons.obsdirector.audio.TestSound.play(Director.router) },
-            Row.Switch(Icons.Outlined.PlayArrow, "Start listening when connected", s.autoListen) { x, v -> x.copy(autoListen = v) },
-            // turns the live mix down while a clip or an OBS recording's AAC plays, so it can be heard over it
-            Row.Slider(Icons.Outlined.VolumeDown, "Lower the mix while playing", s.duckPct) { x, v -> x.copy(duckPct = v) },
             // Bluetooth always keeps at least 160 ms queued to play smoothly; say so beside the choice
             Row.Choice(Icons.Outlined.Schedule, "Delay",
                 (if (s.bufferMs == 0) "Auto" else "${s.bufferMs} ms") + (if (onBluetooth && s.bufferMs < dev.sharptalons.obsdirector.audio.AudioEngine.BT_CUSHION_MS) " · 160 ms on Bluetooth" else ""),
                 listOf("Auto", "20 ms", "40 ms", "80 ms", "160 ms")) { x, v ->
                 x.copy(bufferMs = if (v == "Auto") 0 else v.removeSuffix(" ms").toInt())
             },
+            Row.Switch(Icons.Outlined.PlayArrow, "Start listening when connected", s.autoListen) { x, v -> x.copy(autoListen = v) },
+            Row.Action(Icons.AutoMirrored.Outlined.VolumeUp, "Play a test sound", "Play") { dev.sharptalons.obsdirector.audio.TestSound.play(Director.router) },
         )),
-        Group("Connection", Tints.ok, listOf(
-            Row.Action(Icons.Outlined.DesktopWindows, "OBS PC",
-                if (link == LinkState.DISCONNECTED) "Find PCs" else pc?.name ?: pc?.ip ?: "OBS PC", onConnect),
-            Row.Action(Icons.Outlined.PhoneAndroid, "This phone in OBS", s.deviceName) { renaming = true },
-        )),
-        Group("Controls", Tints.amber, listOf(
-            Row.Choice(Icons.Outlined.Timer, "Hold to stop recording", if (s.holdMs == 500) "0.5 s" else "${s.holdMs / 1000} s", listOf("0.5 s", "1 s", "2 s")) { x, v ->
-                x.copy(holdMs = (secs(v) * 1000).toInt())
-            },
-            Row.Switch(Icons.Outlined.PowerSettingsNew, "Allow ending the stream", s.allowStreamStop) { x, v -> x.copy(allowStreamStop = v) },
-            Row.Switch(Icons.Outlined.LightMode, "Keep the screen on", s.keepScreenOn) { x, v -> x.copy(keepScreenOn = v) },
-            Row.Choice(Icons.Outlined.TouchApp, "Touch sound", if (s.touchSound == 0) "Off" else "${s.touchSound}%", listOf("Off", "25%", "50%", "75%", "100%")) { x, v ->
-                x.copy(touchSound = if (v == "Off") 0 else v.removeSuffix("%").toInt())
-            },
-            Row.Choice(Icons.Outlined.Vibration, "Vibration", listOf("Off", "Light", "Medium", "Strong")[s.haptics.coerceIn(0, 3)], listOf("Off", "Light", "Medium", "Strong")) { x, v ->
-                x.copy(haptics = listOf("Off", "Light", "Medium", "Strong").indexOf(v).coerceAtLeast(0))
-            },
-        ) + listOf(
-            Row.Switch(Icons.Outlined.PictureInPictureAlt, "Floating bubble when you leave", s.bubble) { x, v -> x.copy(bubble = v) },
-        ) + (if (s.bubble && !canBubble) listOf(
-            Row.Action(Icons.Outlined.PictureInPictureAlt, "Allow the bubble over other apps", "Allow") {
-                context.startActivity(android.content.Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION, android.net.Uri.parse("package:" + context.packageName)))
-            },
-        ) else emptyList())),
-        Group("Clips", Tints.rec, listOf(
+        Group("Clips and playback", Tints.rec, listOf(
+            // turns the live mix down while a clip or an OBS recording's AAC plays, so it can be heard over it
+            Row.Slider(Icons.Outlined.VolumeDown, "Lower the mix while playing", s.duckPct) { x, v -> x.copy(duckPct = v) },
             // "Clip 2" where it starts, "Clip 2 – Choir intro" where it ends (once the note is in)
             Row.Switch(Icons.Outlined.Bookmark, "Chapter markers in the OBS recording", s.chapters) { x, v -> x.copy(chapters = v) },
             Row.Switch(Icons.Outlined.TaskAlt, "Save the clip list on the PC", s.pcClipLists) { x, v -> x.copy(pcClipLists = v) },
             Row.Choice(Icons.Outlined.IosShare, "Export as", formatLabels[s.exportFormat] ?: s.exportFormat, formatLabels.values.toList()) { x, v ->
                 x.copy(exportFormat = formatLabels.entries.first { it.value == v }.key)
             },
+        )),
+        Group("Storage on this phone", Tints.purple, listOf(
+            Row.Switch(Icons.Outlined.Mic, "Save the session audio", s.saveAudio) { x, v -> x.copy(saveAudio = v) },
+            Row.Choice(Icons.Outlined.CalendarMonth, "Keep it for", when (s.keepDays) { 0 -> "Forever"; 7 -> "7 days"; else -> "30 days" }, listOf("7 days", "30 days", "Forever")) { x, v ->
+                x.copy(keepDays = when (v) { "7 days" -> 7; "Forever" -> 0; else -> 30 })
+            },
+            Row.Action(Icons.Outlined.DeleteSweep, "Delete all recordings and clips",
+                if (recordings.isEmpty()) "None stored" else "${recordings.size} stored") { if (recordings.isNotEmpty()) confirmClear = true },
+        )),
+        Group("Recording and stream", Tints.amber, listOf(
+            Row.Choice(Icons.Outlined.Timer, "Hold to stop recording", if (s.holdMs == 500) "0.5 s" else "${s.holdMs / 1000} s", listOf("0.5 s", "1 s", "2 s")) { x, v ->
+                x.copy(holdMs = (secs(v) * 1000).toInt())
+            },
+            Row.Switch(Icons.Outlined.PowerSettingsNew, "Allow ending the stream", s.allowStreamStop) { x, v -> x.copy(allowStreamStop = v) },
         )),
         Group("Alerts", Tints.orange, listOf(
             Row.Choice(Icons.Outlined.VolumeOff, "Mix goes silent for", if (s.silenceSeconds == 0) "Off" else "${s.silenceSeconds} s", listOf("Off", "10 s", "20 s", "30 s")) { x, v ->
@@ -165,17 +161,24 @@ fun SettingsScreen(onConnect: () -> Unit) {
             Row.Choice(Icons.Outlined.ShowChart, "Dropped frames over", "${s.dropsPerMinute} a minute", listOf("50 a minute", "100 a minute", "500 a minute")) { x, v ->
                 x.copy(dropsPerMinute = v.substringBefore(' ').toInt())
             },
-            Row.Choice(Icons.Outlined.BatteryAlert, "Warn when the battery is below", if (s.batteryWarn == 0) "Off" else "${s.batteryWarn}%", listOf("Off", "20%", "15%", "10%")) { x, v ->
+            Row.Choice(Icons.Outlined.BatteryAlert, "Battery below", if (s.batteryWarn == 0) "Off" else "${s.batteryWarn}%", listOf("Off", "20%", "15%", "10%")) { x, v ->
                 x.copy(batteryWarn = if (v == "Off") 0 else v.removeSuffix("%").toInt())
             },
         )),
-        Group("Audio on this phone", Tints.purple, listOf(
-            Row.Switch(Icons.Outlined.Mic, "Save the session audio", s.saveAudio) { x, v -> x.copy(saveAudio = v) },
-            Row.Choice(Icons.Outlined.CalendarMonth, "Keep it for", when (s.keepDays) { 0 -> "Forever"; 7 -> "7 days"; else -> "30 days" }, listOf("7 days", "30 days", "Forever")) { x, v ->
-                x.copy(keepDays = when (v) { "7 days" -> 7; "Forever" -> 0; else -> 30 })
+        Group("This phone", Tints.blue, listOf(
+            Row.Switch(Icons.Outlined.LightMode, "Keep the screen on", s.keepScreenOn) { x, v -> x.copy(keepScreenOn = v) },
+            Row.Switch(Icons.Outlined.PictureInPictureAlt, "Floating bubble when you leave", s.bubble) { x, v -> x.copy(bubble = v) },
+        ) + (if (s.bubble && !canBubble) listOf(
+            Row.Action(Icons.Outlined.PictureInPictureAlt, "Allow the bubble over other apps", "Allow") {
+                context.startActivity(android.content.Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION, android.net.Uri.parse("package:" + context.packageName)))
             },
-            Row.Action(Icons.Outlined.DeleteSweep, "Delete all recordings and clips",
-                if (recordings.isEmpty()) "None stored" else "${recordings.size} stored") { if (recordings.isNotEmpty()) confirmClear = true },
+        ) else emptyList()) + listOf(
+            Row.Choice(Icons.Outlined.Vibration, "Vibration", listOf("Off", "Light", "Medium", "Strong")[s.haptics.coerceIn(0, 3)], listOf("Off", "Light", "Medium", "Strong")) { x, v ->
+                x.copy(haptics = listOf("Off", "Light", "Medium", "Strong").indexOf(v).coerceAtLeast(0))
+            },
+            Row.Choice(Icons.Outlined.TouchApp, "Touch sound", if (s.touchSound == 0) "Off" else "${s.touchSound}%", listOf("Off", "25%", "50%", "75%", "100%")) { x, v ->
+                x.copy(touchSound = if (v == "Off") 0 else v.removeSuffix("%").toInt())
+            },
         )),
     )
 
@@ -302,20 +305,20 @@ private fun HelpDialog(onDone: () -> Unit) {
     )
 }
 
-/** A setting with a 0–100% slider under its name: the value shows as you drag, and saves on release. */
+/** A setting with a 50–100% slider under its name: the value shows as you drag, and saves on release. */
 @Composable
 private fun SliderItem(r: Row.Slider, tint: Tint, divider: Boolean) {
-    var v by remember(r.percent) { mutableStateOf(r.percent.toFloat()) }
+    var v by remember(r.percent) { mutableStateOf(r.percent.coerceIn(50, 100).toFloat()) }
     Column {
         if (divider) HorizontalDivider(color = T.raised)
         Column(Modifier.fillMaxWidth().padding(start = 14.dp, end = 14.dp, top = 10.dp, bottom = 4.dp)) {
             androidx.compose.foundation.layout.Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                 TintTile(r.icon, tint)
                 Text(r.label, style = Type.body.copy(fontSize = 15.sp), modifier = Modifier.weight(1f))
-                Text(if (v.roundToInt() == 0) "Off" else "${v.roundToInt()}%", style = Type.body.copy(color = tint.ink))
+                Text("${v.roundToInt()}%", style = Type.body.copy(color = tint.ink))
             }
-            androidx.compose.material3.Slider(v, { v = (it / 5).roundToInt() * 5f }, Modifier.fillMaxWidth().semantics { contentDescription = r.label },
-                valueRange = 0f..100f, onValueChangeFinished = { Prefs.update { x -> r.set(x, v.roundToInt()) } },
+            androidx.compose.material3.Slider(v, { v = ((it / 5).roundToInt() * 5f).coerceIn(50f, 100f) }, Modifier.fillMaxWidth().semantics { contentDescription = r.label },
+                valueRange = 50f..100f, steps = 9, onValueChangeFinished = { Prefs.update { x -> r.set(x, v.roundToInt()) } },
                 colors = androidx.compose.material3.SliderDefaults.colors(thumbColor = T.text, activeTrackColor = tint.ink, inactiveTrackColor = T.control))
             Text("A clip or an OBS recording's AAC plays over the live mix lowered this much. 100% silences it. Clipping and OBS carry on either way.",
                 style = Type.small.copy(fontSize = 12.sp), modifier = Modifier.padding(bottom = 8.dp))

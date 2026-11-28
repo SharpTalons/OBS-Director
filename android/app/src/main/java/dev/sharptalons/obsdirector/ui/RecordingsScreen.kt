@@ -31,6 +31,23 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.AlignHorizontalLeft
+import androidx.compose.material.icons.outlined.AlignHorizontalRight
+import androidx.compose.material.icons.outlined.ChevronLeft
+import androidx.compose.material.icons.outlined.ChevronRight
+import androidx.compose.material.icons.outlined.FirstPage
+import androidx.compose.material.icons.outlined.Forward5
+import androidx.compose.material.icons.outlined.LastPage
+import androidx.compose.material.icons.outlined.Replay5
+import androidx.compose.material.icons.outlined.Restore
+import androidx.compose.material.icons.outlined.ZoomIn
+import androidx.compose.material.icons.outlined.ZoomOut
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.text.drawText
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.unit.Dp
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.ContentCut
 import androidx.compose.material.icons.outlined.DeleteOutline
@@ -133,7 +150,7 @@ fun clockAt(r: Recording, ms: Long): String =
 /** A clip's name: "2026-11-28 19-02-11 clip 2 – Choir intro"; older clips go by their note or time. */
 fun clipTitle(r: Recording, c: Clip): String = c.fullName() ?: c.note.ifBlank { "Clip at ${clockAt(r, c.startMs)}" }
 
-private fun clipMeta(r: Recording, c: Clip) = "${clipLength(c.lengthMs)} · ${clockAt(r, c.startMs)}"
+private fun clipMeta(r: Recording, c: Clip) = "${clipLength(c.lengthMs)} · ${clockAt(r, c.startMs)}" + if (c.recovered) " · saved after the app closed" else ""
 
 private fun mb(bytes: Long) = if (bytes >= 10 shl 20) "${bytes shr 20} MB" else "%.1f MB".format(bytes / 1048576.0)
 
@@ -377,7 +394,13 @@ private fun ObsRecordingCard(o: ObsRecording, clips: Int, job: Director.AacJob?,
     }
 }
 
-/** The player above the tabs while a clip or an AAC file plays: which, how far, and Stop. */
+/** "4:05", or "1:02:09" past an hour. */
+private fun playTime(ms: Long): String {
+    val t = ms / 1000
+    return if (t >= 3600) "%d:%02d:%02d".format(t / 3600, t / 60 % 60, t % 60) else "%d:%02d".format(t / 60, t % 60)
+}
+
+/** The player above the tabs while a clip or an AAC file plays: which, pause, stop, and a bar to move through it. */
 @Composable
 private fun MiniPlayer(all: List<Recording>, p: ClipPlayer.State) {
     val title = if (p.key.startsWith("aac:")) p.key.removePrefix("aac:").substringBeforeLast('.') + ".m4a" else {
@@ -386,22 +409,34 @@ private fun MiniPlayer(all: List<Recording>, p: ClipPlayer.State) {
         if (r != null && c != null) clipTitle(r, c) else "Playing"
     }
     val span = (p.toMs - p.fromMs).coerceAtLeast(1)
-    val done = (p.posMs - p.fromMs).coerceIn(0, span)
+    // while the bar is dragged it shows where it will go; the sound moves there on release
+    var scrub by remember(p.key) { mutableStateOf<Float?>(null) }
+    val done = scrub?.toLong() ?: (p.posMs - p.fromMs).coerceIn(0, span)
     val duck = Prefs.settings.value.duckPct
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(T.raised)) {
-        Row(Modifier.fillMaxWidth().padding(start = 14.dp, end = 8.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(Modifier.fillMaxWidth().padding(start = 14.dp, end = 8.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Column(Modifier.weight(1f)) {
                 Text(title, style = Type.body.copy(fontSize = 14.sp, fontWeight = FontWeight.Medium), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text("${Director.len(done)} of ${Director.len(span)}" + if (duck > 0) " · live mix lowered $duck%" else "", style = Type.small.copy(fontSize = 12.sp, color = T.text2))
+                Text(if (p.paused) "Paused · live mix at full level" else "Live mix lowered $duck%", style = Type.small.copy(fontSize = 12.sp, color = T.text2))
             }
-            Box(Modifier.size(48.dp).clip(CircleShape).background(T.text).clickable(role = Role.Button) { ClipPlayer.stop() }
+            Box(Modifier.size(48.dp).clip(CircleShape).background(T.accent).clickable(role = Role.Button) { ClipPlayer.toggle() }
+                .semantics { contentDescription = if (p.paused) "Play" else "Pause" }, contentAlignment = Alignment.Center) {
+                Icon(if (p.paused) Icons.Outlined.PlayArrow else Icons.Outlined.Pause, null, tint = T.ground)
+            }
+            Box(Modifier.size(48.dp).clip(CircleShape).background(T.control).clickable(role = Role.Button) { ClipPlayer.stop() }
                 .semantics { contentDescription = "Stop" }, contentAlignment = Alignment.Center) {
-                Icon(Icons.Outlined.Stop, null, tint = T.ground)
+                Icon(Icons.Outlined.Stop, null, tint = T.text)
             }
         }
-        Box(Modifier.fillMaxWidth().height(3.dp).background(T.control)) {
-            Box(Modifier.fillMaxWidth(done / span.toFloat()).height(3.dp).background(T.accent))
+        Row(Modifier.fillMaxWidth().padding(start = 14.dp, end = 14.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(playTime(done), style = Type.mono.copy(fontSize = 12.sp, color = T.text2))
+            Slider(done.toFloat(), { scrub = it }, Modifier.weight(1f).semantics { contentDescription = "Position in $title" },
+                valueRange = 0f..span.toFloat(),
+                onValueChangeFinished = { scrub?.let { ClipPlayer.seek(p.fromMs + it.toLong()) }; scrub = null },
+                colors = SliderDefaults.colors(thumbColor = T.text, activeTrackColor = T.accent, inactiveTrackColor = T.control))
+            Text(playTime(span), style = Type.mono.copy(fontSize = 12.sp, color = T.text2))
         }
     }
 }
@@ -413,7 +448,7 @@ private fun ClipSheet(r: Recording, c: Clip, playing: Boolean, onPlay: () -> Uni
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = T.surface) {
         Column(Modifier.padding(start = 16.dp, end = 16.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Column {
-                Text(when (mode) { "trim" -> "Trim clip"; "note" -> "Note"; else -> clipTitle(r, c) },
+                Text(when (mode) { "trim" -> "Edit clip"; "note" -> "Note"; else -> clipTitle(r, c) },
                     style = Type.cardTitle.copy(fontSize = 18.sp, fontWeight = FontWeight.Medium), modifier = Modifier.semantics { heading() })
                 Text((if (mode == "clip") "" else clipTitle(r, c) + " · ") + clipMeta(r, c) + " · " + dayLabel(c.createdAt), style = Type.small.copy(fontSize = 13.sp))
             }
@@ -427,7 +462,7 @@ private fun ClipSheet(r: Recording, c: Clip, playing: Boolean, onPlay: () -> Uni
                 else -> {
                     PrimaryButton(if (playing) "Playing…" else "Play clip", Icons.Outlined.PlayArrow, Modifier.fillMaxWidth(), height = 52.dp, onClick = onPlay)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        SheetTile("Trim", Icons.Outlined.ContentCut, Tints.teal, Modifier.weight(1f)) { mode = "trim" }
+                        SheetTile("Edit", Icons.Outlined.ContentCut, Tints.teal, Modifier.weight(1f)) { mode = "trim" }
                         SheetTile("Note", Icons.Outlined.Edit, Tints.amber, Modifier.weight(1f)) { mode = "note" }
                         SheetTile("Share", Icons.Outlined.Share, Tints.purple, Modifier.weight(1f), onShare)
                     }
@@ -450,25 +485,38 @@ private fun SheetTile(label: String, icon: ImageVector, tint: Tint, modifier: Mo
 }
 
 /**
- * Trim, the way phones trim video: the sound of the clip with 15 s either side, the kept part lit,
- * and a handle at each end. Drag a handle to move that end, or drag the lit part to move the whole
- * clip; tap elsewhere to bring the nearer end there. Letting go of a handle settles it in the
- * nearest pause (see [Trim.snap]) and plays a moment of sound at that edge, so you hear the cut.
- * ±1 s fine-tunes the end you last touched. Nothing changes until Save.
+ * The clip editor. The sound of the clip with 15 s either side, the kept part lit, a handle at
+ * each end and a white playhead.
+ *
+ * - **Ends:** drag a handle; it settles in the nearest pause ([Trim.snap]) and plays a moment there,
+ *   so you hear the cut. Or place the playhead and use Start here / End here. ‹ › nudge the chosen end.
+ * - **Playhead:** tap anywhere, or drag along the time strip under the sound, to put it there; while
+ *   playing, the sound moves with it. The transport plays from it and skips 5 s.
+ * - **Whole clip:** drag the lit part to move it, keeping its length.
+ * - **Zoom:** in and out around the playhead, to place an end exactly.
+ * Nothing changes until Save.
  */
 @Composable
 private fun TrimPanel(r: Recording, c: Clip, onDone: () -> Unit) {
     var start by remember(c.id) { mutableLongStateOf(c.startMs) }
     var end by remember(c.id) { mutableLongStateOf(c.endMs) }
-    var active by remember(c.id) { mutableStateOf("start") } // the end ±1 s moves
+    var active by remember(c.id) { mutableStateOf("start") } // the end ‹ › moves
+    var head by remember(c.id) { mutableLongStateOf(c.startMs) }
     val playback by ClipPlayer.playback.collectAsState()
     val envelope = Director.liveEnvelope(r.file) ?: r.envelope
     val duration = Director.liveLengthMs(r.file) ?: r.durationMs.coerceAtLeast(envelope.size * Trim.ENVELOPE_MS)
-    // the view: the clip with 15 s either side, widened when an end is dragged to its side
+    // the view: the clip with 15 s either side, widened when an end is dragged to its side, or zoomed
     var view by remember(c.id) { mutableStateOf(Trim.window(c.startMs, c.endMs, duration)) }
     val trimPlaying = playback.playing && playback.key == "trim"
+    val sounding = trimPlaying && !playback.paused
+    var scrubbing by remember { mutableStateOf(false) }
+    // the playhead follows the sound while it plays
+    LaunchedEffect(playback.posMs, trimPlaying) { if (trimPlaying && !scrubbing) head = playback.posMs }
     val density = androidx.compose.ui.platform.LocalDensity.current
     val grab = with(density) { 28.dp.toPx() }
+    val rulerH = with(density) { 22.dp.toPx() }
+    val measurer = rememberTextMeasurer()
+    val rulerStyle = Type.mono.copy(fontSize = 10.sp, color = T.muted)
 
     fun hear(edge: String) {
         if (edge == "start") playClip(r, c, "trim", start, minOf(start + 2000, end))
@@ -480,41 +528,71 @@ private fun TrimPanel(r: Recording, c: Clip, onDone: () -> Unit) {
         // an end pushed to the side of the view: show more
         if (start - view.first < 1500 || view.last - end < 1500) view = Trim.window(start, end, duration)
     }
+    /** Puts the playhead at [ms]; the sound follows if it's playing. */
+    fun place(ms: Long) {
+        head = ms.coerceIn(0, if (duration > 0) duration else Long.MAX_VALUE)
+        if (trimPlaying) ClipPlayer.seek(head)
+    }
+    fun playFromHead() {
+        val from = if (head in view) head else start
+        head = from
+        playClip(r, c, "trim", view.first, view.last, from)
+    }
+    fun zoom(factor: Double) {
+        val span = ((view.last - view.first) * factor).toLong().coerceIn(4000, maxOf(4000, if (duration > 0) duration else 600_000))
+        var a = head - span / 2
+        if (duration > 0) a = a.coerceAtMost(duration - span)
+        a = a.coerceAtLeast(0)
+        view = a..(a + span)
+    }
 
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Showing ${clipLength(view.last - view.first)}", style = Type.small.copy(fontSize = 12.sp), modifier = Modifier.weight(1f))
+            TrimIcon(Icons.Outlined.ZoomOut, "Zoom out", size = 40.dp) { zoom(2.0) }
+            TrimIcon(Icons.Outlined.ZoomIn, "Zoom in", size = 40.dp, enabled = view.last - view.first > 4000) { zoom(0.5) }
+        }
         Canvas(
-            Modifier.fillMaxWidth().height(84.dp).clip(RoundedCornerShape(12.dp)).background(T.sunken)
-                .semantics { contentDescription = "Trimmer. Keeps ${clockAt(r, start)} to ${clockAt(r, end)}, ${clipLength(end - start)}. Use the buttons below to move each end." }
-                .pointerInput(c.id) {
+            Modifier.fillMaxWidth().height(128.dp).clip(RoundedCornerShape(12.dp)).background(T.sunken)
+                .semantics {
+                    contentDescription = "Clip editor. Keeps ${clockAt(r, start)} to ${clockAt(r, end)}, ${clipLength(end - start)}. " +
+                        "Playhead at ${clockAt(r, head)}. Use the buttons below to move the ends and the playhead."
+                }
+                .pointerInput(c.id, view, duration) {
                     awaitEachGesture {
                         val down = awaitFirstDown()
                         val w = size.width.toFloat()
                         val span = (view.last - view.first).coerceAtLeast(1)
-                        fun msAt(x: Float) = view.first + (x / w * span).toLong()
+                        fun msAt(x: Float) = view.first + (x.coerceIn(0f, w) / w * span).toLong()
                         val sx = (start - view.first) / span.toFloat() * w
                         val ex = (end - view.first) / span.toFloat() * w
                         val x0 = down.position.x
-                        // which part was grabbed: an end, the kept part, or elsewhere (the nearer end jumps there)
-                        val target = when {
+                        val inRuler = down.position.y > size.height - rulerH
+                        // what was grabbed: an end, the time strip (playhead), the kept part (move it), or elsewhere
+                        var target = when {
+                            inRuler -> "head"
                             kotlin.math.abs(x0 - sx) <= grab && kotlin.math.abs(x0 - sx) <= kotlin.math.abs(x0 - ex) -> "start"
                             kotlin.math.abs(x0 - ex) <= grab -> "end"
                             x0 > sx && x0 < ex -> "both"
-                            kotlin.math.abs(x0 - sx) < kotlin.math.abs(x0 - ex) -> { start = Trim.moveStart(start, end, msAt(x0)); "start" }
-                            else -> { end = Trim.moveEnd(start, end, msAt(x0), duration); "end" }
+                            else -> "head"
                         }
-                        if (target != "both") active = target
-                        if (trimPlaying) ClipPlayer.stop()
+                        if (target == "start" || target == "end") { active = target; if (sounding) ClipPlayer.stop() }
+                        if (target == "head") { scrubbing = true; head = msAt(x0) }
                         val startAt = start
+                        var moved = false
                         down.consume()
                         while (true) {
                             val ev = awaitPointerEvent()
                             val ch = ev.changes.firstOrNull { it.id == down.id } ?: break
                             if (!ch.pressed) break
                             val x = ch.position.x.coerceIn(0f, w)
-                            when (target) {
+                            if (kotlin.math.abs(x - x0) > viewConfiguration.touchSlop) moved = true
+                            if (moved) when (target) {
                                 "start" -> start = Trim.moveStart(start, end, msAt(x))
                                 "end" -> end = Trim.moveEnd(start, end, msAt(x), duration)
+                                "head" -> head = msAt(x)
                                 "both" -> {
+                                    if (sounding) ClipPlayer.stop()
                                     val len = end - start
                                     start = Trim.moveBoth(startAt, startAt + len, ((x - x0) / w * span).toLong(), duration)
                                     end = start + len
@@ -522,66 +600,112 @@ private fun TrimPanel(r: Recording, c: Clip, onDone: () -> Unit) {
                             }
                             ch.consume()
                         }
-                        if (target != "both") { settle(target); hear(target) }
+                        // a tap that didn't drag anything puts the playhead there
+                        if (!moved && target == "both") target = "head"
+                        when (target) {
+                            "start", "end" -> if (moved) { settle(target); hear(target) }
+                            "head" -> { scrubbing = false; place(if (moved) head else msAt(x0)) }
+                        }
                     }
                 },
         ) {
             val span = (view.last - view.first).coerceAtLeast(1)
-            val sx = (start - view.first) / span.toFloat() * size.width
-            val ex = (end - view.first) / span.toFloat() * size.width
-            // the kept part
-            drawRect(Tints.teal.bg, Offset(sx, 0f), Size(ex - sx, size.height))
-            // the sound: one bar per few pixels, lit inside the clip
-            val bars = (size.width / 6f).toInt().coerceAtLeast(20)
+            val waveH = size.height - rulerH
+            fun xAt(ms: Long) = (ms - view.first) / span.toFloat() * size.width
+            val sx = xAt(start); val ex = xAt(end)
+            // outside the clip is dimmed, the kept part lit
+            drawRect(Tints.teal.bg, Offset(sx, 0f), Size(ex - sx, waveH))
+            val bars = (size.width / 5f).toInt().coerceAtLeast(20)
             val bw = size.width / bars
             for (k in 0 until bars) {
                 val t = view.first + span * k / bars
                 val a = (envelope.getOrNull((t / Trim.ENVELOPE_MS).toInt()) ?: 0.08f).coerceIn(0.06f, 1f)
-                val h = a * size.height * 0.7f
-                drawRect(if (t in start..end) Tints.teal.ink else T.waveform, Offset(k * bw + bw * 0.25f, (size.height - h) / 2), Size(bw * 0.5f, h))
+                val h = a * waveH * 0.78f
+                drawRect(if (t in start..end) Tints.teal.ink else T.waveform, Offset(k * bw + bw * 0.2f, (waveH - h) / 2), Size(bw * 0.6f, h))
             }
-            // the two handles: a line with a grip, brighter for the end ±1 s moves
+            // the time strip: a tick every step, a time under every other one
+            drawRect(T.raised, Offset(0f, waveH), Size(size.width, rulerH))
+            val step = listOf(1000L, 2000L, 5000L, 10_000L, 15_000L, 30_000L, 60_000L, 120_000L, 300_000L)
+                .firstOrNull { size.width * it / span >= 28.dp.toPx() } ?: 600_000L
+            var t = (view.first / step + 1) * step
+            var n = (view.first / step + 1)
+            while (t < view.last) {
+                val x = xAt(t)
+                val major = n % 2 == 0L
+                drawRect(T.muted, Offset(x - 0.5f, waveH), Size(1f, if (major) 6.dp.toPx() else 3.dp.toPx()))
+                if (major) {
+                    val label = clockAt(r, t).let { if (it.length >= 8) it.substring(3) else it }
+                    val m = measurer.measure(label, rulerStyle)
+                    val lx = (x - m.size.width / 2).coerceIn(0f, size.width - m.size.width)
+                    drawText(m, topLeft = Offset(lx, waveH + 7.dp.toPx()))
+                }
+                t += step; n++
+            }
+            // the two handles: a line with a grip, brighter for the end ‹ › moves
             for ((x, which) in listOf(sx to "start", ex to "end")) {
                 val col = if (active == which) T.text else Tints.teal.ink
-                val line = 2.dp.toPx(); val gw = 12.dp.toPx(); val gh = 32.dp.toPx()
-                drawRect(col, Offset(x - line / 2, 0f), Size(line, size.height))
-                drawRoundRect(col, Offset(x - gw / 2, size.height / 2 - gh / 2), Size(gw, gh), androidx.compose.ui.geometry.CornerRadius(4.dp.toPx()))
-                // two little ridges on the grip, so it reads as something to drag
-                for (k in listOf(-2.5f, 2.5f)) drawRect(T.sunken, Offset(x + k.dp.toPx() - 0.5.dp.toPx(), size.height / 2 - 8.dp.toPx()), Size(1.dp.toPx(), 16.dp.toPx()))
+                val line = 2.dp.toPx(); val gw = 12.dp.toPx(); val gh = 34.dp.toPx()
+                drawRect(col, Offset(x - line / 2, 0f), Size(line, waveH))
+                drawRoundRect(col, Offset(x - gw / 2, waveH / 2 - gh / 2), Size(gw, gh), androidx.compose.ui.geometry.CornerRadius(4.dp.toPx()))
+                for (k in listOf(-2.5f, 2.5f)) drawRect(T.sunken, Offset(x + k.dp.toPx() - 0.5.dp.toPx(), waveH / 2 - 8.dp.toPx()), Size(1.dp.toPx(), 16.dp.toPx()))
             }
-            if (trimPlaying) {
-                val px = (playback.posMs - view.first) / span.toFloat() * size.width
+            // the playhead: a line through the sound with a knob on the time strip
+            if (head in view) {
+                val px = xAt(head)
                 drawRect(Color.White, Offset(px - 1f, 0f), Size(2f, size.height))
+                drawCircle(Color.White, 6.dp.toPx(), Offset(px, waveH + rulerH / 2))
+                val tri = androidx.compose.ui.graphics.Path().apply {
+                    moveTo(px - 6.dp.toPx(), 0f); lineTo(px + 6.dp.toPx(), 0f); lineTo(px, 7.dp.toPx()); close()
+                }
+                drawPath(tri, Color.White)
             }
         }
-        // the two ends and the length; tapping a time picks that end for ±1 s
+        // the two ends, and the playhead between them
         Row(verticalAlignment = Alignment.CenterVertically) {
             EdgeTime("Start", clockAt(r, start), active == "start", Modifier.weight(1f)) { active = "start" }
-            Text(clipLength(end - start), style = Type.body.copy(fontSize = 15.sp, fontWeight = FontWeight.Medium), textAlign = TextAlign.Center,
-                modifier = Modifier.weight(1f).semantics { contentDescription = "Length ${clipLength(end - start)}" })
+            Column(Modifier.weight(1f).semantics(mergeDescendants = true) { }, horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(clockAt(r, head), style = Type.mono.copy(fontSize = 17.sp, fontWeight = FontWeight.Medium, color = T.text))
+                Text("Length ${clipLength(end - start)}", style = Type.small.copy(fontSize = 12.sp))
+            }
             EdgeTime("End", clockAt(r, end), active == "end", Modifier.weight(1f), alignEnd = true) { active = "end" }
         }
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        // play from the playhead, skip, go to the ends
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceEvenly) {
+            TrimIcon(Icons.Outlined.FirstPage, "Go to the start") { place(start); if (view.first > start) view = Trim.window(start, end, duration) }
+            TrimIcon(Icons.Outlined.Replay5, "Back 5 seconds") { place(maxOf(view.first, head - 5000)) }
+            Box(Modifier.size(60.dp).clip(CircleShape).background(T.accent)
+                .clickable(role = Role.Button) { when { sounding -> ClipPlayer.pause(); trimPlaying -> ClipPlayer.resume(); else -> playFromHead() } }
+                .semantics { contentDescription = if (sounding) "Pause" else "Play from the playhead" }, contentAlignment = Alignment.Center) {
+                Icon(if (sounding) Icons.Outlined.Pause else Icons.Outlined.PlayArrow, null, tint = T.ground, modifier = Modifier.size(30.dp))
+            }
+            TrimIcon(Icons.Outlined.Forward5, "Forward 5 seconds") { place(minOf(view.last, head + 5000)) }
+            // a few seconds before the end, to hear how it ends
+            TrimIcon(Icons.Outlined.LastPage, "Go to the end") { place(maxOf(start, end - 3000)) }
+        }
+        // set the ends from the playhead, or nudge the chosen end
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             val which = if (active == "start") "start" else "end"
-            Text("Move the $which", style = Type.small.copy(fontSize = 13.sp), modifier = Modifier.weight(1f))
-            listOf(-1000L to "−1 s", 1000L to "+1 s").forEach { (d, t) ->
-                Box(Modifier.width(64.dp).height(48.dp).clip(RoundedCornerShape(12.dp)).background(T.raised)
-                    .clickable(role = Role.Button) {
-                        if (active == "start") start = Trim.moveStart(start, end, start + d) else end = Trim.moveEnd(start, end, end + d, duration)
-                        hear(active)
-                    }
-                    .semantics { contentDescription = "Move the $which 1 second ${if (d > 0) "later" else "earlier"}" },
-                    contentAlignment = Alignment.Center) { Text(t, style = Type.body.copy(fontSize = 14.sp, fontWeight = FontWeight.Medium)) }
+            EditTool(Icons.Outlined.AlignHorizontalLeft, "Start here", Modifier.weight(1f), enabled = head < end - Trim.MIN_MS + 1) {
+                start = Trim.moveStart(start, end, head); active = "start"
+            }
+            EditTool(Icons.Outlined.ChevronLeft, "−0.5 s", Modifier.weight(1f), description = "Move the $which half a second earlier") {
+                if (active == "start") start = Trim.moveStart(start, end, start - 500) else end = Trim.moveEnd(start, end, end - 500, duration)
+                hear(active)
+            }
+            EditTool(Icons.Outlined.ChevronRight, "+0.5 s", Modifier.weight(1f), description = "Move the $which half a second later") {
+                if (active == "start") start = Trim.moveStart(start, end, start + 500) else end = Trim.moveEnd(start, end, end + 500, duration)
+                hear(active)
+            }
+            EditTool(Icons.Outlined.AlignHorizontalRight, "End here", Modifier.weight(1f), enabled = head > start + Trim.MIN_MS - 1) {
+                end = Trim.moveEnd(start, end, head, duration); active = "end"
             }
         }
-        Text(if (envelope.isEmpty()) "Drag the ends, or the lit part to move the whole clip."
-            else "Drag the ends, or the lit part to move the whole clip. Each end settles in the nearest pause.",
+        Text(if (envelope.isEmpty()) "Tap to place the playhead. Drag the ends, or the lit part to move the whole clip. ‹ › move the ${if (active == "start") "start" else "end"}."
+            else "Tap to place the playhead. Drag the ends (they settle in the nearest pause), or the lit part to move the whole clip. ‹ › move the ${if (active == "start") "start" else "end"}.",
             style = Type.small.copy(fontSize = 12.sp))
     }
-    OutlineButton(if (trimPlaying) "Stop" else "Play ${clipLength(end - start)}", if (trimPlaying) Icons.Outlined.Stop else Icons.Outlined.PlayArrow,
-        Modifier.fillMaxWidth()) { if (trimPlaying) ClipPlayer.stop() else playClip(r, c, "trim", start, end) }
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        OutlineButton("Reset", modifier = Modifier.weight(1f), enabled = start != c.startMs || end != c.endMs) {
+        OutlineButton("Reset", Icons.Outlined.Restore, modifier = Modifier.weight(1f), enabled = start != c.startMs || end != c.endMs) {
             start = c.startMs; end = c.endMs; view = Trim.window(c.startMs, c.endMs, duration)
         }
         OutlineButton("Cancel", modifier = Modifier.weight(1f)) { if (trimPlaying) ClipPlayer.stop(); onDone() }
@@ -591,6 +715,28 @@ private fun TrimPanel(r: Recording, c: Clip, onDone: () -> Unit) {
             Director.toast("Clip trimmed to ${clipLength(end - start)}")
             onDone()
         }
+    }
+}
+
+/** A round icon button in the editor's transport. */
+@Composable
+private fun TrimIcon(icon: ImageVector, label: String, size: Dp = 48.dp, enabled: Boolean = true, onClick: () -> Unit) {
+    Box(Modifier.size(size).clip(CircleShape).clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+        .semantics { contentDescription = label }, contentAlignment = Alignment.Center) {
+        Icon(icon, null, tint = if (enabled) T.text else T.muted, modifier = Modifier.size(if (size < 48.dp) 22.dp else 26.dp))
+    }
+}
+
+/** An editing button: an icon over a short word. */
+@Composable
+private fun EditTool(icon: ImageVector, label: String, modifier: Modifier, enabled: Boolean = true, description: String = label, onClick: () -> Unit) {
+    Column(
+        modifier.height(60.dp).clip(RoundedCornerShape(12.dp)).background(T.raised).clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+            .semantics { contentDescription = description },
+        horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center,
+    ) {
+        Icon(icon, null, tint = if (enabled) Tints.teal.ink else T.muted, modifier = Modifier.size(22.dp))
+        Text(label, style = Type.small.copy(fontSize = 12.sp, color = if (enabled) T.text else T.muted), modifier = Modifier.padding(top = 2.dp))
     }
 }
 

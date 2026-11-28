@@ -233,7 +233,15 @@ private fun ListenSection(lost: Boolean, onOpenRecording: (String) -> Unit) {
                 Text("$vol%", style = Type.mono.copy(fontSize = 14.sp, color = if (boosting) T.warning else T.text))
             }
             Slider(
-                vol.toFloat(), { vol = it.roundToInt(); Director.setVolume(vol, save = false) },
+                vol.toFloat(), {
+                    // it settles on 50% (the mix as OBS sends it) when dragged within a step of it,
+                    // with a vibration as it gets there
+                    var v = it.roundToInt()
+                    if (kotlin.math.abs(v - Loudness.AS_SENT) <= 1) v = Loudness.AS_SENT
+                    if (v != vol && (v == Loudness.AS_SENT || (vol - Loudness.AS_SENT) * (v - Loudness.AS_SENT) < 0)) dev.sharptalons.obsdirector.core.Feedback.detent()
+                    vol = v
+                    Director.setVolume(vol, save = false)
+                },
                 Modifier.fillMaxWidth()
                     // a double tap puts it back to the mix as OBS sends it
                     .pointerInput(Unit) {

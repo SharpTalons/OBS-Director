@@ -3,9 +3,9 @@ package dev.sharptalons.obsdirector.audio
 import android.media.MediaCodec
 import android.media.MediaCodecInfo
 import android.media.MediaFormat
-import android.media.MediaMuxer
 import dev.sharptalons.obsdirector.core.Gap
 import java.io.File
+import java.io.FileOutputStream
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
 import kotlin.math.abs
@@ -13,9 +13,12 @@ import kotlin.math.max
 import kotlin.math.sqrt
 
 /**
- * Saves the session's mix on the phone as AAC (128 kb/s, 48 kHz stereo, .m4a), lined up with
- * the OBS recording's file time, plus a loudness envelope (one value per 100 ms) for the
- * clip-adjust waveform and a list of Wi-Fi gaps.
+ * Saves the session's mix on the phone as AAC (128 kb/s, 48 kHz stereo), plus a loudness
+ * envelope (one value per 100 ms) for the trimmer's waveform and a list of Wi-Fi gaps.
+ *
+ * The file is raw AAC with a header on each frame ([Adts]), written frame by frame and pushed to
+ * storage every few seconds, so a piece cut short by the app being killed or the phone switching
+ * off still plays up to the moment it stopped.
  */
 class SessionRecorder(private val file: File, val offsetMs: Long) {
 
@@ -84,10 +87,10 @@ class SessionRecorder(private val file: File, val offsetMs: Long) {
         val codec = runCatching { MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_AUDIO_AAC) }.getOrNull() ?: return
         codec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
         codec.start()
-        val muxer = MediaMuxer(file.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
-        var track = -1
-        var muxing = false
+        val out = FileOutputStream(file)
+        var lastSync = System.currentTimeMillis()
         val info = MediaCodec.BufferInfo()
+        var frame = ByteArray(4096)
         var samples = 0L
         var eosQueued = false
         var done = false
@@ -99,20 +102,21 @@ class SessionRecorder(private val file: File, val offsetMs: Long) {
                 val idx = codec.dequeueOutputBuffer(info, 0)
                 when {
                     idx == MediaCodec.INFO_TRY_AGAIN_LATER -> return
-                    idx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
-                        track = muxer.addTrack(codec.outputFormat)
-                        muxer.start(); muxing = true
-                    }
                     idx >= 0 -> {
-                        val out = codec.getOutputBuffer(idx)
-                        if (out != null && info.size > 0 && muxing && info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG == 0) {
-                            out.position(info.offset); out.limit(info.offset + info.size)
-                            muxer.writeSampleData(track, out, info)
+                        val buf = codec.getOutputBuffer(idx)
+                        if (buf != null && info.size > 0 && info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG == 0) {
+                            if (frame.size < info.size + 7) frame = ByteArray(info.size + 7)
+                            System.arraycopy(Adts.header(info.size, AudioEngine.RATE, AudioEngine.CHANNELS), 0, frame, 0, 7)
+                            buf.position(info.offset); buf.get(frame, 7, info.size)
+                            // header and frame in one write: a kill leaves at most one frame half-written
+                            out.write(frame, 0, info.size + 7)
+                            val now = System.currentTimeMillis()
+                            if (now - lastSync > 3000) { runCatching { out.fd.sync() }; lastSync = now }
                         }
                         codec.releaseOutputBuffer(idx, false)
                         if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) { done = true; return }
                     }
-                    else -> return
+                    else -> {}
                 }
             }
         }
@@ -155,8 +159,8 @@ class SessionRecorder(private val file: File, val offsetMs: Long) {
         } finally {
             runCatching { codec.stop() }
             runCatching { codec.release() }
-            runCatching { if (muxing) muxer.stop() }
-            runCatching { muxer.release() }
+            runCatching { out.fd.sync() }
+            runCatching { out.close() }
         }
     }
 }

@@ -46,6 +46,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.selected
@@ -204,12 +205,22 @@ fun ObsMeter(levels: Levels, active: Boolean, modifier: Modifier = Modifier, bar
         MeterBar(shownL, holdL, barHeight, dim)
         MeterBar(shownR, holdR, barHeight, dim)
         if (showScale) {
-            Box(Modifier.fillMaxWidth().height(15.dp)) {
-                val st = Type.label.copy(fontSize = 11.sp)
-                Text("-60", style = st, modifier = Modifier.align(Alignment.CenterStart))
-                Text("-20", style = st, modifier = Modifier.align(BiasAlignment(2 * 0.667f - 1f)))
-                Text("-9", style = st, modifier = Modifier.align(BiasAlignment(2 * 0.85f - 1f)))
-                Text("0 dB", style = st, modifier = Modifier.align(Alignment.CenterEnd))
+            // a tick every 5 dB, a number every 10 dB, like the scale beside OBS's own meter
+            val tick = T.muted
+            Canvas(Modifier.fillMaxWidth().height(4.dp)) {
+                for (d in 0..12) {
+                    val x = (size.width * d / 12f).coerceIn(0.5f, size.width - 0.5f)
+                    drawRect(tick, Offset(x - 0.5f, 0f), Size(1f, if (d % 2 == 0) size.height else size.height / 2))
+                }
+            }
+            Box(Modifier.fillMaxWidth().height(14.dp).clearAndSetSemantics { }) {
+                val st = Type.label.copy(fontSize = 10.sp)
+                for (d in 0..6) {
+                    val db = -60 + d * 10
+                    val text = if (db == 0) "0" else "−${-db}"
+                    val align = when (d) { 0 -> Alignment.CenterStart; 6 -> Alignment.CenterEnd; else -> BiasAlignment(2 * d / 6f - 1f) }
+                    Text(text, style = st, modifier = Modifier.align(align))
+                }
             }
         }
     }
@@ -305,14 +316,20 @@ fun SettingItem(icon: ImageVector, tint: Tint, label: String, divider: Boolean, 
             horizontalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             TintTile(icon, tint)
-            Text(label, style = Type.body.copy(fontSize = 15.sp), modifier = Modifier.weight(1f))
+            // A long value ("Automatic · Bluetooth · oraimo Necklace Lite") goes under the name
+            // instead of squeezing it into a column of single letters.
+            val below = value != null && value.length > 18
+            Column(Modifier.weight(1f)) {
+                Text(label, style = Type.body.copy(fontSize = 15.sp))
+                if (below) Text(value!!, style = Type.small.copy(fontSize = 13.sp, color = tint.ink), maxLines = 2, overflow = TextOverflow.Ellipsis)
+            }
             when {
                 checked != null -> Box(
                     Modifier.size(52.dp, 30.dp).clip(CircleShape).background(if (checked) T.blue else T.control).padding(3.dp),
                     contentAlignment = if (checked) Alignment.CenterEnd else Alignment.CenterStart,
                 ) { Box(Modifier.size(24.dp).clip(CircleShape).background(Color.White)) }
                 value != null -> Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(value, style = Type.body.copy(color = tint.ink), maxLines = 1)
+                    if (!below) Text(value, style = Type.body.copy(color = tint.ink), maxLines = 1)
                     // values line up whether or not they have an arrow
                     if (onClick != null) Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, null, tint = tint.ink, modifier = Modifier.size(18.dp))
                     else Spacer(Modifier.width(18.dp))

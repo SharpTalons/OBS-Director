@@ -68,4 +68,10 @@ object Feedback {
             vib.vibrate(VibrationEffect.createOneShot(FeedbackTokens.TAP_MS[k], amp))
         }
     }
+
+    /** A slider reached a set point (the volume at "as set in OBS"): a vibration only, no sound. */
+    fun detent() {
+        if (!::app.isInitialized) return
+        tick(Prefs.settings.value.haptics)
+    }
 }

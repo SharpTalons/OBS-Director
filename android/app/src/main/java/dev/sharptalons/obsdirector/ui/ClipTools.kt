@@ -79,8 +79,8 @@ import java.io.File
 import kotlin.math.abs
 
 /** Plays part of a clip from the saved session audio; works during the session too. */
-internal fun playClip(r: Recording, c: Clip, key: String, from: Long = c.startMs, to: Long = c.endMs) =
-    Director.playSaved(r, key, from, to)
+internal fun playClip(r: Recording, c: Clip, key: String, from: Long = c.startMs, to: Long = c.endMs, at: Long = from) =
+    Director.playSaved(r, key, from, to, at)
 
 /** Plays an OBS recording's AAC saved on this phone (the live mix is lowered while it plays). */
 internal fun playAac(file: String) {

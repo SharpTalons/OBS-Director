@@ -149,11 +149,53 @@ object Director {
         // While a clip plays, turn the mix down by the share Settings say (80% unless changed), so
         // the clip can be heard over it; back up when it stops.
         scope.launch {
-            kotlinx.coroutines.flow.combine(dev.sharptalons.obsdirector.audio.ClipPlayer.playback, Prefs.settings) { p, s -> p.playing to s.duckPct }
-                .collect { (playing, pct) -> engine?.duck = if (playing) 1f - pct.coerceIn(0, 100) / 100f else 1f }
+            kotlinx.coroutines.flow.combine(dev.sharptalons.obsdirector.audio.ClipPlayer.playback, Prefs.settings) { p, s -> p.sounding to s.duckPct }
+                .collect { (playing, pct) -> engine?.duck = if (playing) 1f - pct.coerceIn(50, 100) / 100f else 1f }
         }
         // the live session's length and OBS stretches, kept up to date in the store
         scope.launch { while (true) { delay(5000); saveSession() } }
+        recoverClip()
+    }
+
+    // ---- a clip that was running when the app stopped ----
+
+    @kotlinx.serialization.Serializable
+    private data class RunningClip(val session: String, val startMs: Long, val name: String, val number: Int, val chapter: Boolean)
+
+    private val runningFile get() = File(app.filesDir, "running-clip.json")
+
+    /** Notes the running clip on disk, so it is saved even if the app is killed before it ends. */
+    private fun keepRunning(c: RunningClip?) {
+        runCatching {
+            if (c == null) runningFile.delete()
+            else runningFile.writeText(kotlinx.serialization.json.Json.encodeToString(RunningClip.serializer(), c))
+        }
+    }
+
+    /**
+     * The app was closed, killed or switched off while a clip ran: the clip is saved now, ending
+     * where the saved sound of its session ends (the sound is written as it comes in, so little
+     * or nothing is lost).
+     */
+    private fun recoverClip() {
+        val f = runningFile
+        if (!f.exists()) return
+        val c = runCatching { kotlinx.serialization.json.Json.decodeFromString(RunningClip.serializer(), f.readText()) }.getOrNull()
+        f.delete()
+        c ?: return
+        val r = ClipStore.recordings.value.firstOrNull { it.file == c.session } ?: return
+        if (r.clips.any { it.startMs == c.startMs }) return
+        val end = maxOf(c.startMs + 1000, r.durationMs)
+        val clip = Clip(ClipStore.newId(), c.startMs, end, name = c.name, number = c.number, chapterWritten = c.chapter, recovered = true)
+        ClipStore.addClip(r.file, clip)
+        lastSaved.value = "${clip.fullName()} saved after the app closed, ${len(end - c.startMs)} long"
+        toast("${clip.fullName()} was running when the app closed. It's saved in Recordings.")
+    }
+
+    /** The app's task was swiped away: a running clip is ended and saved before the app goes. */
+    fun onAppClosing() {
+        endClipIfRunning("closed")
+        saveSession()
     }
 
     /** What each recording's clip list looked like the last time it went to the PC. */
@@ -504,12 +546,12 @@ object Director {
     }
 
     /** Plays saved audio of [r] (see [sessionAudio]); says why when there is none. */
-    fun playSaved(r: Recording, key: String, fromMs: Long, toMs: Long) {
+    fun playSaved(r: Recording, key: String, fromMs: Long, toMs: Long, atMs: Long = fromMs) {
         scope.launch {
             val pieces = sessionAudio(r, fromMs, toMs)
             when {
                 pieces.isEmpty() -> toast(if (Prefs.settings.value.saveAudio) "No audio saved for this part." else "No audio saved: Save the session audio is off in Settings.")
-                !dev.sharptalons.obsdirector.audio.ClipPlayer.play(key, pieces, fromMs, toMs) -> toast("Couldn't play this audio.")
+                !dev.sharptalons.obsdirector.audio.ClipPlayer.play(key, pieces, fromMs, toMs, atMs) -> toast("Couldn't play this audio.")
             }
         }
     }
@@ -543,6 +585,7 @@ object Director {
         runningClip.value = heardSessionMs().coerceAtLeast(0)
         val (name, number) = nextClip()
         runningName = name to number
+        keepRunning(RunningClip(capture!!.id, runningClip.value!!, name, number, Prefs.settings.value.chapters && s.recActive && s.container == "mp4"))
         lastSaved.value = null
         vibrate(FeedbackTokens.CLIP_START)
         if (Prefs.settings.value.chapters && s.recActive) scope.launch {
@@ -582,6 +625,7 @@ object Director {
 
     fun cancelClip() {
         runningClip.value = null
+        keepRunning(null)
         lastSaved.value = "Clip cancelled. Nothing saved."
     }
 
@@ -595,6 +639,7 @@ object Director {
         val file = cap.id
         val end = maxOf(start + 1000, heardSessionMs())
         runningClip.value = null
+        keepRunning(null)
         val (name, number) = runningName ?: nextClip()
         runningName = null
         val recording = statusState.value.recActive
@@ -608,6 +653,7 @@ object Director {
         val why = when (auto) {
             "net" -> ", ended when the connection dropped"
             "disconnect" -> ", ended when you disconnected"
+            "closed" -> ", ended when the app closed"
             else -> ""
         }
         lastSaved.value = "${clip.fullName()} saved, ${len(end - start)} long$why"

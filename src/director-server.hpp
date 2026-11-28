@@ -32,6 +32,7 @@ class DeskDock;
 class QMessageBox;
 class UdpAudio;
 class VideoPreview;
+class Mp3Export;
 
 /*
  * The plugin's side of OBS Director (see docs/PROTOCOL.md):
@@ -183,6 +184,17 @@ private:
 	 * write next to one of these. */
 	QHash<QString, QString> recordedFiles;
 	void rememberRecording(const QString &path);
+	/* the name OBS would give a recording started now, without its extension */
+	QString nextRecordingName() const;
+
+	/* Save as MP3: OBS's FFmpeg turns a finished recording's sound into <name>.mp3 next to
+	 * it, then the phone or browser fetches it from GET /mp3/<token> on the web port. */
+	Mp3Export *mp3 = nullptr;
+	QHash<QString, QString> mp3Tokens; /* token -> the MP3's full path */
+	QHash<QString, QString> mp3ByFile; /* recording file name -> token */
+	QString mp3Token(const QString &file, const QString &path);
+	QJsonObject mp3Ready(const QString &file, const QString &path);
+	void serveMp3(QTcpSocket *sock, const QByteArray &token);
 
 	/* the desk chat: everyone connected sees every message (kept for this OBS session) */
 	struct ChatMessage {

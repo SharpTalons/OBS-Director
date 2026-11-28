@@ -13,12 +13,17 @@ the Free Software Foundation; either version 2 of the License, or
 #include "desk-dock.hpp"
 #include "udp-audio.hpp"
 #include "video-preview.hpp"
+#include "mp3-export.hpp"
 
 #include <obs-module.h>
 #include <obs.h>
 #include <plugin-support.h>
 #include <util/bmem.h>
 #include <util/platform.h>
+#include <util/config-file.h>
+#include <obs-frontend-api.h>
+
+#include <cstring>
 
 #include <QDateTime>
 #include <QFileInfo>
@@ -103,6 +108,19 @@ DirectorServer::DirectorServer(DeskDock *d, QObject *parent)
 	  audio(std::make_unique<UdpAudio>())
 {
 	loadConfig();
+
+	mp3 = new Mp3Export(this);
+	connect(mp3, &Mp3Export::progress, this, [this](const QString &file, int pct) {
+		event("mp3.progress", QJsonObject{{"file", file}, {"percent", pct}});
+	});
+	connect(mp3, &Mp3Export::finished, this, [this](const QString &file, bool ok, const QString &error) {
+		if (ok && recordedFiles.contains(file)) {
+			QFileInfo rec(recordedFiles.value(file));
+			event("mp3.ready", mp3Ready(file, rec.absolutePath() + "/" + rec.completeBaseName() + ".mp3"));
+		} else {
+			event("mp3.failed", QJsonObject{{"file", file}, {"error", ok ? QStringLiteral("unknown_recording") : error}});
+		}
+	});
 
 	preview = std::make_unique<VideoPreview>([this](const uint8_t *data, size_t size, int64_t ptsUs, bool key,
 							bool config) {
@@ -814,6 +832,39 @@ void DirectorServer::handleCommand(Client &c, int id, const QString &cmd, const 
 		bool ok = obs_frontend_recording_add_chapter(name.isEmpty() ? nullptr : name.toUtf8().constData());
 		return result(c, id, ok, {}, ok ? QString() : QStringLiteral("chapters_unsupported"));
 	}
+	if (cmd == "recording.mp3" || cmd == "recording.mp3.cancel") {
+		/* The sound of a finished recording as MP3, made on this PC with OBS's own FFmpeg.
+		 * The result says "converting" (then mp3.progress and mp3.ready or mp3.failed follow,
+		 * to everyone) or "ready" with the token to fetch it by. */
+		QString file = args.value("file").toString();
+		if (file.isEmpty() || file != QFileInfo(file).fileName() || !recordedFiles.contains(file))
+			return result(c, id, false, {}, "unknown_recording");
+		if (cmd == "recording.mp3.cancel") {
+			if (mp3->busy() && mp3->file() == file)
+				mp3->cancel();
+			return result(c, id, true);
+		}
+		if (obs_frontend_recording_active() && QFileInfo(lastFile).fileName() == file)
+			return result(c, id, false, {}, "still_recording");
+		QFileInfo rec(recordedFiles.value(file));
+		if (!rec.exists())
+			return result(c, id, false, {}, "recording_missing");
+		const QString out = rec.absolutePath() + "/" + rec.completeBaseName() + ".mp3";
+		QFileInfo made(out);
+		if (made.exists() && made.size() > 0 && made.lastModified() >= rec.lastModified()) {
+			QJsonObject d = mp3Ready(file, out);
+			d["state"] = "ready";
+			return result(c, id, true, d);
+		}
+		if (mp3->busy())
+			return mp3->file() == file ? result(c, id, true, QJsonObject{{"state", "converting"}})
+						   : result(c, id, false, {}, "busy");
+		if (!Mp3Export::available())
+			return result(c, id, false, {}, "mp3_unavailable");
+		if (!mp3->start(file, rec.absoluteFilePath(), out))
+			return result(c, id, false, {}, "busy");
+		return result(c, id, true, QJsonObject{{"state", "converting"}});
+	}
 	if (cmd == "clips.write") {
 		/* The phone's clip list for one recording, saved next to it as <name>.edl and <name>.csv
 		 * so the editor finds it. Only for recordings OBS made while this plugin was running,
@@ -911,6 +962,48 @@ void DirectorServer::postChat(const ChatMessage &m)
 	dock->addMessage(m.id, m.from, m.text, m.at, m.fromDevice.isEmpty());
 }
 
+QString DirectorServer::mp3Token(const QString &file, const QString &path)
+{
+	QString token = mp3ByFile.value(file);
+	if (token.isEmpty()) {
+		token = QString::number(QRandomGenerator::global()->generate64(), 16) +
+			QString::number(QRandomGenerator::global()->generate64(), 16);
+		mp3ByFile.insert(file, token);
+	}
+	mp3Tokens.insert(token, path);
+	return token;
+}
+
+QJsonObject DirectorServer::mp3Ready(const QString &file, const QString &path)
+{
+	QJsonObject d;
+	d["file"] = file;
+	d["token"] = mp3Token(file, path);
+	d["port"] = int(kWebPort);
+	d["bytes"] = double(QFileInfo(path).size());
+	d["name"] = QFileInfo(path).fileName();
+	return d;
+}
+
+QString DirectorServer::nextRecordingName() const
+{
+	/* Settings, Advanced, Recording: Filename Formatting, and whether spaces are allowed */
+	if (!obs_initialized())
+		return QString();
+	config_t *cfg = obs_frontend_get_profile_config();
+	const char *format = cfg ? config_get_string(cfg, "Output", "FilenameFormatting") : nullptr;
+	const char *mode = cfg ? config_get_string(cfg, "Output", "Mode") : nullptr;
+	const bool advanced = mode && strcmp(mode, "Advanced") == 0;
+	const bool noSpace = cfg && config_get_bool(cfg, advanced ? "AdvOut" : "SimpleOutput", "FileNameWithoutSpace");
+	char *name = os_generate_formatted_filename("mkv", !noSpace,
+						    format && *format ? format : "%CCYY-%MM-%DD %hh-%mm-%ss");
+	QString out = name ? QString::fromUtf8(name) : QString();
+	bfree(name);
+	if (out.endsWith(".mkv"))
+		out.chop(4);
+	return out;
+}
+
 void DirectorServer::rememberRecording(const QString &path)
 {
 	if (path.isEmpty())
@@ -1000,6 +1093,7 @@ QJsonObject DirectorServer::buildStatus()
 	}
 	/* file name only: the full path can contain the PC's account name */
 	rec["file"] = QFileInfo(lastFile).fileName();
+	rec["nextName"] = nextRecordingName();
 	rec["container"] = QFileInfo(lastFile).suffix().toLower();
 	rec["bytes"] = ro ? double(obs_output_get_total_bytes(ro)) : 0.0;
 	QString dir = QFileInfo(lastFile).absolutePath();

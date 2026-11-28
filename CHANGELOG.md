@@ -7,21 +7,32 @@ All notable changes to OBS Director (plugin and Android app). The project follow
 
 ## [0.9.0] - 2026-11-28
 
-Clips and the OBS recording no longer depend on each other.
+OBS recordings and clips are now two separate things, and neither gets in the other's way.
 
-### Clips any time (app and browser)
-- **Clip whether or not OBS records.** While connected, the phone or browser keeps its own copy of the mix, so Start clip works before the recording starts, between recordings and after it ends.
-- **Recording and clips leave each other alone.** Starting, pausing or stopping the recording never ends a running clip, and starting or ending a clip never touches the recording. Losing the connection still saves a running clip at the drop.
-- **Sessions:** Recordings now lists sessions, one card per time you were connected (a break of 10 minutes or more starts a new one). Each says how long it ran, how many clips it has, and which OBS recordings it overlaps ("Not recorded in OBS", "In an OBS recording", "In 2 OBS recordings"). Clips are named by the time of day they start.
-- **Still in the recording:** a clip marked while OBS records still adds a chapter marker, and the clip lists saved next to each recording on the PC hold that recording's clips in its own times, from every session that overlaps it.
-- **Export** per OBS recording (all formats, in that file's times, for the editor) or for the whole session (CSV and text, times from its start).
-- **Playable straight away:** a clip just made can be played and trimmed at once; the app saves the session audio a minute at a time, the browser 30 s at a time, and finishes the piece in hand when it is needed sooner. With the session audio always saved while connected, the app uses about 60 MB an hour; Keep it for (Settings) still clears old audio.
+### Clips: recordings of the mix on the phone or browser
+- **Start and end clips any time.** Clips record the mix the phone or browser hears, whether or not OBS is recording. Starting, pausing or stopping the OBS recording never ends a running clip, and clipping never touches the recording. Losing the connection still saves a running clip at the drop.
+- **A clip starts at your tap and ends at your next one.** "Start before your tap" and "Keep going after End" are gone: the sound around each clip is kept, so trimming can move either end out to take in more.
+- **Named after the recording:** the OBS recording's name, or, when OBS isn't recording, the name OBS would give the next one (from OBS's own Filename Formatting), then the clip number and your note: "2026-11-28 19-02-11 clip 2 – Choir intro". Shared audio files take the same name.
+- **Chapter markers:** while OBS records, "Clip 2" goes in where the clip starts and "Clip 2 – Choir intro" where it ends, once the note is in (OBS can only mark the moment it's told, so the end marker waits for the note, a minute at most).
+- **Clipping lives in Monitoring:** the Clip button, the next clip's name, and the latest clips with Play sit under the listening controls.
+- **Playable straight away**, while clipping and while OBS records. The app saves the mix a minute at a time and the browser 30 s at a time, finishing the piece in hand when it's needed sooner. With the mix always saved while connected, the app uses about 60 MB an hour; Keep it for (Settings) still clears old audio.
 
-### Lower the mix while a clip plays (app and browser)
-- Playing a saved clip lowers the live mix by 80% so you can hear the clip, and brings it back smoothly when the clip stops. Settings, Listening, **Lower the mix while a clip plays**: Off, 20, 40, 60, 80 or 100%.
+### OBS recordings: kept on the PC
+- **A smaller recording row on Monitor:** state, time, the file name (or the next one OBS will use), and round buttons. **Hold Pause to pause** and hold Stop to stop, so a stray tap can't touch the take; Resume and Start are a tap.
+- **Recordings has two tabs: Clips and OBS recordings.** OBS recordings lists each recording made while you were connected, with its clips and its clip list for the editor.
+- **Save as AAC:** once a recording stops, its sound can be saved on the phone or in the browser and played there. OBS records AAC, so the plugin copies that track out into an .m4a without re-encoding (seconds for an hour; other sound is encoded to AAC at 192 kb/s with OBS's own FFmpeg). A progress bar shows it getting ready on the PC and then copying over; it keeps going if you leave the screen. The .m4a is also left next to the recording on the PC.
+
+### Listening
+- **Lower the mix while playing:** playing a clip or an AAC lowers the live mix, 80% unless changed; Settings has a slider from Off to 100%.
+- **Double-tap the volume slider** (double-click in the browser) to go back to the mix as set in OBS.
+- **The floating button** shows the record sign only while a clip is recording; OBS recording on its own no longer shows it.
+
+### Plugin
+- `recording.aac` and `recording.aac.cancel` commands, `aac.progress`, `aac.ready` and `aac.failed` events, and `GET /aac/<token>` on the web port. The status's `rec` gains `nextName`.
+- Uses OBS's own FFmpeg, loaded on first use, so the plugin still loads if OBS ships a different version (Save as AAC then says it can't here).
 
 ### Earlier recordings
-- Clips from before 0.9.0 stay as they were, under their recording, in its file times.
+- Clips from before 0.9.0 keep their names and times.
 
 ## [0.8.1] - 2026-11-27
 

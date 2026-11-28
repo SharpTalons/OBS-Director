@@ -59,13 +59,13 @@ The status carries the recording's file name only, never its full path.
 
 ```json
 {"type":"status","t":1795365974000,
- "rec":{"active":true,"paused":false,"fileTimeMs":2331000,"file":"2026-11-22 20-35-39.mp4","container":"mp4","bytes":11660000000,"diskFreeMB":421888},
+ "rec":{"active":true,"paused":false,"fileTimeMs":2331000,"file":"2026-11-22 20-35-39.mp4","nextName":"2026-11-22 21-14-02","container":"mp4","bytes":11660000000,"diskFreeMB":421888},
  "stream":{"active":true,"durationMs":6128000,"kbps":5940.2,"dropped":214,"total":367680,"congestion":0.0},
  "pc":{"cpu":18.4,"fps":60.0,"renderLag":0,"encodeLag":0},
  "scene":"Speaker wide"}
 ```
 
-`fileTimeMs` is the position in the recording file: time since the recording started, minus time spent paused.
+`fileTimeMs` is the position in the recording file: time since the recording started, minus time spent paused. `nextName` is the name OBS would give a recording started now, from its Filename Formatting setting, without the extension; clips made while OBS isn't recording take it (added in 0.9.0).
 
 ### Commands (app → plugin)
 
@@ -86,6 +86,8 @@ The status carries the recording's file name only, never its full path.
 | `video.stop` | | Closes this device's video channel |
 | `chapter.add` | `name` | Adds a chapter marker at the current position (OBS 30.2+, Hybrid MP4 only); `ok:false, error:"chapters_unsupported"` otherwise |
 | `clips.write` | `file`, `edl`, `csv` | Saves the clip list next to the recording as `<name>.edl` and `<name>.csv`. `file` is the recording's file name only, and must be a recording OBS made while the plugin was running (`error:"unknown_recording"` otherwise). At most 1 MB each. Result has `files` (the names written) and `pc`. Added in 0.5.0; older plugins answer `unknown_command` |
+| `recording.aac` | `file` | Saves the sound of a finished recording as AAC, as `<name>.m4a` next to it: OBS's AAC track is copied as it is; other sound is encoded at 192 kb/s. `file` as for `clips.write`. Result has `state`: `"converting"` (then `aac.progress` and `aac.ready` or `aac.failed` follow) or `"ready"` with the fields of `aac.ready`. Errors: `still_recording`, `unknown_recording`, `recording_missing`, `busy` (another one is being made), `aac_unavailable` (OBS's FFmpeg isn't the version the plugin was built for). Added in 0.9.0 |
+| `recording.aac.cancel` | `file` | Stops making it; `aac.failed` follows with `error:"cancelled"` |
 | `desk.send` | `id`, `text` | Posts a message in the desk chat (up to 1000 characters, line breaks kept). `id` is the app's own message ID (letters, digits, dashes, up to 64); sending the same `id` again doesn't post twice. Result has `id` and `at` |
 | `desk.history` | | Result has `messages`: the chat so far in this OBS session (up to 500), each as in `desk.message` |
 | `desk.feed` | `text` | Adds a line to the dock's activity feed |
@@ -109,6 +111,9 @@ A ping keeps the line warm: `{"type":"ping","t":…}` gets `{"type":"pong","t":�
 | `record.paused`, `record.resumed` | |
 | `stream.started`, `stream.stopped` | |
 | `scene.changed` | `scene` |
+| `aac.progress` | `file`, `percent` (0–100) while a recording's sound is being saved as AAC |
+| `aac.ready` | `file`, `token`, `port` (the web port), `bytes`, `name` (`<name>.m4a`). Fetch it with `GET /aac/<token>` on that port |
+| `aac.failed` | `file`, `error` (`cancelled`, `no_audio`, `open_failed`, `write_failed`, …) |
 | `desk.message` | A new chat message, to everyone connected: `id`, `from` (the sender's name, or "Desk"), `text`, `at` (ms), `desk` (written in OBS), `mine` (sent by this device), `seen` (read at the desk) |
 | `desk.seen` | `ids`: messages the desk has now read (the dock was showing with OBS in front). The sender's ticks turn blue |
 
@@ -156,6 +161,7 @@ Added in 0.6.0. The plugin serves a small web app from its own resources (`src/w
 | `/` | The page |
 | `/app.js`, `/app.css`, `/icon.svg` | Its script, styles and icon |
 | `/ws` | The WebSocket (below) |
+| `/aac/<token>` | A recording's sound saved by `recording.aac` (`audio/mp4`, with `Content-Length`, sent in pieces). The token comes only to paired devices, in `aac.ready` |
 
 - **Methods:** only GET; anything else gets 405.
 - **Request size:** at most 8 KB, which must arrive within 10 s.

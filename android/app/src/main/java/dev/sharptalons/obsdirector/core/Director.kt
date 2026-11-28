@@ -11,7 +11,7 @@ import androidx.core.content.ContextCompat
 import dev.sharptalons.obsdirector.audio.AudioEngine
 import dev.sharptalons.obsdirector.audio.Loudness
 import dev.sharptalons.obsdirector.audio.Levels
-import dev.sharptalons.obsdirector.audio.SessionRecorder
+import dev.sharptalons.obsdirector.audio.SessionCapture
 import dev.sharptalons.obsdirector.net.Connection
 import dev.sharptalons.obsdirector.net.Protocol
 import dev.sharptalons.obsdirector.net.data
@@ -34,6 +34,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import java.io.File
+import kotlinx.coroutines.withContext
 
 /**
  * The app's single source of truth: the link to the plugin, what OBS is doing, the mix, clips,
@@ -41,6 +42,9 @@ import java.io.File
  * screen off.
  */
 @SuppressLint("StaticFieldLeak")
+/** Silence from OBS for this long (away, or a long drop) ends a session; the next sound starts a new one. */
+private const val SESSION_BREAK_MS = 10 * 60_000L
+
 object Director {
     private lateinit var app: Context
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -79,12 +83,13 @@ object Director {
     val levels: StateFlow<Levels> get() = levelsState
     private val latencyState = MutableStateFlow(0)
     val latencyMs: StateFlow<Int> get() = latencyState
-    @Volatile private var recorder: SessionRecorder? = null
-    private var recorderFile: String? = null
+    /** The phone's own copy of this session (see [SessionCapture]); clips are timed against it. */
+    @Volatile private var capture: SessionCapture? = null
+    @Volatile private var lastPcmAt = 0L
 
     // ---- clips ----
     private val runningClip = MutableStateFlow<Long?>(null)
-    /** file time where the running clip starts, or null */
+    /** session time where the running clip starts, or null */
     val clipStart: StateFlow<Long?> get() = runningClip
     private val pendingNote = MutableStateFlow<Pair<String, Clip>?>(null)
     val noteFor: StateFlow<Pair<String, Clip>?> get() = pendingNote
@@ -141,6 +146,14 @@ object Director {
         scope.launch { Prefs.settings.collect { router.preferredKey = it.outputPref } }
         scope.launch { alertLoop() }
         scope.launch { clipListLoop() }
+        // While a clip plays, turn the mix down by the share Settings say (80% unless changed), so
+        // the clip can be heard over it; back up when it stops.
+        scope.launch {
+            kotlinx.coroutines.flow.combine(dev.sharptalons.obsdirector.audio.ClipPlayer.playback, Prefs.settings) { p, s -> p.playing to s.duckPct }
+                .collect { (playing, pct) -> engine?.duck = if (playing) 1f - pct.coerceIn(0, 100) / 100f else 1f }
+        }
+        // the live session's length and OBS stretches, kept up to date in the store
+        scope.launch { while (true) { delay(5000); saveSession() } }
     }
 
     /** What each recording's clip list looked like the last time it went to the PC. */
@@ -158,21 +171,25 @@ object Director {
             .collect { (recs, link, on) ->
                 if (!on || link != LinkState.CONNECTED) return@collect
                 val conn = connection ?: return@collect
-                for (r in recs) {
-                    if (r.clips.isEmpty()) continue
-                    val sig = r.clips.hashCode()
-                    if (sentClipLists[r.file] == sig) continue
-                    sentClipLists[r.file] = sig
+                // each OBS recording gets the clips (or their parts) from every session that overlaps it
+                val byFile = LinkedHashMap<String, MutableList<Clip>>()
+                for (r in recs) for (f in r.obsFiles()) byFile.getOrPut(f) { ArrayList() } += r.forObsFile(f).clips
+                for ((file, clips) in byFile) {
+                    if (clips.isEmpty()) continue
+                    val view = Recording(file = file, startedAt = 0, clips = clips.sortedBy { it.startMs })
+                    val sig = view.clips.hashCode()
+                    if (sentClipLists[file] == sig) continue
+                    sentClipLists[file] = sig
                     val res = conn.command("clips.write", mapOf(
-                        "file" to JsonPrimitive(r.file),
-                        "edl" to JsonPrimitive(Exporter.edl(r)),
-                        "csv" to JsonPrimitive(Exporter.csv(r)),
+                        "file" to JsonPrimitive(file),
+                        "edl" to JsonPrimitive(Exporter.edl(view)),
+                        "csv" to JsonPrimitive(Exporter.csv(view)),
                     ))
                     if (res.ok()) {
                         val pcName = pcState.value?.name ?: "the PC"
-                        if (r.savedOnPc != pcName) ClipStore.update(r.file) { it.copy(savedOnPc = pcName) }
+                        for (r in recs) if (file in r.obsFiles() && r.savedOnPc != pcName) ClipStore.update(r.file) { it.copy(savedOnPc = pcName) }
                     } else if (res["error"]?.jsonPrimitive?.content == "not_connected" || res["error"]?.jsonPrimitive?.content == "timeout") {
-                        sentClipLists.remove(r.file) // try again on the next change or reconnect
+                        sentClipLists.remove(file) // try again on the next change or reconnect
                     }
                 }
             }
@@ -220,7 +237,7 @@ object Director {
         endClipIfRunning("disconnect")
         stopVideo()
         stopAudio()
-        finishRecorder()
+        endSession()
         linkState.value = LinkState.DISCONNECTED
         approvalState.value = null
         if (!keepError) linkError.value = null
@@ -334,10 +351,12 @@ object Director {
         }
     }
 
+    /** A recording stopping doesn't touch a running clip: clips are timed on the session, not the file. */
     private fun onRecordingEnded(file: String, durationMs: Long) {
-        endClipIfRunning("stop")
-        if (file.isNotEmpty()) ClipStore.update(file) { it.copy(live = false, durationMs = durationMs) }
-        finishRecorder()
+        // an entry from before 0.9.0, still marked as recording
+        if (file.isNotEmpty()) ClipStore.recordings.value.firstOrNull { it.file == file && !it.session }?.let {
+            ClipStore.update(file) { r -> r.copy(live = false, durationMs = durationMs) }
+        }
     }
 
     // =============================================================== audio
@@ -403,41 +422,82 @@ object Director {
 
     private fun onPcm(pcm: ShortArray, fileTimeUs: Long, recording: Boolean, gap: Boolean) {
         if (gap) synchronized(dropoutTimes) { dropoutTimes.addLast(SystemClock.elapsedRealtime()) }
-        if (!recording || !Prefs.settings.value.saveAudio) {
-            if (recorder != null && !recording) finishRecorder()
-            return
-        }
-        val file = statusState.value.file
-        if (file.isEmpty()) return
-        var rec = recorder
-        if (rec == null || recorderFile != file) {
-            finishRecorder()
-            val name = file.substringBeforeLast('.') + ".m4a"
-            val out = File(ClipStore.sessionsDir, name)
-            rec = SessionRecorder(out, fileTimeUs / 1000).also { it.start() }
-            recorder = rec
-            recorderFile = file
-            ClipStore.ensure(file, live = true)
-            ClipStore.update(file) { it.copy(audioFile = name, audioOffsetMs = fileTimeUs / 1000) }
-        }
-        rec.write(pcm, fileTimeUs / 1000, gap)
+        val now = SystemClock.elapsedRealtime()
+        var cap = capture
+        // back after a long time away: that was another session
+        if (cap != null && now - lastPcmAt > SESSION_BREAK_MS) { endSession(); cap = null }
+        lastPcmAt = now
+        if (cap == null) cap = beginSession()
+        cap.write(pcm, gap, recording, statusState.value.file, fileTimeUs / 1000)
     }
 
-    private fun finishRecorder() {
-        val rec = recorder ?: return
-        val file = recorderFile
-        recorder = null
-        recorderFile = null
+    /** A new session starts with the first sound after connecting. */
+    private fun beginSession(): SessionCapture {
+        val id = "session-" + java.text.SimpleDateFormat("yyyyMMdd-HHmmss", java.util.Locale.US).format(java.util.Date())
+        ClipStore.startSession(id)
+        val cap = SessionCapture(id, ClipStore.sessionsDir, Prefs.settings.value.saveAudio) { saveSession(withEnvelope = true) }
+        capture = cap
+        return cap
+    }
+
+    /** Writes the live session's length, OBS stretches and audio pieces to the store (and its loudness, now and then). */
+    private fun saveSession(withEnvelope: Boolean = false) {
+        val cap = capture ?: return
+        val spans = cap.spans(); val segs = cap.segments(); val pos = cap.posMs
+        ClipStore.update(cap.id) { r ->
+            r.copy(durationMs = pos, obs = spans, segments = segs, envelope = if (withEnvelope) cap.envelope() else r.envelope)
+        }
+    }
+
+    private fun endSession() {
+        val cap = capture ?: return
+        capture = null
         scope.launch(Dispatchers.IO) {
-            rec.finish()
-            if (file != null) ClipStore.update(file) { it.copy(envelope = rec.envelopeSnapshot(), gaps = rec.gapsSnapshot()) }
-            if (file != null && Prefs.settings.value.sidecar) writeSidecar(file)
+            cap.finish()
+            ClipStore.update(cap.id) { r ->
+                r.copy(live = false, durationMs = cap.posMs, obs = cap.spans(), segments = cap.segments(), envelope = cap.envelope())
+            }
         }
     }
 
-    /** The envelope and gaps of the recording in progress, for adjusting clips while it's still going. */
-    fun liveEnvelope(file: String): List<Float>? = if (recorderFile == file) recorder?.envelopeSnapshot() else null
-    fun liveGaps(file: String): List<Gap>? = if (recorderFile == file) recorder?.gapsSnapshot() else null
+    /** The loudness of the live session, for the trimmer, while it's still going. */
+    fun liveEnvelope(file: String): List<Float>? = capture?.takeIf { it.id == file }?.envelope()
+
+    /** How long the live session [file] is so far, or null if it isn't the live one. */
+    fun liveLengthMs(file: String): Long? = capture?.takeIf { it.id == file }?.posMs
+
+    /** The live session, if there is one. */
+    val sessionId: String? get() = capture?.id
+
+    /** Session time of what you are hearing now (the newest sound, less what is queued to play). */
+    fun heardSessionMs(): Long {
+        val cap = capture ?: return 0
+        return (cap.posMs - (engine?.queuedMs() ?: 0)).coerceAtLeast(0)
+    }
+
+    /**
+     * The saved audio of [r] covering [fromMs]..[toMs], as files and where each starts. For the
+     * live session, the piece being written is finished first if it holds any of it, so a clip
+     * can be played or shared moments after it is made.
+     */
+    suspend fun sessionAudio(r: Recording, fromMs: Long, toMs: Long): List<Pair<File, Long>> = withContext(Dispatchers.IO) {
+        val cap = capture?.takeIf { it.id == r.file }
+        if (cap != null) {
+            cap.flush(toMs)
+            ClipStore.audioFor(r, fromMs, toMs, cap.segments())
+        } else ClipStore.audioFor(r, fromMs, toMs)
+    }
+
+    /** Plays saved audio of [r] (see [sessionAudio]); says why when there is none. */
+    fun playSaved(r: Recording, key: String, fromMs: Long, toMs: Long) {
+        scope.launch {
+            val pieces = sessionAudio(r, fromMs, toMs)
+            when {
+                pieces.isEmpty() -> toast(if (Prefs.settings.value.saveAudio) "No audio saved for this part." else "No audio saved: Save the session audio is off in Settings.")
+                !dev.sharptalons.obsdirector.audio.ClipPlayer.play(key, pieces, fromMs, toMs) -> toast("Couldn't play this audio.")
+            }
+        }
+    }
 
     // =============================================================== time
 
@@ -453,19 +513,28 @@ object Director {
 
     // =============================================================== clips
 
+    /**
+     * Starts a clip, whether or not OBS is recording: clips are timed on the session (the phone's
+     * own copy of the mix), so starting and stopping the recording never touches them, and
+     * starting or ending a clip never touches the recording. While OBS records, the clip also
+     * gets a chapter marker in the recording, if Settings say so.
+     */
     fun startClip() {
         val s = statusState.value
-        if (!s.recActive || runningClip.value != null || linkState.value != LinkState.CONNECTED) return
+        if (runningClip.value != null || linkState.value != LinkState.CONNECTED || capture == null) return
         val lead = Prefs.settings.value.leadMinutes * 60_000L
-        runningClip.value = (nowFileTimeMs() - lead).coerceAtLeast(0)
+        runningClip.value = (heardSessionMs() - lead).coerceAtLeast(0)
         pendingNote.value = null
         lastSaved.value = null
         vibrate(FeedbackTokens.CLIP_START)
-        if (Prefs.settings.value.chapters) scope.launch {
-            val n = (ClipStore.recordings.value.firstOrNull { it.file == s.file }?.clips?.size ?: 0) + 1
+        if (Prefs.settings.value.chapters && s.recActive) scope.launch {
+            val n = (ClipStore.recordings.value.firstOrNull { it.file == capture?.id }?.clips?.size ?: 0) + 1
             connection?.command("chapter.add", mapOf("name" to JsonPrimitive("Clip $n")))
         }
     }
+
+    /** How long the running clip is so far. */
+    fun runningClipMs(): Long = runningClip.value?.let { (heardSessionMs() - it).coerceAtLeast(0) } ?: 0
 
     fun endClip() = finishClip(auto = null)
 
@@ -480,22 +549,24 @@ object Director {
 
     private fun finishClip(auto: String?) {
         val start = runningClip.value ?: return
-        val file = statusState.value.file.ifEmpty { return }
+        val cap = capture ?: run { runningClip.value = null; return }
+        val file = cap.id
         val pad = if (auto == null) Prefs.settings.value.padSeconds * 1000L else 0
-        val end = maxOf(start + 1000, nowFileTimeMs() + pad)
+        val end = maxOf(start + 1000, heardSessionMs() + pad)
         runningClip.value = null
-        val clip = Clip(ClipStore.newId(), start, end, chapterWritten = Prefs.settings.value.chapters && statusState.value.container == "mp4")
-        ClipStore.ensure(file, live = statusState.value.recActive)
+        val clip = Clip(ClipStore.newId(), start, end, chapterWritten = Prefs.settings.value.chapters && statusState.value.container == "mp4" && statusState.value.recActive)
+        saveSession()
         ClipStore.addClip(file, clip)
+        // close the audio piece being written, so the new clip can be played straight away
+        scope.launch(Dispatchers.IO) { cap.flush(end); saveSession() }
         vibrate(FeedbackTokens.CLIP_SAVED)
         val n = ClipStore.recordings.value.firstOrNull { it.file == file }?.clips?.indexOfFirst { it.id == clip.id }?.plus(1) ?: 0
         val why = when (auto) {
             "net" -> ", ended when the connection dropped"
-            "stop" -> ", ended when the recording stopped"
             "disconnect" -> ", ended when you disconnected"
             else -> ""
         }
-        lastSaved.value = "Clip $n saved, ${tc(start)} → ${tc(end)} (${len(end - start)})$why"
+        lastSaved.value = "Clip $n saved, ${len(end - start)} long$why"
         if (Prefs.settings.value.askNote && auto == null) pendingNote.value = file to clip
     }
 
@@ -747,13 +818,6 @@ object Director {
                 v.vibrate(VibrationEffect.createWaveform(timing, -1))
             }
         }
-    }
-
-    private fun writeSidecar(file: String) {
-        val rec = ClipStore.recordings.value.firstOrNull { it.file == file } ?: return
-        if (rec.clips.isEmpty()) return
-        val dir = File(app.filesDir, "exports").apply { mkdirs() }
-        File(dir, file.substringBeforeLast('.') + ".csv").writeText(Exporter.csv(rec))
     }
 
     fun serviceIntent(): Intent = Intent(app, MonitorService::class.java)

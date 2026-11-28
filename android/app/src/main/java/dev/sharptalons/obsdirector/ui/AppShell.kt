@@ -136,6 +136,8 @@ fun AppShell() {
 
     // phones get tabs at the bottom; tablets, unfolded phones and landscape get a rail at the side
     val wide = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp >= 600
+    // the dot on Recordings: OBS is recording now (sessions are always live while connected)
+    val obsRecording = Director.status.collectAsState().value.recActive && link == LinkState.CONNECTED
     val tab = when (screen) { "recordings", "recording" -> "recordings"; "config" -> "config"; "desk" -> "desk"; "monitor", "stream" -> "monitor"; else -> "monitor" }
     val unread by Director.deskUnreadCount.collectAsState()
     val unreadAlert by Director.deskUnreadAlert.collectAsState()
@@ -144,7 +146,7 @@ fun AppShell() {
     val deskBadgeSays = when (unreadAlert) { 2 -> "including a severe alert"; 1 -> "including an alert"; else -> null }
     val tabs: @Composable (Modifier) -> Unit = { m ->
         NavItem("Monitor", Icons.Outlined.Headphones, tab == "monitor", null, m, rail = wide) { screen = "monitor" }
-        NavItem("Recordings", Icons.Outlined.VideoLibrary, tab == "recordings", if (recordings.any { it.live }) "•" else null, m, rail = wide) { screen = "recordings" }
+        NavItem("Recordings", Icons.Outlined.VideoLibrary, tab == "recordings", if (obsRecording) "•" else null, m, rail = wide) { screen = "recordings" }
         NavItem("Desk", Icons.AutoMirrored.Outlined.Chat, tab == "desk", deskBadge, m, badgeColor = deskBadgeColor, badgeSays = deskBadgeSays, rail = wide) { screen = "desk" }
         NavItem("Settings", Icons.Outlined.Settings, tab == "config", null, m, rail = wide) { screen = "config" }
     }

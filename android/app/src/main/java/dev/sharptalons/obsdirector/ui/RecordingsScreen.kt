@@ -113,11 +113,27 @@ private fun clipsText(n: Int) = when (n) { 0 -> "No clips"; 1 -> "1 clip"; else 
 
 private fun clipKey(r: Recording, c: Clip) = "${r.file}:${c.id}"
 
-private fun clipName(c: Clip) = c.note.ifBlank { "Clip at ${Director.tc(c.startMs)}" }
+/**
+ * When [ms] of an entry's own time happened: the time of day for a session ("19:14:05"), the
+ * recording's time for an entry from before 0.9.0 ("00:12:00").
+ */
+fun clockAt(r: Recording, ms: Long): String =
+    if (r.session) SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(java.util.Date(r.startedAt + ms)) else Director.tc(ms)
 
-private fun clipMeta(c: Clip) = "${clipLength(c.lengthMs)} long · at ${Director.tc(c.startMs)}"
+private fun clipName(r: Recording, c: Clip) = c.note.ifBlank { "Clip at ${clockAt(r, c.startMs)}" }
 
-private fun recordingMeta(r: Recording) = (if (r.live) "Recording now" else Director.len(r.durationMs)) + " · " + clipsText(r.clips.size)
+private fun clipMeta(r: Recording, c: Clip) = "${clipLength(c.lengthMs)} long · at ${clockAt(r, c.startMs)}"
+
+/** "Now · 3 clips · In an OBS recording", "1 h 12 min · 2 clips · Not recorded in OBS". */
+private fun recordingMeta(r: Recording): String {
+    val obs = when {
+        !r.session -> null
+        r.obs.isEmpty() -> "Not recorded in OBS"
+        r.obsFiles().size == 1 -> "In an OBS recording"
+        else -> "In ${r.obsFiles().size} OBS recordings"
+    }
+    return listOfNotNull(if (r.live) "Now" else Director.len(r.durationMs), clipsText(r.clips.size), obs).joinToString(" · ")
+}
 
 /**
  * Recordings, clips first, on one screen. Each recording is a card with its clips inside; tap a
@@ -301,7 +317,7 @@ private fun RecordingCard(r: Recording, open: Boolean, playingKey: String?, save
                 if (r.live) Row(Modifier.clip(CircleShape).background(Tints.rec.bg).padding(horizontal = 8.dp, vertical = 3.dp),
                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                     Box(Modifier.size(7.dp).clip(CircleShape).background(T.negative))
-                    Text("REC", style = Type.label.copy(fontWeight = FontWeight.Bold, color = Tints.rec.ink))
+                    Text("NOW", style = Type.label.copy(fontWeight = FontWeight.Bold, color = Tints.rec.ink))
                 }
                 Column(Modifier.weight(1f)) {
                     Text(title, style = Type.body.copy(fontSize = 16.sp, fontWeight = FontWeight.Medium), modifier = Modifier.semantics { heading() })
@@ -324,17 +340,17 @@ private fun RecordingCard(r: Recording, open: Boolean, playingKey: String?, save
                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     Box(Modifier.size(48.dp).clip(CircleShape).background(if (playing) T.accent else T.raised)
                         .clickable(role = Role.Button) { onPlay(c) }
-                        .semantics { contentDescription = (if (playing) "Stop " else "Play ") + clipName(c) }, contentAlignment = Alignment.Center) {
+                        .semantics { contentDescription = (if (playing) "Stop " else "Play ") + clipName(r, c) }, contentAlignment = Alignment.Center) {
                         Icon(if (playing) Icons.Outlined.Pause else Icons.Outlined.PlayArrow, null, tint = if (playing) T.ground else T.text, modifier = Modifier.size(24.dp))
                     }
                     Column(Modifier.weight(1f).heightIn(min = 52.dp).clip(RoundedCornerShape(10.dp)).clickable(role = Role.Button, onClickLabel = "Open") { onOpenClip(c) }
                         .padding(vertical = 4.dp), verticalArrangement = Arrangement.Center) {
                         // its note as the title; a clip without one is named by its time, "No note" under it
-                        Text(clipName(c), style = Type.body.copy(fontSize = 15.sp, fontWeight = FontWeight.Medium), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(if (c.note.isBlank()) "No note · ${clipLength(c.lengthMs)} long" else clipMeta(c), style = Type.small.copy(fontSize = 13.sp))
+                        Text(clipName(r, c), style = Type.body.copy(fontSize = 15.sp, fontWeight = FontWeight.Medium), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(if (c.note.isBlank()) "No note · ${clipLength(c.lengthMs)} long" else clipMeta(r, c), style = Type.small.copy(fontSize = 13.sp))
                     }
                     Box(Modifier.size(48.dp).clip(CircleShape).clickable(role = Role.Button) { onOpenClip(c) }
-                        .semantics { contentDescription = "More for ${clipName(c)}" }, contentAlignment = Alignment.Center) {
+                        .semantics { contentDescription = "More for ${clipName(r, c)}" }, contentAlignment = Alignment.Center) {
                         Icon(Icons.Outlined.MoreHoriz, null, tint = T.text2)
                     }
                 }
@@ -361,7 +377,7 @@ private fun MiniPlayer(all: List<Recording>, p: ClipPlayer.State) {
         Row(Modifier.fillMaxWidth().padding(start = 14.dp, end = 8.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Column(Modifier.weight(1f)) {
-                Text(c?.let { clipName(it) } ?: "Playing", style = Type.body.copy(fontSize = 14.sp, fontWeight = FontWeight.Medium), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(c?.let { clipName(r, it) } ?: "Playing", style = Type.body.copy(fontSize = 14.sp, fontWeight = FontWeight.Medium), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text("${Director.len(done)} of ${Director.len(span)}" + (r?.let { " · " + recordingTitle(it) } ?: ""), style = Type.small.copy(fontSize = 12.sp, color = T.text2))
             }
             Box(Modifier.size(48.dp).clip(CircleShape).background(T.text).clickable(role = Role.Button) { ClipPlayer.stop() }
@@ -382,9 +398,9 @@ private fun ClipSheet(r: Recording, c: Clip, playing: Boolean, onPlay: () -> Uni
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = T.surface) {
         Column(Modifier.padding(start = 16.dp, end = 16.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Column {
-                Text(when (mode) { "trim" -> "Trim clip"; "note" -> "Note"; else -> clipName(c) },
+                Text(when (mode) { "trim" -> "Trim clip"; "note" -> "Note"; else -> clipName(r, c) },
                     style = Type.cardTitle.copy(fontSize = 18.sp, fontWeight = FontWeight.Medium), modifier = Modifier.semantics { heading() })
-                Text(clipMeta(c) + " · " + recordingTitle(r), style = Type.small.copy(fontSize = 13.sp))
+                Text(clipMeta(r, c) + " · " + recordingTitle(r), style = Type.small.copy(fontSize = 13.sp))
             }
             when (mode) {
                 "trim" -> TrimPanel(r, c, onDone = { mode = "clip" })
@@ -432,7 +448,7 @@ private fun TrimPanel(r: Recording, c: Clip, onDone: () -> Unit) {
     var active by remember(c.id) { mutableStateOf("start") } // the end ±1 s moves
     val playback by ClipPlayer.playback.collectAsState()
     val envelope = Director.liveEnvelope(r.file) ?: r.envelope
-    val duration = if (r.live) Director.nowFileTimeMs() else r.durationMs.coerceAtLeast(envelope.size * Trim.ENVELOPE_MS)
+    val duration = Director.liveLengthMs(r.file) ?: r.durationMs.coerceAtLeast(envelope.size * Trim.ENVELOPE_MS)
     // the view: the clip with 15 s either side, widened when an end is dragged to its side
     var view by remember(c.id) { mutableStateOf(Trim.window(c.startMs, c.endMs, duration)) }
     val trimPlaying = playback.playing && playback.key == "trim"
@@ -583,8 +599,9 @@ private fun EdgeTime(label: String, ms: Long, active: Boolean, modifier: Modifie
 private fun RecordingSheet(r: Recording, onDelete: () -> Unit, onDismiss: () -> Unit) {
     val context = LocalContext.current
     var saving by remember { mutableStateOf("") }
+    var savingView by remember { mutableStateOf(r) }
     val save = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
-        val text = Exporter.export(r, saving)
+        val text = Exporter.export(savingView, saving)
         if (uri != null) runCatching { context.contentResolver.openOutputStream(uri)?.use { it.write(text.toByteArray()) } }
             .onSuccess { Director.toast("Saved"); onDismiss() }.onFailure { Director.toast("Couldn't save the file") }
     }
@@ -592,17 +609,25 @@ private fun RecordingSheet(r: Recording, onDelete: () -> Unit, onDismiss: () -> 
         Column(Modifier.padding(start = 16.dp, end = 16.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Column {
                 Text(recordingTitle(r), style = Type.cardTitle.copy(fontSize = 18.sp, fontWeight = FontWeight.Medium), modifier = Modifier.semantics { heading() })
-                Text(recordingMeta(r) + " · " + r.file, style = Type.small.copy(fontSize = 13.sp), maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text(recordingMeta(r) + (if (r.session) "" else " · " + r.file), style = Type.small.copy(fontSize = 13.sp), maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
-            if (r.clips.isNotEmpty()) {
-                Text("Export the clip list for your editor. Tap a format to share it, or the arrow to save it to the phone.", style = Type.small.copy(fontSize = 13.sp))
+            // a clip list for each OBS recording the session overlaps (for the editor), and one for the
+            // whole session with times from its start (to read or paste)
+            val targets = buildList {
+                for (file in r.obsFiles()) r.forObsFile(file).takeIf { it.clips.isNotEmpty() }?.let { add(Triple("For $file", it, exportFormats)) }
+                if (r.session && r.clips.isNotEmpty())
+                    add(Triple(if (r.obs.isEmpty()) "Times from the start of the session" else "The whole session, times from its start", r, exportFormats.filter { it.id != "Resolve EDL" }))
+            }
+            if (targets.isNotEmpty()) Text("Export the clip list. Tap a format to share it, or the arrow to save it to the phone.", style = Type.small.copy(fontSize = 13.sp))
+            targets.forEach { (title, view, formats) ->
+                Text(title, style = Type.small.copy(fontSize = 12.sp, color = T.text2), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(T.sunken)) {
-                    exportFormats.forEachIndexed { i, f ->
+                    formats.forEachIndexed { i, f ->
                         if (i > 0) HorizontalDivider(color = T.rule)
                         Row(Modifier.fillMaxWidth().heightIn(min = 60.dp), verticalAlignment = Alignment.CenterVertically) {
                             Row(Modifier.weight(1f).heightIn(min = 60.dp).clickable(role = Role.Button, onClickLabel = "Share") {
                                 context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain")
-                                    .putExtra(Intent.EXTRA_TEXT, Exporter.export(r, f.id)), "Share clips"))
+                                    .putExtra(Intent.EXTRA_TEXT, Exporter.export(view, f.id)), "Share clips"))
                                 onDismiss()
                             }.padding(start = 14.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                                 Box(Modifier.size(36.dp).clip(RoundedCornerShape(10.dp)).background(f.tint.bg), contentAlignment = Alignment.Center) {
@@ -614,8 +639,8 @@ private fun RecordingSheet(r: Recording, onDelete: () -> Unit, onDismiss: () -> 
                                 }
                             }
                             Box(Modifier.padding(end = 6.dp).size(48.dp).clip(CircleShape).clickable(role = Role.Button) {
-                                saving = f.id
-                                save.launch("${r.file.substringBeforeLast('.')}.${Exporter.extension(f.id)}")
+                                saving = f.id; savingView = view
+                                save.launch("${view.file.substringBeforeLast('.')}.${Exporter.extension(f.id)}")
                             }.semantics { contentDescription = "Save the ${f.label} file to the phone" }, contentAlignment = Alignment.Center) {
                                 Icon(Icons.Outlined.FileDownload, null, tint = T.text2)
                             }
@@ -624,8 +649,8 @@ private fun RecordingSheet(r: Recording, onDelete: () -> Unit, onDismiss: () -> 
                 }
             }
             if (!r.live) {
-                DangerLink("Delete this recording", onDelete)
-                Text("Only from this phone. The recording on the PC isn't touched.", style = Type.small.copy(fontSize = 12.sp),
+                DangerLink(if (r.session) "Delete this session" else "Delete this recording", onDelete)
+                Text("Only from this phone. The recordings on the PC aren't touched.", style = Type.small.copy(fontSize = 12.sp),
                     textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
             }
         }

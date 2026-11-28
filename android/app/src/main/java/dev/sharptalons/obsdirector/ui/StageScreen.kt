@@ -59,7 +59,7 @@ fun StageScreen(onExit: () -> Unit) {
     val settings by Prefs.settings.collectAsState()
     @Suppress("UNUSED_VARIABLE") val tick = rememberTicker()
     val lost = link == LinkState.LOST
-    val clips = recordings.firstOrNull { it.file == status.file }?.clips?.size ?: 0
+    val clips = recordings.firstOrNull { it.file == Director.sessionId }?.clips?.size ?: 0
 
     // Dim the screen and keep it on while Stage mode is up.
     val activity = LocalContext.current as? android.app.Activity
@@ -89,8 +89,8 @@ fun StageScreen(onExit: () -> Unit) {
         // landscape: the time and meter on the left, the Clip button filling the right
         val wide = androidx.compose.ui.platform.LocalConfiguration.current.let { it.screenWidthDp > it.screenHeightDp }
         val running = clipStart != null
-        val enabled = status.recActive && !lost
-        val length = clipLength(Director.nowFileTimeMs() - (clipStart ?: 0))
+        val enabled = !lost && Director.sessionId != null
+        val length = clipLength(Director.runningClipMs())
         val info: @Composable (Modifier) -> Unit = { m -> Column(m, verticalArrangement = Arrangement.spacedBy(22.dp, Alignment.CenterVertically)) {
             Text(Director.tc(if (status.recActive && !lost) Director.nowFileTimeMs() else status.fileTimeMs),
                 style = Type.timecode.copy(fontSize = 72.sp, fontWeight = FontWeight.Normal, letterSpacing = (-2).sp, color = Stage.time),

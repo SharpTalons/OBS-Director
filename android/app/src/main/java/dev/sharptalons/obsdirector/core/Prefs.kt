@@ -20,6 +20,8 @@ data class Settings(
     /** The volume slider, 1–100% on the loudness scale ([dev.sharptalons.obsdirector.audio.Loudness]); 50 = as OBS sends it. */
     val volumePct: Int = dev.sharptalons.obsdirector.audio.Loudness.AS_SENT,
     val saveAudio: Boolean = true,
+    /** How far the mix is turned down while a clip plays, percent (0 = not at all, 100 = silent). */
+    val duckPct: Int = 80,
     val keepDays: Int = 30, // 0 = forever
     // clips
     val leadMinutes: Int = 1,
@@ -82,6 +84,7 @@ object Prefs {
             volumePct = if (sp.contains("volumePct")) sp.getInt("volumePct", d.volumePct)
                 else if (sp.contains("volume")) dev.sharptalons.obsdirector.audio.Loudness.fromGain(sp.getFloat("volume", 1f)) else d.volumePct,
             saveAudio = sp.getBoolean("saveAudio", d.saveAudio),
+            duckPct = sp.getInt("duckPct", d.duckPct),
             keepDays = sp.getInt("keepDays", d.keepDays),
             leadMinutes = sp.getInt("leadMinutes", d.leadMinutes),
             padSeconds = sp.getInt("padSeconds", d.padSeconds),
@@ -122,6 +125,7 @@ object Prefs {
             putBoolean("autoListen", s.autoListen)
             putInt("volumePct", s.volumePct)
             putBoolean("saveAudio", s.saveAudio)
+            putInt("duckPct", s.duckPct)
             putInt("keepDays", s.keepDays)
             putInt("leadMinutes", s.leadMinutes)
             putInt("padSeconds", s.padSeconds)

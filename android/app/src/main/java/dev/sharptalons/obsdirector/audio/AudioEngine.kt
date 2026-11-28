@@ -45,6 +45,10 @@ class AudioEngine(private val onPcm: (pcm: ShortArray, fileTimeUs: Long, recordi
     @Volatile var listening = true
     /** A gain, from [Loudness]: up to 1 is the player's own volume; above 1 the mix is boosted here, through a limiter. */
     @Volatile var volume = 1f
+    /** While a clip plays, the mix is turned down to this share of [volume] (1 = not at all). */
+    @Volatile var duck = 1f
+    /** Where the dip is now: it moves towards [duck] over about 150 ms, so it fades rather than clicks. */
+    private var duckNow = 1f
     /** Follows the phone's active output and says when to make a fresh track. */
     @Volatile var router: OutputRouter? = null
     private var boosted = ShortArray(0)
@@ -80,6 +84,9 @@ class AudioEngine(private val onPcm: (pcm: ShortArray, fileTimeUs: Long, recordi
         if (lastFileTimeUs <= 0 || SystemClock.elapsedRealtime() - lastPacketAt > 1500) return -1
         return lastFileTimeUs / 1000 - bufferedMs()
     }
+
+    /** How much of the mix is queued in the player now, in ms: how far behind the newest packet you hear. */
+    fun queuedMs(): Long = if (listening) bufferedMs() else 0
 
     fun receivingAudio(): Boolean = SystemClock.elapsedRealtime() - lastPacketAt < 1500
 
@@ -256,7 +263,9 @@ class AudioEngine(private val onPcm: (pcm: ShortArray, fileTimeUs: Long, recordi
             router?.reportRouted(it.routedDevice)
             it.addOnRoutingChangedListener({ r -> router?.reportRouted(r.routedDevice) }, android.os.Handler(android.os.Looper.getMainLooper()))
         }
-        val v = volume.coerceIn(0f, 10f)
+        duckNow += (duck.coerceIn(0f, 1f) - duckNow) * 0.035f * (pcm.size / 2f / FRAMES_PER_PACKET)
+        if (kotlin.math.abs(duck - duckNow) < 0.002f) duckNow = duck
+        val v = (volume * duckNow).coerceIn(0f, 10f)
         t.setVolume(v.coerceAtMost(1f))
         val out = if (v > 1f) boost(pcm, v) else pcm
 

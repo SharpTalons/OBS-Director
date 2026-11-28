@@ -109,7 +109,10 @@ fun MonitorScreen(onOpenRecording: (String) -> Unit, onOpenStream: () -> Unit) {
     @Suppress("UNUSED_VARIABLE") val tick = rememberTicker()
     val lost = link == LinkState.LOST
     val fileTime = if (status.recActive && !lost) Director.nowFileTimeMs() else status.fileTimeMs
-    val clips = recordings.firstOrNull { it.file == status.file }?.clips?.size ?: 0
+    // clips belong to the session (this connection), not to the OBS recording
+    val sessionId = Director.sessionId
+    val session = recordings.firstOrNull { it.file == sessionId }
+    val clips = session?.clips?.size ?: 0
 
     Column(Modifier.semantics { paneTitle = "Monitor" }, verticalArrangement = Arrangement.spacedBy(12.dp)) {
 
@@ -132,11 +135,12 @@ fun MonitorScreen(onOpenRecording: (String) -> Unit, onOpenStream: () -> Unit) {
             val running = clipStart != null
             ClipButton(
                 running = running,
-                lengthText = clipLength(Director.nowFileTimeMs() - (clipStart ?: 0)),
-                enabled = status.recActive && !lost,
+                lengthText = clipLength(Director.runningClipMs()),
+                // clips don't need OBS to be recording: the phone keeps its own copy of the mix
+                enabled = !lost && sessionId != null,
                 hint = when {
                     lost -> "Reconnecting…"
-                    !status.recActive -> "Start recording to clip"
+                    sessionId == null -> "Waiting for sound from OBS"
                     else -> "starts ${settings.leadMinutes} min before your tap"
                 },
             ) { if (running) Director.endClip() else Director.startClip() }
@@ -145,12 +149,13 @@ fun MonitorScreen(onOpenRecording: (String) -> Unit, onOpenStream: () -> Unit) {
             // one thing to do about it. Nothing appears or disappears, so nothing below moves.
             var noteOpen by remember { mutableStateOf(false) }
             LaunchedEffect(note) { noteOpen = note != null }
-            val clipsText = if (clips == 1) "1 clip in this recording" else if (clips == 0) "No clips yet" else "$clips clips in this recording"
+            val clipsText = if (clips == 1) "1 clip this session" else if (clips == 0) "No clips yet" else "$clips clips this session"
+            val openSession: (() -> Unit)? = sessionId?.takeIf { clips > 0 }?.let { id -> { onOpenRecording(id) } }
             val (lineText, action) = when {
-                running -> "Clip running from ${Director.tc(clipStart ?: 0)}" to ("Cancel" to { Director.cancelClip() })
+                running -> "Clip running from ${session?.let { clockAt(it, clipStart ?: 0) } ?: ""}" to ("Cancel" to { Director.cancelClip() })
                 note != null -> (saved ?: "Clip saved") to ("Add note" to { noteOpen = true })
-                saved != null -> saved!! to (if (clips > 0) "See all" to { onOpenRecording(status.file) } else null)
-                else -> clipsText to (if (status.file.isNotBlank() && clips > 0) "See all" to { onOpenRecording(status.file) } else null)
+                saved != null -> saved!! to openSession?.let { "See all" to it }
+                else -> clipsText to openSession?.let { "See all" to it }
             }
             Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(lineText, style = Type.body.copy(fontSize = 14.sp, color = T.text2), maxLines = 1, overflow = TextOverflow.Ellipsis,

@@ -34,6 +34,7 @@ import androidx.compose.material.icons.outlined.Storage
 import androidx.compose.material.icons.outlined.TaskAlt
 import androidx.compose.material.icons.outlined.Timer
 import androidx.compose.material.icons.outlined.VolumeOff
+import androidx.compose.material.icons.outlined.VolumeDown
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -108,6 +109,9 @@ fun SettingsScreen(onConnect: () -> Unit) {
             Row.Action(Icons.Outlined.Headphones, "Play through", playThrough) { choosingOutput = true },
             Row.Action(Icons.AutoMirrored.Outlined.VolumeUp, "Play a test sound", "Play") { dev.sharptalons.obsdirector.audio.TestSound.play(Director.router) },
             Row.Switch(Icons.Outlined.PlayArrow, "Start listening when connected", s.autoListen) { x, v -> x.copy(autoListen = v) },
+            // turns the mix down while a clip plays, so the clip can be heard over it
+            Row.Choice(Icons.Outlined.VolumeDown, "Lower the mix while a clip plays", if (s.duckPct == 0) "Off" else "${s.duckPct}%",
+                listOf("Off", "20%", "40%", "60%", "80%", "100%")) { x, v -> x.copy(duckPct = if (v == "Off") 0 else v.removeSuffix("%").toInt()) },
             // Bluetooth always keeps at least 160 ms queued to play smoothly; say so beside the choice
             Row.Choice(Icons.Outlined.Schedule, "Delay",
                 (if (s.bufferMs == 0) "Auto" else "${s.bufferMs} ms") + (if (onBluetooth && s.bufferMs < dev.sharptalons.obsdirector.audio.AudioEngine.BT_CUSHION_MS) " · 160 ms on Bluetooth" else ""),

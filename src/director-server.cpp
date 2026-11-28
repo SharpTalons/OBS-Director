@@ -118,7 +118,8 @@ DirectorServer::DirectorServer(DeskDock *d, QObject *parent)
 			QFileInfo rec(recordedFiles.value(file));
 			event("aac.ready", aacReady(file, rec.absolutePath() + "/" + rec.completeBaseName() + ".m4a"));
 		} else {
-			event("aac.failed", QJsonObject{{"file", file}, {"error", ok ? QStringLiteral("unknown_recording") : error}});
+			event("aac.failed",
+			      QJsonObject{{"file", file}, {"error", ok ? QStringLiteral("unknown_recording") : error}});
 		}
 	});
 

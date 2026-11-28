@@ -222,11 +222,11 @@ void DirectorServer::serveAac(QTcpSocket *sock, const QByteArray &token)
 	auto *file = new QFile(path, sock);
 	if (path.isEmpty() || !file->open(QIODevice::ReadOnly))
 		return respond(sock, 404, "text/plain", "Not found\n");
-	QByteArray head = "HTTP/1.1 200 OK\r\nContent-Type: audio/mp4\r\nContent-Length: " +
-			  QByteArray::number(file->size()) +
-			  "\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\n"
-			  "Content-Disposition: attachment; filename=\"" +
-			  QFileInfo(path).fileName().toUtf8().replace('"', '_') + "\"\r\nConnection: close\r\n\r\n";
+	QByteArray head =
+		"HTTP/1.1 200 OK\r\nContent-Type: audio/mp4\r\nContent-Length: " + QByteArray::number(file->size()) +
+		"\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\n"
+		"Content-Disposition: attachment; filename=\"" +
+		QFileInfo(path).fileName().toUtf8().replace('"', '_') + "\"\r\nConnection: close\r\n\r\n";
 	sock->write(head);
 	auto pump = [sock, file]() {
 		while (sock->bytesToWrite() < 1024 * 1024 && !file->atEnd()) {

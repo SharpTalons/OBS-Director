@@ -125,7 +125,8 @@ struct Job {
 		conv->sample_rate = enc->sample_rate;
 		if (av_channel_layout_copy(&conv->ch_layout, &enc->ch_layout) < 0 || av_frame_get_buffer(conv, 0) < 0)
 			return false;
-		const int got = swr_convert(swr, conv->data, want, f ? const_cast<const uint8_t **>(f->extended_data) : nullptr,
+		const int got = swr_convert(swr, conv->data, want,
+					    f ? const_cast<const uint8_t **>(f->extended_data) : nullptr,
 					    f ? f->nb_samples : 0);
 		if (got < 0)
 			return false;
@@ -287,11 +288,12 @@ bool extractAac(const std::string &inPath, const std::string &outPath, const std
 
 	AVChannelLayout inLayout;
 	if (j.dec->ch_layout.order == AV_CHANNEL_ORDER_UNSPEC || j.dec->ch_layout.nb_channels <= 0)
-		av_channel_layout_default(&inLayout, j.dec->ch_layout.nb_channels > 0 ? j.dec->ch_layout.nb_channels : 2);
+		av_channel_layout_default(&inLayout,
+					  j.dec->ch_layout.nb_channels > 0 ? j.dec->ch_layout.nb_channels : 2);
 	else if (av_channel_layout_copy(&inLayout, &j.dec->ch_layout) < 0)
 		return fail("decoder_failed");
-	const int made = swr_alloc_set_opts2(&j.swr, &j.enc->ch_layout, j.enc->sample_fmt, j.enc->sample_rate, &inLayout,
-					     j.dec->sample_fmt, j.dec->sample_rate, 0, nullptr);
+	const int made = swr_alloc_set_opts2(&j.swr, &j.enc->ch_layout, j.enc->sample_fmt, j.enc->sample_rate,
+					     &inLayout, j.dec->sample_fmt, j.dec->sample_rate, 0, nullptr);
 	av_channel_layout_uninit(&inLayout);
 	if (made < 0 || swr_init(j.swr) < 0)
 		return fail("resample_failed");

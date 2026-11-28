@@ -129,7 +129,7 @@ The program mix (mix 1), converted to 48 kHz stereo 16-bit, in 5 ms packets of 2
 | 23 | u8 | flags: bit 0 recording, bit 1 paused |
 | 24 | s16[] | interleaved PCM |
 
-984 bytes per packet, 200 packets a second, about 1.6 Mb/s. Because every packet carries its file time, the app knows exactly which moment of the recording is coming out of its speaker, which is what clips are timed against. A gap in sequence numbers is a lost packet; the app fills it with silence so the saved session audio stays lined up with the recording.
+984 bytes per packet, 200 packets a second, about 1.6 Mb/s. Because every packet carries its file time, the app knows exactly which moment of the recording is coming out of its speaker, which is how the app maps its clips onto the recording. Clips themselves are timed against the app's own session clock (samples received since the session began), so they work whether or not OBS is recording; the recording flag and file time in each packet record which stretches of the session OBS was recording. A gap in sequence numbers is a lost packet; the app fills it with silence so the saved session audio stays lined up with the recording.
 
 ## Live output (TCP 4468)
 

@@ -5,6 +5,24 @@ All notable changes to OBS Director (plugin and Android app). The project follow
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-11-28
+
+Clips and the OBS recording no longer depend on each other.
+
+### Clips any time (app and browser)
+- **Clip whether or not OBS records.** While connected, the phone or browser keeps its own copy of the mix, so Start clip works before the recording starts, between recordings and after it ends.
+- **Recording and clips leave each other alone.** Starting, pausing or stopping the recording never ends a running clip, and starting or ending a clip never touches the recording. Losing the connection still saves a running clip at the drop.
+- **Sessions:** Recordings now lists sessions, one card per time you were connected (a break of 10 minutes or more starts a new one). Each says how long it ran, how many clips it has, and which OBS recordings it overlaps ("Not recorded in OBS", "In an OBS recording", "In 2 OBS recordings"). Clips are named by the time of day they start.
+- **Still in the recording:** a clip marked while OBS records still adds a chapter marker, and the clip lists saved next to each recording on the PC hold that recording's clips in its own times, from every session that overlaps it.
+- **Export** per OBS recording (all formats, in that file's times, for the editor) or for the whole session (CSV and text, times from its start).
+- **Playable straight away:** a clip just made can be played and trimmed at once; the app saves the session audio a minute at a time, the browser 30 s at a time, and finishes the piece in hand when it is needed sooner. With the session audio always saved while connected, the app uses about 60 MB an hour; Keep it for (Settings) still clears old audio.
+
+### Lower the mix while a clip plays (app and browser)
+- Playing a saved clip lowers the live mix by 80% so you can hear the clip, and brings it back smoothly when the clip stops. Settings, Listening, **Lower the mix while a clip plays**: Off, 20, 40, 60, 80 or 100%.
+
+### Earlier recordings
+- Clips from before 0.9.0 stay as they were, under their recording, in its file times.
+
 ## [0.8.1] - 2026-11-27
 
 Fixes from design audits and reviews of the app, the browser version and the OBS dock.

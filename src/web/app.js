@@ -171,8 +171,6 @@ const settings = Object.assign({
 	volumePct: null,
 	saveAudio: true,
 	keepDays: 30,
-	leadMinutes: 1,
-	padSeconds: 2,
 	chapters: true,
 	pcClipLists: true,
 	exportFormat: 'Resolve EDL',
@@ -383,6 +381,8 @@ const state = {
 	status: null,
 	statusAt: 0,
 	clipStart: null,
+	clipName: null, // {name, number} of the running clip
+	aacJobs: {}, // OBS recordings being saved as AAC: {file: {stage, percent}}
 	lastSaved: '',
 	alerts: [],
 	desk: [], // the desk chat, from OBS: {id, from, text, at, desk, mine, state}
@@ -524,7 +524,7 @@ function onStatus(m) {
 	const prev = state.status;
 	const rec = m.rec || {}, stream = m.stream || {}, pc = m.pc || {};
 	state.status = {
-		recActive: !!rec.active, recPaused: !!rec.paused, fileTimeMs: rec.fileTimeMs || 0, file: rec.file || '',
+		recActive: !!rec.active, recPaused: !!rec.paused, fileTimeMs: rec.fileTimeMs || 0, file: rec.file || '', nextName: rec.nextName || '',
 		container: rec.container || '', recBytes: rec.bytes || 0, diskFreeMb: rec.diskFreeMB ?? -1,
 		streamActive: !!stream.active, streamDurationMs: stream.durationMs || 0, streamKbps: stream.kbps || 0,
 		dropped: stream.dropped || 0, totalFrames: stream.total || 0, congestion: stream.congestion || 0,
@@ -535,7 +535,7 @@ function onStatus(m) {
 	const s = state.status;
 	if (!session) beginSession();
 	trackObs(s);
-	if (prev && prev.recActive !== s.recActive) scheduleClipLists();
+	if (prev && prev.recActive !== s.recActive) { scheduleClipLists(); idleName = null; }
 	dropHistory.push([Date.now(), s.dropped]);
 	while (dropHistory.length && dropHistory[0][0] < Date.now() - 70000) dropHistory.shift();
 }
@@ -554,6 +554,15 @@ function onEvent(name, d) {
 		stopRequestedHere = false;
 	} else if (name === 'record.started') {
 		clearAlert('recstop');
+	} else if (name === 'aac.progress') {
+		const j = state.aacJobs[d.file];
+		if (j && j.stage === 'converting') { j.percent = d.percent || 0; render(); }
+	} else if (name === 'aac.ready') {
+		const j = state.aacJobs[d.file];
+		if (j && j.stage === 'converting') downloadAac(d.file, d);
+	} else if (name === 'aac.failed') {
+		const j = state.aacJobs[d.file];
+		if (j && j.stage === 'converting') failAac(d.file, d.error || '');
 	} else if (name === 'desk.message') {
 		const m = chatMessage(d);
 		const known = state.desk.find((x) => x.id === m.id);
@@ -580,10 +589,12 @@ const idb = {
 		if (this.db || !window.indexedDB) return Promise.resolve(this.db);
 		return new Promise((resolve) => {
 			let req;
-			try { req = indexedDB.open('obsdirector', 1); } catch { return resolve(null); }
+			try { req = indexedDB.open('obsdirector', 2); } catch { return resolve(null); }
 			req.onupgradeneeded = () => {
-				const s = req.result.createObjectStore('audio', { keyPath: 'id' });
-				s.createIndex('file', 'file');
+				const db = req.result;
+				if (!db.objectStoreNames.contains('audio')) db.createObjectStore('audio', { keyPath: 'id' }).createIndex('file', 'file');
+				/* an OBS recording's sound, saved as AAC: {file, blob, at} */
+				if (!db.objectStoreNames.contains('aac')) db.createObjectStore('aac', { keyPath: 'file' });
 			};
 			req.onsuccess = () => { this.db = req.result; resolve(this.db); };
 			req.onerror = () => resolve(null);
@@ -618,6 +629,41 @@ const idb = {
 			if (file === undefined || c.value.file === file) c.delete();
 			c.continue();
 		};
+	},
+	async aacGet(file) {
+		const db = await this.open();
+		if (!db) return null;
+		return new Promise((res) => {
+			const req = db.transaction('aac').objectStore('aac').get(file);
+			req.onsuccess = () => res(req.result || null);
+			req.onerror = () => res(null);
+		});
+	},
+	async aacPut(rec) {
+		const db = await this.open();
+		if (!db) return false;
+		return new Promise((res) => {
+			const tx = db.transaction('aac', 'readwrite');
+			tx.objectStore('aac').put(rec);
+			tx.oncomplete = () => res(true);
+			tx.onerror = tx.onabort = () => res(false);
+		});
+	},
+	async aacDelete(file) {
+		const db = await this.open();
+		if (!db) return;
+		db.transaction('aac', 'readwrite').objectStore('aac').delete(file);
+	},
+	/** {file: bytes} of every AAC file kept here */
+	async aacSizes() {
+		const db = await this.open();
+		if (!db) return {};
+		return new Promise((res) => {
+			const out = {};
+			const req = db.transaction('aac').objectStore('aac').openCursor();
+			req.onsuccess = (e) => { const c = e.target.result; if (!c) return res(out); out[c.value.file] = c.value.blob.size; c.continue(); };
+			req.onerror = () => res(out);
+		});
 	},
 	async prune(days) {
 		const db = await this.open();
@@ -874,8 +920,30 @@ const player = {
 		this.timer = setInterval(() => { if (!audio.ctx || audio.ctx.currentTime >= end) this.stop(); render(); }, 250);
 		render();
 	},
-	posMs() { return this.key && audio.ctx ? this.fromMs + Math.max(0, audio.ctx.currentTime - this.startedAt) * 1000 : 0; },
+	/** An OBS recording's AAC file saved in this browser. Too long to decode at once, so it streams from an <audio>. */
+	async playAac(file) {
+		this.stop();
+		audio.unlock();
+		const rec = await idb.aacGet(file);
+		if (!rec) return toast('That AAC file isn’t saved in this browser.');
+		const url = URL.createObjectURL(rec.blob);
+		const el = new Audio(url);
+		this.el = el; this.url = url;
+		this.key = 'aac:' + file;
+		this.fromMs = 0; this.toMs = 1;
+		el.addEventListener('loadedmetadata', () => { this.toMs = el.duration * 1000 || 1; render(); });
+		el.addEventListener('ended', () => this.stop());
+		try { await el.play(); } catch { this.stop(); return toast('This browser couldn’t play the AAC file.'); }
+		audio.duck(true);
+		this.timer = setInterval(render, 500);
+		render();
+	},
+	posMs() {
+		if (this.el) return this.el.currentTime * 1000;
+		return this.key && audio.ctx ? this.fromMs + Math.max(0, audio.ctx.currentTime - this.startedAt) * 1000 : 0;
+	},
 	stop() {
+		if (this.el) { try { this.el.pause(); } catch { /* fine */ } URL.revokeObjectURL(this.url); this.el = null; this.url = null; }
 		for (const s of this.sources) { try { s.stop(); } catch { /* done */ } }
 		this.sources = [];
 		clearInterval(this.timer);
@@ -1165,38 +1233,179 @@ function onBinary(u8) {
 
 /* =============================================================== clips */
 
-/* A clip is timed on the session, not the recording: it can start and end whether or not OBS
- * records, and starting or stopping the recording never ends it. */
+/* A clip is a recording of the mix in this browser, timed on the session: it starts at your click
+ * and ends at your next one, whether or not OBS records, and starting or stopping the recording
+ * never ends it. Trim it afterwards to take in more: the sound around it is kept. Each clip is
+ * named after the OBS recording ("2026-11-28 19-02-11 clip 2"), or the name OBS would give one. */
 const canClip = () => state.link === 'connected' && !!session;
+let idleName = null; // {name, session}: the name OBS would have given, kept for this session's clips while OBS isn't recording
+function localName() {
+	const d = new Date();
+	return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()) + ' ' + pad2(d.getHours()) + '-' + pad2(d.getMinutes()) + '-' + pad2(d.getSeconds());
+}
+function nextClip() {
+	const s = state.status || {};
+	let name;
+	if (s.recActive && s.file) name = s.file.replace(/\.[^.]*$/, '');
+	else {
+		if (!idleName || idleName.session !== (session && session.id)) idleName = { name: s.nextName || localName(), session: session && session.id };
+		name = idleName.name;
+	}
+	let max = 0;
+	for (const r of recordings) for (const c of r.clips) if (c.name === name) max = Math.max(max, c.number || 0);
+	return { name, number: max + 1 };
+}
+const nextClipName = () => { const n = state.clipName || nextClip(); return n.name + ' clip ' + n.number; };
+/** "2026-11-28 19-02-11 clip 2 – Choir intro"; null for a clip from before names */
+const fullName = (c) => (c.name && c.number ? c.name + ' clip ' + c.number + (c.note ? ' – ' + c.note : '') : null);
+
 function startClip() {
 	const s = state.status;
 	if (!canClip() || state.clipStart !== null) return;
-	state.clipStart = Math.max(0, heardMs() - settings.leadMinutes * 60000);
+	if (state.noteFor) skipNote(); /* the clip before still waiting for its note: its end marker goes in now */
+	state.clipStart = Math.max(0, heardMs());
+	state.clipName = nextClip();
 	state.lastSaved = '';
 	/* a chapter only goes in while OBS records */
-	if (settings.chapters && s && s.recActive) {
-		const r = sessionEntry();
-		command('chapter.add', { name: 'Clip ' + ((r ? r.clips.length : 0) + 1) });
-	}
+	if (settings.chapters && s && s.recActive) command('chapter.add', { name: 'Clip ' + state.clipName.number });
 	render();
 }
 function runningClipMs() { return state.clipStart === null ? 0 : heardMs() - state.clipStart; }
+let endMarker = null, endMarkerTimer = 0; // a clip's end marker waits for its note (a minute at most)
 function endClip(why = '', auto = false) {
 	const start = state.clipStart;
 	const r = sessionEntry();
 	if (start === null || !r) return;
-	const end = Math.max(start + 1000, heardMs() + (auto ? 0 : settings.padSeconds * 1000));
+	const end = Math.max(start + 1000, heardMs());
+	const n = state.clipName || nextClip();
 	state.clipStart = null;
-	const c = { id: newId(), startMs: Math.round(start), endMs: Math.round(end), note: '', createdAt: Date.now() };
+	state.clipName = null;
+	const s = state.status || {};
+	const c = { id: newId(), startMs: Math.round(start), endMs: Math.round(end), note: '', createdAt: Date.now(), name: n.name, number: n.number };
 	r.clips.push(c);
 	r.clips.sort((a, b) => a.startMs - b.startMs);
-	state.lastSaved = 'Clip ' + (r.clips.indexOf(c) + 1) + ' saved, ' + clockAt(r, start) + ' → ' + clockAt(r, end) + ' (' + len(end - start) + ')' + why;
-	state.noteFor = { file: r.file, id: c.id };
+	state.lastSaved = fullName(c) + ' saved, ' + len(end - start) + why;
+	endMarker = settings.chapters && s.recActive ? n.number : null;
+	clearTimeout(endMarkerTimer);
+	if (!auto) {
+		state.noteFor = { file: r.file, id: c.id };
+		endMarkerTimer = setTimeout(() => { if (state.noteFor && state.noteFor.id === c.id) { skipNote(); render(); } }, 60000);
+	} else writeEndMarker('');
 	saveRecordings();
 }
+/** The clip's end marker in the OBS recording ("Clip 2 – Choir intro"), if OBS is still recording. */
+function writeEndMarker(note) {
+	const n = endMarker;
+	endMarker = null;
+	clearTimeout(endMarkerTimer);
+	if (n === null || !(state.status && state.status.recActive)) return;
+	command('chapter.add', { name: (note ? 'Clip ' + n + ' – ' + note : 'Clip ' + n + ' end').slice(0, 120) });
+}
+function saveNote(c, text) {
+	c.note = text.trim();
+	state.noteFor = null;
+	writeEndMarker(c.note);
+	state.lastSaved = fullName(c) + ' saved';
+	saveRecordings();
+}
+function skipNote() { state.noteFor = null; writeEndMarker(''); }
 function endClipIfRunning(why) { if (state.clipStart !== null) endClip(why, true); }
 function toggleClip() { if (state.clipStart === null) startClip(); else endClip(); }
-function cancelClip() { state.clipStart = null; state.lastSaved = 'Clip cancelled. Nothing saved.'; render(); }
+function cancelClip() { state.clipStart = null; state.clipName = null; state.lastSaved = 'Clip cancelled. Nothing saved.'; render(); }
+
+/* =============================================================== OBS recordings, and their sound as AAC */
+
+/** The OBS recordings this browser was connected for, newest first: [{file, startedAt, durationMs, live}] */
+function obsRecordings() {
+	const found = new Map();
+	const add = (o) => {
+		const had = found.get(o.file);
+		found.set(o.file, had ? Object.assign(had, { startedAt: Math.min(had.startedAt, o.startedAt), durationMs: Math.max(had.durationMs, o.durationMs) }) : o);
+	};
+	for (const r of recordings.map(withOpen)) {
+		if (!r.session) { add({ file: r.file, startedAt: r.startedAt, durationMs: r.durationMs || 0 }); continue; }
+		for (const x of r.obs) add({ file: x.file, startedAt: r.startedAt + x.fromMs - x.fileStartMs, durationMs: x.fileStartMs + x.toMs - x.fromMs });
+	}
+	const s = state.status || {};
+	const connected = state.link === 'connected';
+	if (connected && s.recActive && s.file) add({ file: s.file, startedAt: Date.now() - s.fileTimeMs, durationMs: s.fileTimeMs });
+	return [...found.values()].map((o) => Object.assign(o, { live: connected && !!s.recActive && o.file === s.file })).sort((a, b) => b.startedAt - a.startedAt);
+}
+/** The clips (or their parts) inside one OBS recording, from every session that overlaps it, in its times. */
+function obsClips(file) {
+	return { file, clips: recordings.map(withOpen).flatMap((r) => forObsFile(r, file).clips).sort((a, b) => a.startMs - b.startMs) };
+}
+
+let aacSizes = {};
+idb.aacSizes().then((x) => { aacSizes = x; render(); });
+const aacCopies = {};
+/** Asks the PC to take a finished recording's sound out as AAC (.m4a), then copies it into this browser. */
+async function saveAac(file) {
+	if (state.aacJobs[file]) return;
+	state.aacJobs[file] = { stage: 'converting', percent: 0 };
+	render();
+	const res = await command('recording.aac', { file });
+	if (!res.ok) return failAac(file, res.error || 'error');
+	if (res.data && res.data.state === 'ready') downloadAac(file, res.data);
+}
+function cancelAac(file) {
+	const j = state.aacJobs[file];
+	if (!j) return;
+	if (aacCopies[file]) aacCopies[file].abort();
+	if (j.stage === 'converting') command('recording.aac.cancel', { file });
+	delete state.aacJobs[file];
+	render();
+}
+function failAac(file, error) {
+	delete state.aacJobs[file];
+	render();
+	if (error === 'cancelled') return;
+	toast({
+		still_recording: 'OBS is still making that recording. Save it once it stops.',
+		aac_unavailable: 'The PC can’t make AAC files: OBS’s FFmpeg isn’t the version the plugin expects. Update OBS and the plugin.',
+		unknown_recording: 'The PC no longer knows that recording (OBS was restarted since).',
+		recording_missing: 'That recording isn’t on the PC any more.',
+		no_audio: 'That recording has no sound to save.',
+		busy: 'The PC is making another AAC file. Try again once it’s done.',
+		unknown_command: 'Update the OBS Director plugin on the PC to save AAC files.',
+		not_connected: 'Not connected to the PC.',
+		timeout: 'Not connected to the PC.',
+	}[error] || 'The PC couldn’t make the AAC file (' + error + ').');
+}
+async function downloadAac(file, d) {
+	state.aacJobs[file] = { stage: 'copying', percent: 0 };
+	render();
+	const ctl = new AbortController();
+	aacCopies[file] = ctl;
+	try {
+		const r = await fetch('/aac/' + encodeURIComponent(d.token), { signal: ctl.signal, cache: 'no-store' });
+		if (!r.ok || !r.body) throw new Error('status ' + r.status);
+		const total = Number(r.headers.get('content-length')) || d.bytes || 0;
+		const reader = r.body.getReader();
+		const parts = [];
+		let got = 0, shown = -1;
+		for (;;) {
+			const { done, value } = await reader.read();
+			if (done) break;
+			parts.push(value);
+			got += value.length;
+			const pct = total ? Math.floor(got * 100 / total) : 0;
+			if (pct !== shown) { shown = pct; if (state.aacJobs[file]) state.aacJobs[file].percent = pct; render(); }
+		}
+		if (total && got !== total) throw new Error('incomplete');
+		const blob = new Blob(parts, { type: 'audio/mp4' });
+		if (!(await idb.aacPut({ file, blob, at: Date.now() }))) throw new Error('storage');
+		aacSizes[file] = blob.size;
+		delete state.aacJobs[file];
+		toast(fileBase(file) + '.m4a saved in this browser');
+	} catch (e) {
+		const cancelled = !state.aacJobs[file];
+		delete state.aacJobs[file];
+		if (!cancelled) toast(String(e && e.message) === 'storage' ? 'This browser has no room for the AAC file.' : 'Copying the AAC file from the PC stopped. Try again.');
+	}
+	delete aacCopies[file];
+	render();
+}
 
 /* the clip lists, saved next to the recording on the PC as .edl and .csv */
 const sentClipLists = new Map();
@@ -1532,54 +1741,99 @@ function appView() {
 		view.name === 'desk' ? h('main.main.chat-main', deskPage()) : h('main.main', h('div.page', page())));
 }
 
-function recordingSection() {
+/**
+ * The OBS recording, small: its state, time and name (or the name OBS will give the next one),
+ * and round buttons. Pause and Stop act only when held, so a stray click can't touch the take.
+ */
+function obsRow() {
 	const s = state.status || {};
+	const pill = !s.recActive ? h('span.pill.off', 'STOPPED') : s.recPaused ? h('span.pill.paused', h('span.dot'), 'PAUSED') : h('span.pill.rec', h('span.dot'), 'REC');
+	const off = state.link !== 'connected';
+	return h('section.section.obs-row', { 'aria-label': 'OBS recording' },
+		h('div.grow',
+			h('div.obs-top', pill, bind(h('span.obs-time' + (s.recActive ? '' : '.idle')), () => tc(nowFileTimeMs()))),
+			h('div.small.obs-file', s.recActive ? s.file + ' · hold ' + (s.recPaused ? '■ to stop' : 'Ⅱ or ■') : 'OBS recording · next: ' + (s.nextName || '–'))),
+		s.recActive
+			? [s.recPaused
+				? h('button.round.obs-btn', { type: 'button', 'aria-label': 'Resume recording', disabled: off, onclick: () => act('record.resume') }, icon('play', 20))
+				: holdIconButton('pause', 'Hold to pause recording', settings.holdMs, () => act('record.pause'), 'var(--amber-ink)', off),
+				holdIconButton('stop', 'Hold to stop recording', settings.holdMs, () => { stopRequestedHere = true; act('record.stop'); }, 'var(--rec)', off)]
+			: h('button.round.obs-btn.start', { type: 'button', 'aria-label': 'Start recording', disabled: off, onclick: () => act('record.start') }, icon('rec', 20)));
+}
+
+/** A round button that acts only when held for [ms]: it fills with [fill] as you hold. */
+function holdIconButton(ic, label, ms, done, fill, disabled) {
+	const btn = h('button.round.obs-btn.hold', { type: 'button', 'aria-label': label, disabled: !!disabled }, icon(ic, 20));
+	let timer = 0, started = 0, raf = 0;
+	const reset = () => { clearTimeout(timer); cancelAnimationFrame(raf); btn.style.background = ''; };
+	const go = (e) => {
+		if (e.type === 'keydown' && e.key !== 'Enter' && e.key !== ' ') return;
+		if (e.repeat || btn.disabled) return;
+		e.preventDefault();
+		if (e.pointerId !== undefined) { try { btn.setPointerCapture(e.pointerId); } catch { /* fine */ } }
+		started = performance.now();
+		const step = () => { const p = Math.min(1, (performance.now() - started) / ms); btn.style.background = `conic-gradient(${fill} ${p * 360}deg, var(--surface-2) 0)`; raf = requestAnimationFrame(step); };
+		step();
+		timer = setTimeout(() => { reset(); feedback.tap(); done(); }, ms);
+	};
+	btn.addEventListener('pointerdown', go);
+	btn.addEventListener('keydown', go);
+	for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture', 'keyup', 'blur']) btn.addEventListener(ev, reset);
+	btn.addEventListener('contextmenu', (e) => e.preventDefault());
+	btn.setAttribute('aria-description', 'Press and hold for ' + (ms / 1000) + ' seconds');
+	return btn;
+}
+
+/** Clips: the Clip button, one line under it, and the latest clips with Play. */
+function clippingBlock() {
 	const running = state.clipStart !== null;
 	const r = sessionEntry();
-	const pill = !s.recActive ? h('span.pill.off', 'NOT RECORDING') : s.recPaused ? h('span.pill.paused', h('span.dot'), 'PAUSED') : h('span.pill.rec', h('span.dot'), 'REC');
 	const clipBtn = running
 		? h('button.clip.running', { type: 'button', onclick: toggleClip },
 			h('span.clip-left', h('span.big', 'End clip'), h('span.hint', 'clip length')),
 			bind(h('span.len'), () => clipLength(runningClipMs())))
 		: h('button.clip', { type: 'button', onclick: toggleClip, disabled: !canClip() },
 			h('span.big', 'Start clip'),
-			h('span.hint', canClip() ? 'starts ' + settings.leadMinutes + ' min before your click' + (settings.spaceForClip ? ' · or press Space' : '') : 'Waiting for OBS'));
+			h('span.hint', canClip() ? nextClipName() + (settings.spaceForClip ? ' · or press Space' : '') : 'Waiting for OBS'));
 	if (running) live.push([clipBtn, null, () => clipBtn.setAttribute('aria-label', 'End clip, ' + clipLength(runningClipMs()) + ' long')]);
-	return h('section.section', { 'aria-label': 'Recording' },
-		h('div.row', pill, h('span.small', s.file || 'No recording yet')),
-		bind(h('div.timecode' + (s.recActive ? '' : '.idle')), () => tc(nowFileTimeMs())),
-		clipBtn,
-		statusLine(r, running),
-		h('div.row.controls',
-			s.recActive
-				? [h('button.btn.outline', { type: 'button', onclick: () => act(s.recPaused ? 'record.resume' : 'record.pause') }, icon(s.recPaused ? 'play' : 'pause', 18), s.recPaused ? 'Resume' : 'Pause'),
-					holdButton('Hold to stop', settings.holdMs, () => { stopRequestedHere = true; act('record.stop'); })]
-				: h('button.btn.primary', { type: 'button', onclick: () => act('record.start') }, icon('rec', 18), 'Start recording')));
+	const all = recordings.flatMap((x) => x.clips.map((c) => [x, c])).sort((a, b) => (b[1].createdAt || b[0].startedAt) - (a[1].createdAt || a[0].startedAt)).slice(0, 2);
+	const playingKey = player.key;
+	return [clipBtn, statusLine(r, running),
+		all.length ? h('div.latest',
+			h('div.row', h('h3.grow.latest-title', 'Latest clips'), h('button.line-action', { type: 'button', onclick: () => { view.name = 'recordings'; view.recTab = 'clips'; render(); } }, 'See all')),
+			all.map(([x, c]) => {
+				const key = clipKey(x, c), playing = playingKey === key;
+				return h('div.latest-row' + (playing ? '.playing' : ''),
+					h('button.clip-play', { type: 'button', 'aria-label': (playing ? 'Stop ' : 'Play ') + clipName(c, x), onclick: () => (playing ? player.stop() : player.play(key, x.file, c.startMs, c.endMs)) }, icon(playing ? 'stop' : 'play', 20)),
+					h('div.grow', h('div.latest-name', clipName(c, x)),
+						h('div.small', playing && settings.duckPct ? 'Playing · the live mix is lowered ' + settings.duckPct + '%' : clipLength(c.endMs - c.startMs) + ' · ' + clockAt(x, c.startMs))));
+			})) : null];
 }
 
 /**
+ * One line under the Clip button/**
  * One line under the Clip button, always the same height: what just happened and the one thing
  * to do about it (cancel, add a note, see all). Nothing appears or disappears around it, so the
  * buttons below never move.
  */
 function statusLine(r, running) {
-	const seeAll = () => { view.name = 'recording'; view.recording = r.file; render(); };
+	const seeAll = () => { view.name = 'recordings'; view.recTab = 'clips'; render(); };
 	const link = (label, onclick) => h('button.line-action', { type: 'button', onclick }, label);
 	if (running)
-		return h('div.status-line', h('span.grow', bind(h('span'), () => 'Clip running from ' + clockAt(r, state.clipStart))), link('Cancel', cancelClip));
+		return h('div.status-line', h('span.grow', bind(h('span'), () => 'Recording ' + nextClipName() + ' from ' + clockAt(r, state.clipStart))), link('Cancel', cancelClip));
 	if (state.noteFor) {
 		const { file, id } = state.noteFor;
 		const rec = recordings.find((x) => x.file === file), c = rec && rec.clips.find((x) => x.id === id);
 		if (c) {
 			const input = h('input', { type: 'text', maxlength: 140, placeholder: 'Note for this clip (optional)', 'aria-label': 'Note for this clip' });
-			const save = () => { c.note = input.value.trim(); state.noteFor = null; state.lastSaved = state.lastSaved + (c.note ? ' · ' + c.note : ''); saveRecordings(); render(); };
-			input.addEventListener('keydown', (e) => { if (e.key === 'Enter') save(); if (e.key === 'Escape') { state.noteFor = null; render(); } });
-			return h('div.status-line', h('div.grow', input), link('Save', save), link('Skip', () => { state.noteFor = null; render(); }));
+			const save = () => { saveNote(c, input.value); render(); };
+			input.addEventListener('keydown', (e) => { if (e.key === 'Enter') save(); if (e.key === 'Escape') { skipNote(); render(); } });
+			return h('div.status-line', h('div.grow', input), link('Save', save), link('Skip', () => { skipNote(); render(); }));
 		}
 		state.noteFor = null;
 	}
-	const text = state.lastSaved || (r && r.clips.length ? clipsText(r.clips.length) + ' this session' : 'No clips yet');
-	return h('div.status-line', h('span.grow', { role: 'status' }, text), r && r.clips.length ? link('See all', seeAll) : null);
+	const text = state.lastSaved || 'Starts at your click. Trim it later to take in more.';
+	return h('div.status-line', h('span.grow', { role: 'status' }, text), state.lastSaved && r && r.clips.length ? link('See all', seeAll) : null);
 }
 
 /** A button that only acts when held, so a stray click can't end the take. */
@@ -1633,18 +1887,23 @@ function listenSection() {
 		hint.textContent = Loudness.describe(p);
 	});
 	vol.addEventListener('change', saveSettings);
+	/* a double click puts it back to the mix as OBS sends it */
+	vol.addEventListener('dblclick', () => { audio.setVolume(Loudness.AS_SENT); saveSettings(); feedback.tap(); render(); });
+	vol.setAttribute('aria-description', 'Double-click for as set in OBS');
 	const scale = h('div.vol-scale', { 'aria-hidden': 'true' }, Loudness.marks.map((m, k) => h('span' + (k === 2 ? '.mid' : ''), m)));
-	return h('section.section', { 'aria-label': 'Listening' },
+	return h('section.section', { 'aria-label': 'Monitoring' },
 		h('div.row', h('span.tint-tile', { style: { background: 'var(--teal-tint)', color: 'var(--teal-ink)' } }, icon('head', 18)),
 			h('div.grow', h('h2.card-title', 'Listen in this browser'),
 				bind(h('div.small'), () => "This computer's sound output · about " + (audio.delayMs() + state.latencyMs || 120) + ' ms behind')),
 			sw),
 		bind(h('div.small'), () => meters.label()),
 		meterBlock(false),
-		h('div.vol-head', h('span.small', 'Volume'), volLabel),
+		h('div.vol-head', h('span.small', 'Volume · double-click for as set in OBS'), volLabel),
 		vol, scale,
 		hint,
-		bind(h('div.small'), () => networkLine()));
+		bind(h('div.small'), () => networkLine()),
+		h('hr.rule'),
+		clippingBlock());
 }
 
 function networkLine() {
@@ -1745,9 +2004,9 @@ function deskPage() {
 
 function monitorPage() {
 	return [h('h1.sr', 'Monitor'),
-		h('div.cols', h('div', { style: { display: 'flex', flexDirection: 'column', gap: '16px' } }, recordingSection()),
-			h('div', { style: { display: 'flex', flexDirection: 'column', gap: '16px' } }, listenSection(), chipsRow())),
-		pictureSection()];
+		obsRow(),
+		h('div.cols', h('div', { style: { display: 'flex', flexDirection: 'column', gap: '16px' } }, listenSection()),
+			h('div', { style: { display: 'flex', flexDirection: 'column', gap: '16px' } }, chipsRow(), pictureSection()))];
 }
 
 /* ---------- stream and PC ---------- */
@@ -1814,7 +2073,7 @@ function drawHealth(canvas) {
  * one plays. Clicking a clip opens one sheet with Play, Trim, Note, Download and Delete; a
  * recording's ⋯ opens Export and Delete. Recordings without clips stay folded at the end. */
 const clipKey = (r, c) => r.file + ':' + c.id;
-const clipName = (c, r) => c.note || 'Clip at ' + clockAt(r, c.startMs);
+const clipName = (c, r) => fullName(c) || c.note || 'Clip at ' + clockAt(r, c.startMs);
 const clipMeta = (c, r) => clipLength(c.endMs - c.startMs) + ' long · at ' + clockAt(r, c.startMs);
 function recMeta(r) {
 	if (!r.session) return (r.live ? 'Recording now' : durationText(r.durationMs)) + ' · ' + clipsText(r.clips.length);
@@ -1840,61 +2099,98 @@ function deleteRecording(r) {
 	offerUndo(r.session ? 'Session deleted' : 'Recording deleted', () => { recordings.splice(Math.min(at, recordings.length), 0, r); saveRecordings(); }, () => idb.remove(r.file));
 }
 
+function dayLabel(at) {
+	const d = new Date(at), t = new Date();
+	const days = Math.round((new Date(t.toDateString()) - new Date(d.toDateString())) / 86400000);
+	return days === 0 ? 'Today' : days === 1 ? 'Yesterday' : d.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'short' });
+}
+const mb = (n) => (n >= 10 * 1048576 ? Math.round(n / 1048576) + ' MB' : (n / 1048576).toFixed(1) + ' MB');
+
+/**
+ * Recordings, in two tabs, kept apart because they are:
+ * - Clips: recordings of the mix made in this browser, whatever OBS was doing, newest first, by day.
+ * - OBS recordings: what OBS recorded on the PC while this browser was connected. They stay on the
+ *   PC; Save as AAC has the PC take one's sound out and copies it here to play.
+ */
 function recordingsPage() {
-	const order = (a, b) => (b.live - a.live) || (b.startedAt - a.startedAt);
-	const withClips = recordings.filter((r) => r.live || r.clips.length).sort(order);
-	const empty = recordings.filter((r) => !r.live && !r.clips.length).sort(order);
-	const total = recordings.reduce((n, r) => n + r.clips.length, 0);
-	/* the recording OBS is making and the two newest others start open */
-	if (!view.openRecs) view.openRecs = new Set(withClips.filter((r) => r.live).map((r) => r.file).concat(withClips.filter((r) => !r.live).slice(0, 2).map((r) => r.file)));
-	if (view.name === 'recording' && view.recording) {
-		view.openRecs.add(view.recording);
-		const target = view.recording;
-		view.name = 'recordings';
-		setTimeout(() => { const el = document.getElementById('rec-' + cssId(target)); if (el) el.scrollIntoView({ block: 'start', behavior: 'smooth' }); }, 0);
-	}
+	if (view.name === 'recording') view.name = 'recordings';
+	const tab = view.recTab || 'clips';
 	const playingKey = player.key && player.key.includes(':') ? player.key : null;
+	const s = state.status || {};
+	const clips = recordings.flatMap((r) => {
+		const full = withOpen(r);
+		const inObs = new Map();
+		for (const f of obsFiles(full)) for (const c of forObsFile(full, f).clips) inObs.set(c.id, f);
+		return r.clips.map((c) => [r, c, inObs.get(c.id)]);
+	}).sort((a, b) => (b[1].createdAt || b[0].startedAt) - (a[1].createdAt || a[0].startedAt));
+	const obs = obsRecordings();
 
-	const card = (r) => {
-		const open = view.openRecs.has(r.file);
-		const head = h('div.rec-head',
-			h('button.rec-toggle', { type: 'button', 'aria-expanded': String(open), onclick: () => { open ? view.openRecs.delete(r.file) : view.openRecs.add(r.file); render(); } },
-				r.live ? h('span.rec-pill', h('span.dot', { style: { background: 'var(--rec)' } }), r.session ? 'NOW' : 'REC') : null,
-				h('span.grow', h('h2.rec-title', recordingTitle(r)), h('span.small', recMeta(r))),
-				h('span.chev' + (open ? '.up' : '.down'), icon('chev'))),
-			h('button.round.plain', { type: 'button', 'aria-label': 'More for ' + recordingTitle(r), onclick: () => { view.sheet = { rec: r.file }; render(); } }, icon('more', 22)));
-		const body = !open ? null : h('div.rec-body',
-			!r.clips.length ? h('div.small', { style: { padding: '14px 16px 16px' } }, 'No clips yet. Click Start clip on Monitor when something good happens.') : null,
-			r.clips.map((c) => {
+	const tabs = h('div.rec-tabs', { role: 'tablist', 'aria-label': 'Show' },
+		[['clips', 'Clips · ' + clips.length], ['obs', 'OBS recordings · ' + obs.length]].map(([id, label]) =>
+			h('button' + (tab === id ? '.on' : ''), { type: 'button', role: 'tab', 'aria-selected': String(tab === id), onclick: () => { view.recTab = id; render(); } }, label)));
+
+	const out = [h('div', h('h1.title', 'Recordings'), h('div.sub', 'Clips are kept in this browser; OBS recordings on the PC')), tabs];
+	if (tab === 'clips') {
+		if (!clips.length) out.push(h('section.section', h('div.small', 'No clips yet. Click Start clip on Monitor: it records the mix in this browser, whether or not OBS is recording.')));
+		const days = new Map();
+		for (const x of clips) { const d = dayLabel(x[1].createdAt || x[0].startedAt); if (!days.has(d)) days.set(d, []); days.get(d).push(x); }
+		for (const [day, list] of days) {
+			out.push(h('div.group-label', { style: { color: 'var(--muted)' } }, day));
+			out.push(h('section.rec-card', list.map(([r, c, file]) => {
 				const key = clipKey(r, c), playing = playingKey === key;
+				const tag = file && s.recActive && file === s.file ? ['OBS recording now', 'rec'] : file ? ['In the OBS recording', 'ok'] : ['Not recorded in OBS', 'neutral'];
+				const open = () => { view.sheet = { clip: key }; view.sheetMode = 'clip'; render(); };
 				return h('div.clip-row' + (playing ? '.playing' : ''),
-					h('button.clip-play', { type: 'button', 'aria-label': (playing ? 'Stop ' : 'Play ') + clipName(c, r), onclick: () => (playing ? player.stop() : player.play(key, r.file, c.startMs, c.endMs)) }, icon(playing ? 'pause' : 'play', 22)),
-					h('button.clip-open', { type: 'button', onclick: () => { view.sheet = { clip: key }; view.sheetMode = 'clip'; render(); } },
-						h('span.clip-note', clipName(c, r)), h('span.small', c.note ? clipMeta(c, r) : 'No note · ' + clipLength(c.endMs - c.startMs) + ' long')),
-					h('button.round.plain', { type: 'button', 'aria-label': 'More for ' + clipName(c, r), onclick: () => { view.sheet = { clip: key }; view.sheetMode = 'clip'; render(); } }, icon('more', 22)));
-			}),
-			settings.pcClipLists && r.savedOnPc ? h('div.rec-pc', icon('pc', 16), 'The clip list is saved on ' + r.savedOnPc + ' too, next to the recording.') : null);
-		return h('section.rec-card' + (r.live ? '.live' : ''), { id: 'rec-' + cssId(r.file) }, head, body);
-	};
-
-	const out = [h('div', h('h1.title', 'Recordings'),
-		h('div.sub', recordings.length ? clipsText(total) + ' in ' + withClips.length + (withClips.length === 1 ? ' session' : ' sessions') + ' · kept in this browser' : 'Kept in this browser')),
-	!recordings.length && h('section.section', h('div.small', 'No sessions yet. Each time this browser connects to OBS is a session; clips you mark show up under it, whether or not OBS was recording.')),
-	withClips.map(card),
-	empty.length ? h('button.fold', { type: 'button', 'aria-expanded': String(!!view.showEmpty), onclick: () => { view.showEmpty = !view.showEmpty; render(); } },
-		h('span.grow', empty.length === 1 ? '1 session without clips' : empty.length + ' sessions without clips'), h('span.chev' + (view.showEmpty ? '.up' : '.down'), icon('chev'))) : null,
-	empty.length && view.showEmpty ? h('div.list', empty.map((r) => h('div.list-row',
-		h('span.grow', h('div', recordingTitle(r)), h('div.small', durationText(r.durationMs))),
-		h('button.round.plain', { type: 'button', 'aria-label': 'Delete ' + recordingTitle(r), style: { color: 'var(--rec-ink)' }, onclick: () => deleteRecording(r) }, icon('trash'))))) : null,
-	recordings.length ? h('button.btn.danger', { type: 'button', onclick: () => {
-		if (!confirm('Delete all sessions and clips in this browser? Their notes and saved audio go too. The recordings on the PC are not touched. The session now keeps going, without its clips.')) return;
-		player.stop();
-		const live = recordings.filter((r) => r.live);
-		for (const r of recordings) if (!r.live) idb.remove(r.file);
-		recordings = live.map((r) => Object.assign(r, { clips: [] }));
-		saveRecordings();
-		toast('Deleted');
-	} }, icon('trash', 18), 'Delete all sessions and clips') : null];
+					h('button.clip-play', { type: 'button', 'aria-label': (playing ? 'Stop ' : 'Play ') + clipName(c, r), onclick: () => (playing ? player.stop() : player.play(key, r.file, c.startMs, c.endMs)) }, icon(playing ? 'stop' : 'play', 22)),
+					h('button.clip-open', { type: 'button', onclick: open },
+						h('span.clip-note', clipName(c, r)), h('span.small', clipLength(c.endMs - c.startMs) + ' · ' + clockAt(r, c.startMs)),
+						h('span.tag', { style: { background: `var(--${tag[1]}-tint)`, color: `var(--${tag[1]}-ink)` } }, tag[0])),
+					h('button.round.plain', { type: 'button', 'aria-label': 'More for ' + clipName(c, r), onclick: open }, icon('more', 22)));
+			})));
+		}
+		if (clips.length) out.push(h('button.btn.danger', { type: 'button', onclick: () => {
+			if (!confirm('Delete all clips in this browser? Their notes and saved mix audio go too. The OBS recordings on the PC, and AAC files saved here, aren’t touched. Clipping carries on.')) return;
+			player.stop();
+			const live = recordings.filter((r) => r.live);
+			for (const r of recordings) if (!r.live) idb.remove(r.file);
+			recordings = live.map((r) => Object.assign(r, { clips: [] }));
+			saveRecordings();
+			toast('All clips deleted');
+		} }, icon('trash', 18), 'Delete all clips'));
+	} else {
+		out.push(h('div.small', 'The recordings OBS made while this browser was connected. They stay on the PC; save one’s sound as AAC to play it here.'));
+		if (!obs.length) out.push(h('section.section', h('div.small', 'None yet. Recordings OBS makes while this browser is connected show up here.')));
+		const connected = state.link === 'connected';
+		for (const o of obs) {
+			const job = state.aacJobs[o.file], has = aacSizes[o.file] !== undefined, key = 'aac:' + o.file, playing = player.key === key;
+			const n = obsClips(o.file).clips.length;
+			let aac;
+			if (job) {
+				const total = job.stage === 'converting' ? job.percent * 0.2 : 20 + job.percent * 0.8;
+				aac = h('div.aac-progress',
+					h('div.row', h('span.grow', job.stage === 'converting' ? 'Getting it ready on the PC…' : 'Copying to this browser…'), h('span', job.percent + '%')),
+					h('div.aac-track', { role: 'progressbar', 'aria-label': 'Saving as AAC', 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-valuenow': String(Math.round(total)) },
+						h('div.aac-fill', { style: { width: total + '%' } })),
+					h('div.row', h('span.small.grow', 'Keeps going while this page is open'), h('button.line-action', { type: 'button', onclick: () => cancelAac(o.file) }, 'Cancel')));
+			} else if (has) {
+				aac = h('div.aac-saved' + (playing ? '.playing' : ''),
+					h('button.clip-play', { type: 'button', 'aria-label': (playing ? 'Stop ' : 'Play ') + fileBase(o.file), onclick: () => (playing ? player.stop() : player.playAac(o.file)) }, icon(playing ? 'stop' : 'play', 22)),
+					h('div.grow', h('div', 'AAC in this browser'), h('div.small', mb(aacSizes[o.file]) + ' · download or delete from ⋯')));
+			} else if (o.live) {
+				aac = h('div.small', 'Save it as AAC once OBS stops recording.');
+			} else {
+				aac = [h('button.btn.primary', { type: 'button', disabled: !connected, onclick: () => saveAac(o.file) }, icon('down', 18), 'Save as AAC in this browser'),
+					h('div.small', connected ? 'The PC takes its sound out as AAC (.m4a) and sends it over.' : 'Connect to the PC to save it.')];
+			}
+			out.push(h('section.rec-card.obs-card' + (o.live ? '.live' : ''),
+				h('div.row',
+					h('div.grow',
+						h('div.small', o.live ? h('span.rec-pill', h('span.dot', { style: { background: 'var(--rec)' } }), 'REC') : null, ' ' + recordingTitle(o) + ' · ' + durationText(o.durationMs) + (o.live ? ' so far' : '')),
+						h('h2.rec-title', o.file), h('div.small', clipsText(n))),
+					h('button.round.plain', { type: 'button', 'aria-label': 'More for ' + o.file, onclick: () => { view.sheet = { obs: o.file }; render(); } }, icon('more', 22))),
+				aac));
+		}
+	}
 
 	/* Undo, then the small player, floating at the bottom so nothing in the list moves */
 	const dock = h('div.rec-dock',
@@ -1910,16 +2206,17 @@ const cssId = (s) => s.replace(/[^\w-]/g, '_');
 
 /** The player at the bottom while a clip plays: which clip, how far, and Stop. */
 function miniPlayer(key) {
-	const r = recordings.find((x) => key.startsWith(x.file + ':'));
+	const isAac = key.startsWith('aac:');
+	const r = isAac ? null : recordings.find((x) => key.startsWith(x.file + ':'));
 	const c = r && r.clips.find((x) => clipKey(r, x) === key);
 	const fill = h('div.mini-fill');
 	const span = () => Math.max(1, player.toMs - player.fromMs);
 	const done = () => Math.min(span(), Math.max(0, player.posMs() - player.fromMs));
-	const time = bind(h('span.small'), () => len(done()) + ' of ' + len(span()) + (r ? ' · ' + recordingTitle(r) : ''));
+	const time = bind(h('span.small'), () => len(done()) + ' of ' + len(span()) + (settings.duckPct ? ' · live mix lowered ' + settings.duckPct + '%' : ''));
 	live.push([fill, null, () => { fill.style.width = (done() / span() * 100).toFixed(1) + '%'; }]);
 	fill.style.width = (done() / span() * 100).toFixed(1) + '%';
 	return h('div.mini-player',
-		h('div.mini-row', h('span.grow', h('div.mini-title', c ? clipName(c, r) : 'Playing'), time),
+		h('div.mini-row', h('span.grow', h('div.mini-title', isAac ? fileBase(key.slice(4)) + '.m4a' : c ? clipName(c, r) : 'Playing'), time),
 			h('button.mini-stop', { type: 'button', 'aria-label': 'Stop', onclick: () => player.stop() }, icon('stop', 18))),
 		h('div.mini-track', fill));
 }
@@ -2126,33 +2423,33 @@ function recordingSheet() {
 				} }, icon('trash', 18), 'Delete clip')];
 		}
 	} else {
-		const r = recordings.find((x) => x.file === view.sheet.rec);
-		if (!r) { view.sheet = null; return null; }
-		title = recordingTitle(r);
-		sub = recMeta(r) + (r.session ? '' : ' · ' + r.file);
-		/* what to export: each OBS recording the clips are in (in its own times, for the editor), and the whole session */
-		const full = withOpen(r);
-		const targets = !r.session ? [{ label: null, rec: r, name: fileBase(r.file), formats: Exporter.formats }]
-			: obsFiles(full).map((f) => ({ label: 'OBS recording ' + fileBase(f), rec: forObsFile(full, f), name: fileBase(f), formats: Exporter.formats }))
-				.filter((x) => x.rec.clips.length)
-				.concat([{ label: 'The whole session, times from its start', rec: r, name: entryName(r), formats: Exporter.formats.filter((f) => f.id !== 'Resolve EDL') }]);
-		const exportRow = (t, f) => h('div.export-row',
+		const o = obsRecordings().find((x) => x.file === view.sheet.obs);
+		if (!o) { view.sheet = null; return null; }
+		const v = obsClips(o.file);
+		title = o.file;
+		sub = recordingTitle(o) + ' · ' + durationText(o.durationMs) + ' · ' + clipsText(v.clips.length);
+		const exportRow = (f) => h('div.export-row',
 			h('button.export-main', { type: 'button', onclick: () => {
 				settings.exportFormat = f.id; saveSettings();
-				download(t.name + '.' + Exporter.ext(f.id), new Blob([Exporter.export(t.rec, f.id)], { type: 'text/plain' }));
+				download(fileBase(o.file) + '.' + Exporter.ext(f.id), new Blob([Exporter.export(v, f.id)], { type: 'text/plain' }));
 				close();
 			} },
 				h('span.tint-tile', { style: { width: '36px', height: '36px', background: `var(--${f.tint}-tint)`, color: `var(--${f.tint}-ink)`, fontSize: '12px', fontWeight: 700 } }, f.badge),
 				h('span.grow', h('div', f.label), h('div.small', f.hint))),
-			h('button.copy', { type: 'button', 'aria-label': 'Copy the ' + f.label + ' list' + (t.label ? ', ' + t.label : ''), onclick: async () => {
-				try { await navigator.clipboard.writeText(Exporter.export(t.rec, f.id)); toast('Copied'); } catch { toast("This browser didn't allow copying."); }
+			h('button.copy', { type: 'button', 'aria-label': 'Copy the ' + f.label + ' list', onclick: async () => {
+				try { await navigator.clipboard.writeText(Exporter.export(v, f.id)); toast('Copied'); } catch { toast("This browser didn't allow copying."); }
 			} }, 'Copy'));
+		const has = aacSizes[o.file] !== undefined;
 		body = [
-			r.clips.length ? h('div.small', 'Export the clip list for your editor. Click a format to download it, or Copy to paste it.') : null,
-			r.clips.length ? targets.map((t) => [t.label ? h('div.export-head', t.label) : null,
-				h('div.export-list', t.formats.map((f) => exportRow(t, f)))]) : null,
-			r.live ? null : h('button.btn.danger', { type: 'button', onclick: () => { close(); deleteRecording(r); render(); } }, icon('trash', 18), r.session ? 'Delete this session' : 'Delete this recording'),
-			r.live ? null : h('div.small', { style: { textAlign: 'center' } }, 'Only from this browser. The recording on the PC isn’t touched.')];
+			v.clips.length ? h('div.small', 'Export its clip list, in the recording’s own times. Click a format to download it, or Copy to paste it.') : h('div.small', 'No clips in this recording.'),
+			v.clips.length ? h('div.export-list', Exporter.formats.map(exportRow)) : null,
+			has ? h('div.row',
+				h('button.btn.outline.grow', { type: 'button', onclick: async () => { const rec = await idb.aacGet(o.file); if (rec) download(fileBase(o.file) + '.m4a', rec.blob); close(); } }, icon('down', 18), 'Download AAC'),
+				h('button.btn.danger.grow', { type: 'button', onclick: () => {
+					if (player.key === 'aac:' + o.file) player.stop();
+					idb.aacDelete(o.file); delete aacSizes[o.file]; toast('AAC file deleted from this browser'); close();
+				} }, icon('trash', 18), 'Delete AAC')) : null,
+			h('div.small', { style: { textAlign: 'center' } }, 'The recording itself stays on the PC.')];
 	}
 	dlg.append(h('div.sheet-body',
 		h('div', h('h2.card-title#sheet-title', title), h('div.small', sub)),
@@ -2172,12 +2469,10 @@ function settingsPage() {
 		]],
 		['Listening', 'teal', [
 			['switch', 'head', 'Start listening when connected', 'autoListen'],
-			['choice', 'mute', 'Lower the mix while a clip plays', 'duckPct', [[0, 'Off'], [20, '20%'], [40, '40%'], [60, '60%'], [80, '80%'], [100, '100%']]],
+			['range', 'mute', 'Lower the mix while playing', 'duckPct', 'A clip or an OBS recording’s AAC plays over the live mix lowered this much. 100% silences it. Clipping and OBS carry on either way.'],
 		]],
 		['Clips', 'rec', [
-			['choice', 'rewind', 'Start before your click', 'leadMinutes', [[1, '1 min'], [2, '2 min'], [3, '3 min'], [5, '5 min']]],
-			['choice', 'forward', 'Keep going after End', 'padSeconds', [[0, '0 s'], [2, '2 s'], [5, '5 s']]],
-			['switch', 'bookmark', 'Chapter marker in the recording', 'chapters'],
+			['switch', 'bookmark', 'Chapter markers in the OBS recording', 'chapters'],
 			['switch', 'file', 'Save the clip list on the PC', 'pcClipLists'],
 			['choice', 'export', 'Export as', 'exportFormat', Exporter.formats.map((f) => [f.id, f.label])],
 			['switch', 'keyboard', 'Space starts and ends a clip', 'spaceForClip'],
@@ -2213,6 +2508,13 @@ function settingsPage() {
 				options.map(([v, l]) => h('option', { selected: settings[key] === v }, l)));
 			return h('label.setting', base, tile, h('span.grow', label), sel);
 		}
+		if (kind === 'range') {
+			const val = h('span.value', { style: { color: `var(--${t}-ink)` } }, settings[key] ? settings[key] + '%' : 'Off');
+			const r = h('input', { type: 'range', min: 0, max: 100, step: 5, value: settings[key], 'aria-label': label, 'aria-valuetext': settings[key] + ' percent' });
+			r.addEventListener('input', () => { settings[key] = Number(r.value); val.textContent = settings[key] ? settings[key] + '%' : 'Off'; r.setAttribute('aria-valuetext', settings[key] + ' percent'); });
+			r.addEventListener('change', saveSettings);
+			return h('div.setting.with-range', base, h('div.row', tile, h('span.grow', label), val), r, h('div.small', options));
+		}
 		if (kind === 'text') {
 			const input = h('input', { type: 'text', value: settings[key], maxlength: 40, 'aria-label': label,
 				onchange: (e) => { settings[key] = e.target.value.trim() || defaultName(); saveSettings(); toast('OBS shows the new name from the next connection.'); render(); } });
@@ -2245,8 +2547,8 @@ function helpDialog() {
 		h('h2.card-title#help-title', { style: { fontSize: '19px', fontWeight: 700 } }, 'How OBS Director works'),
 		step('1', 'Connect', 'This page comes from the OBS Director plugin on the PC. The first time, someone at the PC clicks Allow in OBS.'),
 		step('2', 'Listen', 'Switch on Listen in this browser on Monitor to hear the OBS mix. Browsers only play sound after a click.'),
-		step('3', 'Mark clips', 'Click Start clip (or press Space) when something good happens and End when it\u2019s over, whether or not OBS is recording. The clip starts a little before your click.'),
-		step('4', 'Use the clips', 'Recordings lists each session with its clips, and which OBS recordings it was in. Play, trim, add a note, download the audio, or export the list for your editor.'),
+		step('3', 'Mark clips', 'Click Start clip (or press Space) when something good happens and End when it\u2019s over, whether or not OBS is recording. It records the mix in this browser and is named after the OBS recording; trim it later to take in more.'),
+		step('4', 'Use the clips', 'Recordings has two tabs: Clips, made in this browser, and OBS recordings, kept on the PC, whose sound you can save here as AAC. Play, trim, add a note, download the audio, or export the list for your editor.'),
 		step('5', 'Talk to the desk', 'Desk is a group chat with the OBS dock and the phones. Alerts, like a full disk, show up there too.'),
 		step('6', 'Stage mode', 'The masks button at the top shows a big, dim timer and Clip button for use beside a stage.'),
 		h('button.btn.primary', { type: 'button', onclick: close }, 'Done')));
@@ -2262,7 +2564,7 @@ function stageView() {
 	const r = sessionEntry();
 	const btn = h('button.big-clip' + (running ? '.running' : ''), { type: 'button', onclick: toggleClip, disabled: !canClip() && !running },
 		running ? bind(h('span.b'), () => clipLength(runningClipMs())) : h('span.b', 'Clip'),
-		h('span.s', running ? 'End clip' : canClip() ? 'starts ' + settings.leadMinutes + ' min before your click' : 'Waiting for OBS'));
+		h('span.s', running ? 'End clip' : canClip() ? nextClipName() : 'Waiting for OBS'));
 	if (running) live.push([btn, null, () => btn.setAttribute('aria-label', 'End clip, ' + clipLength(runningClipMs()) + ' long')]);
 	return h('main.stage', h('h1.sr', 'Stage mode'),
 		h('div.top', h('span.dot', { style: { background: s.recActive ? 'var(--stage-rec)' : 'var(--stage-muted)' } }), (s.recActive ? (s.recPaused ? 'PAUSED' : 'REC') : 'NOT RECORDING') + ' · ' + state.pc),

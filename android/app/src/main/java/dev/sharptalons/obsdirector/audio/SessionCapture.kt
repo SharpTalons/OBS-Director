@@ -13,7 +13,7 @@ import kotlin.math.sqrt
  *
  * - **Time:** milliseconds from the session's first sample, counted in samples (lost packets are
  *   filled with silence on the way in), so the saved audio and clip times always line up.
- * - **Audio:** AAC in one-minute pieces ([SEGMENT_MS]), so a clip can be played moments after it
+ * - **Audio:** AAC (ADTS, see [Adts]) in one-minute pieces ([SEGMENT_MS]), so a clip can be played moments after it
  *   is made; [flush] closes the piece being written when a clip needs it sooner.
  * - **Loudness:** one value per 100 ms, for the trimmer's picture and its pauses.
  * - **OBS:** which stretches OBS was recording ([ObsSpan]), from the recording flag and file time
@@ -85,7 +85,7 @@ class SessionCapture(val id: String, private val dir: File, private val saveAudi
             if (recorder != null && (flushWanted || t - recorderStart >= SEGMENT_MS)) closeSegment(t)
             val r = recorder ?: run {
                 recorderStart = t
-                recorderName = "$id-${"%03d".format(segmentCount++)}.m4a"
+                recorderName = "$id-${"%03d".format(segmentCount++)}.aac"
                 SessionRecorder(File(dir, recorderName), t).also { it.start(); recorder = it }
             }
             r.write(pcm, t, gap)

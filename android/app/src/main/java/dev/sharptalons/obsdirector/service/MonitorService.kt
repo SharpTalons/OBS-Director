@@ -110,7 +110,14 @@ class MonitorService : Service() {
             .addAction(0, "Disconnect", action(ACTION_DISCONNECT, 3))
             .build()
 
+    /** Swiped away from recent apps: save a running clip before Android may stop the app. */
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        Director.onAppClosing()
+        super.onTaskRemoved(rootIntent)
+    }
+
     override fun onDestroy() {
+        Director.onAppClosing()
         running = false
         scope.cancel()
         runCatching { wifiLock?.release() }

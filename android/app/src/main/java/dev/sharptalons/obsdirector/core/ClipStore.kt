@@ -20,9 +20,37 @@ object ClipStore {
     fun init(context: Context) {
         file = File(context.filesDir, "recordings.json")
         sessionsDir = File(context.filesDir, "sessions").apply { mkdirs() }
-        state.value = runCatching { json.decodeFromString<List<Recording>>(file.readText()) }.getOrDefault(emptyList())
-            .map { it.copy(live = false) }
+        val loaded = runCatching { json.decodeFromString<List<Recording>>(file.readText()) }.getOrDefault(emptyList())
+        // a session still marked live: the app was closed or killed while it ran
+        interrupted = loaded.firstOrNull { it.live && it.session }?.file
+        state.value = loaded.map { if (it.live && it.session) recoverAudio(it) else it.copy(live = false) }
+        if (interrupted != null) save(state.value)
         pruneOldAudio(Prefs.settings.value.keepDays)
+    }
+
+    /** The session that was running when the app last stopped without ending it, if any. */
+    var interrupted: String? = null
+        private set
+
+    /**
+     * Takes in the audio of a session the app didn't get to finish: the pieces on disk that the
+     * store doesn't list yet (the one being written, and any being finished), each cut back to its
+     * last whole frame. Pieces follow one another without gaps, so each starts where the last ended.
+     */
+    private fun recoverAudio(r: Recording): Recording {
+        val known = r.segments.map { it.name }.toSet()
+        var at = r.segments.maxOfOrNull { it.endMs } ?: 0L
+        val found = ArrayList<AudioSeg>()
+        sessionsDir.listFiles { f -> f.name.startsWith(r.file + "-") && f.name.endsWith(".aac") && f.name !in known }
+            ?.sortedBy { it.name }
+            ?.forEach { f ->
+                val frames = runCatching { dev.sharptalons.obsdirector.audio.Adts.repair(f) }.getOrDefault(0L)
+                if (frames <= 0) { f.delete(); return@forEach }
+                val ms = dev.sharptalons.obsdirector.audio.Adts.durationMs(frames, dev.sharptalons.obsdirector.audio.AudioEngine.RATE)
+                found += AudioSeg(f.name, at, at + ms)
+                at += ms
+            }
+        return r.copy(live = false, segments = r.segments + found, durationMs = maxOf(r.durationMs, at))
     }
 
     @Synchronized

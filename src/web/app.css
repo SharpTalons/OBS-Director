@@ -399,3 +399,4 @@ dialog::backdrop { background: rgba(0, 0, 0, .6); }
 .stage .exit { min-height: 44px; padding: 0 18px; border-radius: 22px; border: 1px solid var(--line-strong); background: transparent; color: var(--stage-label); font-size: 14px; }
 body.staged { background: var(--stage-ground); }
 body.staged .head, body.staged .banners { display: none; }
+.export-head { font-size: 13px; font-weight: 500; color: var(--muted); margin: 4px 2px -4px; }

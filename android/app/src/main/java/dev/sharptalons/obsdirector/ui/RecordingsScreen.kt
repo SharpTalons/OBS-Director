@@ -90,6 +90,8 @@ import dev.sharptalons.obsdirector.core.Director
 import dev.sharptalons.obsdirector.core.Exporter
 import dev.sharptalons.obsdirector.core.Prefs
 import dev.sharptalons.obsdirector.core.Recording
+import dev.sharptalons.obsdirector.core.ObsRecording
+import androidx.compose.ui.semantics.selected
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
@@ -97,17 +99,25 @@ import java.util.Calendar
 import java.util.Locale
 
 /** "Today, 20:35", "Yesterday, 10:02" or "Sunday 15 Nov, 10:02". */
-fun recordingTitle(r: Recording): String {
-    val c = Calendar.getInstance().apply { timeInMillis = r.startedAt }
-    val today = Calendar.getInstance()
-    val days = ((today.timeInMillis / 86_400_000L) - (r.startedAt / 86_400_000L)).toInt()
+fun recordingTitle(r: Recording): String = whenText(r.startedAt)
+
+fun whenText(at: Long): String {
+    val c = Calendar.getInstance().apply { timeInMillis = at }
     val time = SimpleDateFormat("HH:mm", Locale.getDefault()).format(c.time)
-    return when {
-        days <= 0 && today.get(Calendar.DAY_OF_YEAR) == c.get(Calendar.DAY_OF_YEAR) -> "Today, $time"
-        days == 1 -> "Yesterday, $time"
-        else -> SimpleDateFormat("EEEE d MMM", Locale.getDefault()).format(c.time) + ", $time"
-    }
+    return dayText(at)?.let { "$it, $time" } ?: (SimpleDateFormat("EEEE d MMM", Locale.getDefault()).format(c.time) + ", $time")
 }
+
+/** "Today", "Yesterday", or null for an older day. */
+private fun dayText(at: Long): String? {
+    val c = Calendar.getInstance().apply { timeInMillis = at }
+    val today = Calendar.getInstance()
+    if (c.get(Calendar.YEAR) == today.get(Calendar.YEAR) && c.get(Calendar.DAY_OF_YEAR) == today.get(Calendar.DAY_OF_YEAR)) return "Today"
+    today.add(Calendar.DAY_OF_YEAR, -1)
+    if (c.get(Calendar.YEAR) == today.get(Calendar.YEAR) && c.get(Calendar.DAY_OF_YEAR) == today.get(Calendar.DAY_OF_YEAR)) return "Yesterday"
+    return null
+}
+
+private fun dayLabel(at: Long): String = dayText(at) ?: SimpleDateFormat("EEEE d MMM", Locale.getDefault()).format(java.util.Date(at))
 
 private fun clipsText(n: Int) = when (n) { 0 -> "No clips"; 1 -> "1 clip"; else -> "$n clips" }
 
@@ -120,136 +130,107 @@ private fun clipKey(r: Recording, c: Clip) = "${r.file}:${c.id}"
 fun clockAt(r: Recording, ms: Long): String =
     if (r.session) SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(java.util.Date(r.startedAt + ms)) else Director.tc(ms)
 
-private fun clipName(r: Recording, c: Clip) = c.note.ifBlank { "Clip at ${clockAt(r, c.startMs)}" }
+/** A clip's name: "2026-11-28 19-02-11 clip 2 – Choir intro"; older clips go by their note or time. */
+fun clipTitle(r: Recording, c: Clip): String = c.fullName() ?: c.note.ifBlank { "Clip at ${clockAt(r, c.startMs)}" }
 
-private fun clipMeta(r: Recording, c: Clip) = "${clipLength(c.lengthMs)} long · at ${clockAt(r, c.startMs)}"
+private fun clipMeta(r: Recording, c: Clip) = "${clipLength(c.lengthMs)} · ${clockAt(r, c.startMs)}"
 
-/** "Now · 3 clips · In an OBS recording", "1 h 12 min · 2 clips · Not recorded in OBS". */
-private fun recordingMeta(r: Recording): String {
-    val obs = when {
-        !r.session -> null
-        r.obs.isEmpty() -> "Not recorded in OBS"
-        r.obsFiles().size == 1 -> "In an OBS recording"
-        else -> "In ${r.obsFiles().size} OBS recordings"
-    }
-    return listOfNotNull(if (r.live) "Now" else Director.len(r.durationMs), clipsText(r.clips.size), obs).joinToString(" · ")
-}
+private fun mb(bytes: Long) = if (bytes >= 10 shl 20) "${bytes shr 20} MB" else "%.1f MB".format(bytes / 1048576.0)
 
 /**
- * Recordings, clips first, on one screen. Each recording is a card with its clips inside; tap a
- * heading to open or fold it. Every clip has its own Play button, and a small player shows above
- * the tabs while one plays. Tapping a clip opens one sheet with Play, Trim, Note, Share and
- * Delete; a recording's ⋯ opens Export and Delete. Recordings without clips stay folded at the end.
+ * Recordings, in two tabs, kept apart because they are:
  *
- * [focus] opens and scrolls to one recording (Monitor's "See all").
+ * - **Clips**: recordings of the mix made on this phone, whatever OBS was doing, newest first,
+ *   by day. Each has its own Play button; tapping one opens Play, Trim, Note, Share and Delete.
+ * - **OBS recordings**: the recordings OBS made on the PC while the phone was connected. They stay
+ *   on the PC; Save as AAC has the PC take one's sound out and copies it here to play.
+ *
+ * A small player shows above the tabs while a clip or an AAC file plays (the live mix is lowered).
  */
 @Composable
-fun RecordingsScreen(modifier: Modifier, top: (@Composable () -> Unit)?, focus: String? = null) {
+fun RecordingsScreen(modifier: Modifier, top: (@Composable () -> Unit)?, @Suppress("UNUSED_PARAMETER") focus: String? = null) {
     val all by ClipStore.recordings.collectAsState()
-    val settings by Prefs.settings.collectAsState()
+    val status by Director.status.collectAsState()
+    val link by Director.link.collectAsState()
+    val jobs by Director.aacJobs.collectAsState()
     val playback by ClipPlayer.playback.collectAsState()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    @Suppress("UNUSED_VARIABLE") val tick = rememberTicker(1000)
 
-    // A recording deleted here waits a few seconds before it goes, so Undo can bring it back.
-    var pendingRec by remember { mutableStateOf<String?>(null) }
     var undo by remember { mutableStateOf<Pair<String, () -> Unit>?>(null) }
     LaunchedEffect(undo) { if (undo != null) { delay(6000); undo = null } }
-    LaunchedEffect(pendingRec) {
-        val f = pendingRec ?: return@LaunchedEffect
-        delay(6000)
-        ClipStore.removeRecording(f)
-        if (pendingRec == f) pendingRec = null
-    }
-    DisposableEffect(Unit) { onDispose { pendingRec?.let { ClipStore.removeRecording(it) } } }
-    fun deleteRecording(file: String) {
-        if (playback.key.startsWith("$file:")) ClipPlayer.stop()
-        pendingRec?.let { ClipStore.removeRecording(it) }
-        pendingRec = file
-        undo = "Recording deleted" to { pendingRec = null }
-    }
 
-    val recordings = all.filter { it.file != pendingRec }
-    // the recording OBS is making first, then the newest
-    val withClips = recordings.filter { it.live || it.clips.isNotEmpty() }.sortedWith(compareBy<Recording>({ !it.live }, { -it.startedAt }))
-    val empty = recordings.filter { !it.live && it.clips.isEmpty() }
-    val totalClips = recordings.sumOf { it.clips.size }
-
-    // the recording OBS is making and the two newest others start open
-    var open by rememberSaveable {
-        mutableStateOf(withClips.filter { it.live }.map { it.file } + withClips.filter { !it.live }.take(2).map { it.file })
-    }
-    var showEmpty by rememberSaveable { mutableStateOf(false) }
-    var sheetClip by rememberSaveable { mutableStateOf<String?>(null) } // "file|clip id"
-    var sheetRec by rememberSaveable { mutableStateOf<String?>(null) }
+    var tab by rememberSaveable { mutableStateOf("clips") }
+    var sheetClip by rememberSaveable { mutableStateOf<String?>(null) } // "entry|clip id"
+    var sheetObs by rememberSaveable { mutableStateOf<String?>(null) }
     var confirmAll by rememberSaveable { mutableStateOf(false) }
-    val list = rememberLazyListState()
-
-    LaunchedEffect(focus) {
-        val f = focus ?: return@LaunchedEffect
-        if (f !in open) open = open + f
-        val i = withClips.indexOfFirst { it.file == f }
-        if (i >= 0) list.animateScrollToItem(i + 1 + (if (top != null) 1 else 0))
-    }
-
     val playingKey = if (playback.playing) playback.key else null
 
+    // every clip, newest first, with whether it's in an OBS recording
+    val clips = all.flatMap { r ->
+        val inObs = r.obsFiles().flatMap { f -> r.forObsFile(f).clips.map { it.id to f } }.toMap()
+        r.clips.map { c -> Triple(r, c, inObs[c.id]) }
+    }.sortedByDescending { it.second.createdAt }
+    val obs = Director.obsRecordings(all, status)
+    val connected = link == dev.sharptalons.obsdirector.core.LinkState.CONNECTED
+
     Box(modifier) {
-        LazyColumn(Modifier.fillMaxSize(), state = list,
+        LazyColumn(Modifier.fillMaxSize(),
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = if (playingKey != null || undo != null) 132.dp else 24.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)) {
             top?.let { t -> item { t() } }
-            item(key = "title") {
-                ScreenTitle("Recordings",
-                    if (recordings.isEmpty()) "Kept on this phone"
-                    else "${clipsText(totalClips)} in ${withClips.size} ${if (withClips.size == 1) "recording" else "recordings"} · kept on this phone")
-            }
-            if (recordings.isEmpty()) item {
-                Section { Text("No recordings yet. Clips you mark while OBS records show up here, under their recording.", style = Type.body.copy(color = T.muted)) }
-            }
-            items(withClips, key = { it.file }) { r ->
-                val isOpen = r.file in open
-                RecordingCard(
-                    r = r, open = isOpen, playingKey = playingKey,
-                    savedOnPc = if (settings.pcClipLists) r.savedOnPc else null,
-                    onToggle = { open = if (isOpen) open - r.file else open + r.file },
-                    onMore = { sheetRec = r.file },
-                    onPlay = { c -> val key = clipKey(r, c); if (playingKey == key) ClipPlayer.stop() else playClip(r, c, key) },
-                    onOpenClip = { c -> sheetClip = "${r.file}|${c.id}" },
-                )
-            }
-            if (empty.isNotEmpty()) {
-                item(key = "empty-toggle") {
-                    Row(
-                        Modifier.fillMaxWidth().height(48.dp).clip(RoundedCornerShape(12.dp))
-                            .clickable(role = Role.Button) { showEmpty = !showEmpty }
-                            .semantics { stateDescription = if (showEmpty) "Expanded" else "Collapsed" }.padding(horizontal = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(if (empty.size == 1) "1 recording without clips" else "${empty.size} recordings without clips",
-                            style = Type.body.copy(fontSize = 15.sp, color = T.text2), modifier = Modifier.weight(1f))
-                        Icon(if (showEmpty) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore, null, tint = T.muted)
+            item(key = "title") { ScreenTitle("Recordings", "Clips are kept on this phone; OBS recordings on the PC") }
+            item(key = "tabs") {
+                Row(Modifier.fillMaxWidth().clip(CircleShape).background(T.surface).padding(4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    listOf("clips" to "Clips · ${clips.size}", "obs" to "OBS recordings · ${obs.size}").forEach { (id, label) ->
+                        val on = tab == id
+                        Box(Modifier.weight(1f).height(44.dp).clip(CircleShape).background(if (on) T.blue else Color.Transparent)
+                            .clickable(role = Role.Tab) { tab = id }.semantics { selected = on }, contentAlignment = Alignment.Center) {
+                            Text(label, style = Type.body.copy(fontSize = 15.sp, fontWeight = FontWeight.Medium, color = if (on) Color.White else T.text2), maxLines = 1)
+                        }
                     }
                 }
-                if (showEmpty) item(key = "empty-list") {
-                    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(T.surface)) {
-                        empty.forEachIndexed { i, r ->
-                            if (i > 0) HorizontalDivider(color = T.rule)
-                            Row(Modifier.fillMaxWidth().heightIn(min = 60.dp).padding(start = 16.dp, end = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Column(Modifier.weight(1f)) {
-                                    Text(recordingTitle(r), style = Type.body.copy(fontSize = 15.sp))
-                                    Text(Director.len(r.durationMs), style = Type.small.copy(fontSize = 13.sp))
-                                }
-                                Box(Modifier.size(48.dp).clip(CircleShape).clickable(role = Role.Button) { deleteRecording(r.file) }
-                                    .semantics { contentDescription = "Delete ${recordingTitle(r)}" }, contentAlignment = Alignment.Center) {
-                                    Icon(Icons.Outlined.DeleteOutline, null, tint = Tints.rec.ink, modifier = Modifier.size(22.dp))
+            }
+            if (tab == "clips") {
+                if (clips.isEmpty()) item(key = "clips-empty") {
+                    Section { Text("No clips yet. Tap Start clip on Monitor: it records the mix on this phone, whether or not OBS is recording.", style = Type.body.copy(color = T.muted)) }
+                }
+                clips.groupBy { dayLabel(it.second.createdAt) }.forEach { (day, list) ->
+                    item(key = "day-$day") {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            GroupLabel(day.uppercase(), T.muted)
+                            Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(T.surface)) {
+                                list.forEachIndexed { i, (r, c, file) ->
+                                    if (i > 0) HorizontalDivider(color = T.rule)
+                                    val key = clipKey(r, c)
+                                    val live = file != null && status.recActive && file == status.file
+                                    ClipRow(r, c, playing = playingKey == key,
+                                        tag = when { live -> "OBS recording now" to Tints.rec; file != null -> "In the OBS recording" to Tints.ok; else -> "Not recorded in OBS" to Tints.neutral },
+                                        onPlay = { if (playingKey == key) ClipPlayer.stop() else playClip(r, c, key) },
+                                        onOpen = { sheetClip = "${r.file}|${c.id}" })
                                 }
                             }
                         }
                     }
                 }
+                if (clips.isNotEmpty()) item(key = "delete-all") { DangerLink("Delete all clips") { confirmAll = true } }
+            } else {
+                item(key = "obs-intro") {
+                    Text("The recordings OBS made while this phone was connected. They stay on the PC; save one's sound as AAC to play it here.",
+                        style = Type.small.copy(fontSize = 13.sp))
+                }
+                if (obs.isEmpty()) item(key = "obs-empty") {
+                    Section { Text("None yet. Recordings OBS makes while this phone is connected show up here.", style = Type.body.copy(color = T.muted)) }
+                }
+                items(obs, key = { "obs-" + it.file }) { o ->
+                    ObsRecordingCard(o, clips = clips.count { it.third == o.file }, job = jobs[o.file], connected = connected,
+                        hasAac = Director.aacFile(o.file).exists(), playing = playingKey == "aac:${o.file}",
+                        onSave = { Director.saveAac(o.file) }, onCancel = { Director.cancelAac(o.file) },
+                        onPlay = { if (playingKey == "aac:${o.file}") ClipPlayer.stop() else playAac(o.file) },
+                        onMore = { sheetObs = o.file })
+                }
             }
-            if (recordings.isNotEmpty()) item(key = "delete-all") { DangerLink("Delete all recordings and clips") { confirmAll = true } }
         }
 
         // Undo, then the small player, floating above the tabs so nothing in the list moves
@@ -285,100 +266,134 @@ fun RecordingsScreen(modifier: Modifier, top: (@Composable () -> Unit)?, focus: 
             },
             onDismiss = { sheetClip = null })
     }
-    // and one for a recording: export and delete
-    sheetRec?.let { file ->
-        val r = all.firstOrNull { it.file == file }
-        if (r == null) LaunchedEffect(file) { sheetRec = null }
-        else RecordingSheet(r, onDelete = { deleteRecording(r.file); sheetRec = null }, onDismiss = { sheetRec = null })
+    // and one for an OBS recording: its clip list for the editor, and its AAC
+    sheetObs?.let { file ->
+        val o = obs.firstOrNull { it.file == file }
+        if (o == null) LaunchedEffect(file) { sheetObs = null }
+        else ObsSheet(o, all, onDismiss = { sheetObs = null })
     }
     if (confirmAll) ConfirmDelete(
-        title = "Delete all recordings and clips?",
-        body = "Removes every recording, clip, note and saved audio from this phone. The recordings on the PC aren't touched. " +
-            "A recording OBS is making now keeps going, without its clips.",
-        onConfirm = { ClipPlayer.stop(); val n = ClipStore.clearAll(); Director.toast(if (n == 1) "1 recording deleted" else "$n recordings deleted") },
+        title = "Delete all clips?",
+        body = "Removes every clip, note and saved mix audio from this phone. The OBS recordings on the PC, and AAC files saved here, aren't touched. " +
+            "Clipping carries on.",
+        onConfirm = { ClipPlayer.stop(); ClipStore.clearAll(); Director.toast("All clips deleted") },
         onDone = { confirmAll = false },
     )
 }
 
-/** A recording's card: its heading (tap to open or fold, ⋯ for more) and, when open, its clips. */
+/** One clip in the list: Play, its name and length, where it is, and ⋯. */
 @Composable
-private fun RecordingCard(r: Recording, open: Boolean, playingKey: String?, savedOnPc: String?, onToggle: () -> Unit, onMore: () -> Unit,
-                          onPlay: (Clip) -> Unit, onOpenClip: (Clip) -> Unit) {
-    val title = recordingTitle(r)
+private fun ClipRow(r: Recording, c: Clip, playing: Boolean, tag: Pair<String, Tint>, onPlay: () -> Unit, onOpen: () -> Unit) {
+    val title = clipTitle(r, c)
+    Row(Modifier.fillMaxWidth().background(if (playing) Tints.blue.bg else T.surface).padding(start = 12.dp, end = 6.dp, top = 10.dp, bottom = 10.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Box(Modifier.size(48.dp).clip(CircleShape).background(if (playing) T.accent else T.raised)
+            .clickable(role = Role.Button) { onPlay() }
+            .semantics { contentDescription = (if (playing) "Stop " else "Play ") + title }, contentAlignment = Alignment.Center) {
+            Icon(if (playing) Icons.Outlined.Stop else Icons.Outlined.PlayArrow, null, tint = if (playing) T.ground else T.text, modifier = Modifier.size(24.dp))
+        }
+        Column(Modifier.weight(1f).heightIn(min = 52.dp).clip(RoundedCornerShape(10.dp)).clickable(role = Role.Button, onClickLabel = "Open") { onOpen() }
+            .padding(vertical = 2.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Text(title, style = Type.body.copy(fontSize = 15.sp, fontWeight = FontWeight.Medium), maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Text(clipMeta(r, c), style = Type.small.copy(fontSize = 12.sp))
+            Text(tag.first, style = Type.label.copy(fontSize = 11.sp, color = tag.second.ink),
+                modifier = Modifier.clip(CircleShape).background(tag.second.bg).padding(horizontal = 8.dp, vertical = 2.dp))
+        }
+        Box(Modifier.size(48.dp).clip(CircleShape).clickable(role = Role.Button) { onOpen() }
+            .semantics { contentDescription = "More for $title" }, contentAlignment = Alignment.Center) {
+            Icon(Icons.Outlined.MoreHoriz, null, tint = T.text2)
+        }
+    }
+}
+
+/**
+ * One OBS recording: when and how long, its name, its clips, and its AAC: a Save button once
+ * it has stopped, a progress bar while the PC converts it and it's copied here, then Play.
+ */
+@Composable
+private fun ObsRecordingCard(o: ObsRecording, clips: Int, job: Director.AacJob?, connected: Boolean, hasAac: Boolean, playing: Boolean,
+                             onSave: () -> Unit, onCancel: () -> Unit, onPlay: () -> Unit, onMore: () -> Unit) {
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(T.surface)
-        .then(if (r.live) Modifier.border(1.dp, Tints.rec.bg, RoundedCornerShape(18.dp)) else Modifier)) {
-        Row(Modifier.fillMaxWidth().heightIn(min = 64.dp), verticalAlignment = Alignment.CenterVertically) {
-            Row(
-                Modifier.weight(1f).heightIn(min = 64.dp).clickable(role = Role.Button, onClickLabel = if (open) "Fold" else "Open", onClick = onToggle)
-                    .semantics { stateDescription = if (open) "Expanded" else "Collapsed" }
-                    .padding(start = 16.dp, end = 4.dp, top = 12.dp, bottom = 12.dp),
-                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                if (r.live) Row(Modifier.clip(CircleShape).background(Tints.rec.bg).padding(horizontal = 8.dp, vertical = 3.dp),
-                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                    Box(Modifier.size(7.dp).clip(CircleShape).background(T.negative))
-                    Text("NOW", style = Type.label.copy(fontWeight = FontWeight.Bold, color = Tints.rec.ink))
+        .then(if (o.live) Modifier.border(1.dp, Tints.rec.bg, RoundedCornerShape(18.dp)) else Modifier)
+        .padding(start = 14.dp, end = 6.dp, top = 12.dp, bottom = 14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (o.live) Row(Modifier.clip(CircleShape).background(Tints.rec.bg).padding(horizontal = 8.dp, vertical = 3.dp),
+                        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                        Box(Modifier.size(7.dp).clip(CircleShape).background(T.negative))
+                        Text("REC", style = Type.label.copy(fontWeight = FontWeight.Bold, color = Tints.rec.ink))
+                    }
+                    Text(whenText(o.startedAt) + " · " + Director.len(o.durationMs) + if (o.live) " so far" else "", style = Type.small.copy(fontSize = 13.sp))
                 }
-                Column(Modifier.weight(1f)) {
-                    Text(title, style = Type.body.copy(fontSize = 16.sp, fontWeight = FontWeight.Medium), modifier = Modifier.semantics { heading() })
-                    Text(recordingMeta(r), style = Type.small.copy(fontSize = 13.sp))
-                }
-                Icon(Icons.Outlined.ExpandMore, null, tint = T.muted, modifier = Modifier.size(22.dp).rotate(if (open) 180f else 0f))
+                Text(o.file, style = Type.body.copy(fontSize = 16.sp, fontWeight = FontWeight.Medium), maxLines = 2, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.semantics { heading() })
+                Text(clipsText(clips), style = Type.small.copy(fontSize = 13.sp))
             }
-            Box(Modifier.padding(end = 6.dp).size(48.dp).clip(CircleShape).clickable(role = Role.Button, onClick = onMore)
-                .semantics { contentDescription = "More for $title" }, contentAlignment = Alignment.Center) {
+            Box(Modifier.size(48.dp).clip(CircleShape).clickable(role = Role.Button, onClick = onMore)
+                .semantics { contentDescription = "More for ${o.file}" }, contentAlignment = Alignment.Center) {
                 Icon(Icons.Outlined.MoreHoriz, null, tint = T.text2)
             }
         }
-        if (open) {
-            HorizontalDivider(color = T.rule)
-            if (r.clips.isEmpty()) Text("No clips yet. Tap Clip on Monitor when something good happens.", style = Type.body.copy(fontSize = 14.sp, color = T.muted),
-                modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 16.dp))
-            r.clips.forEach { c ->
-                val playing = playingKey == clipKey(r, c)
-                Row(Modifier.fillMaxWidth().background(if (playing) Tints.blue.bg else T.surface).padding(start = 12.dp, end = 6.dp, top = 8.dp, bottom = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Box(Modifier.size(48.dp).clip(CircleShape).background(if (playing) T.accent else T.raised)
-                        .clickable(role = Role.Button) { onPlay(c) }
-                        .semantics { contentDescription = (if (playing) "Stop " else "Play ") + clipName(r, c) }, contentAlignment = Alignment.Center) {
-                        Icon(if (playing) Icons.Outlined.Pause else Icons.Outlined.PlayArrow, null, tint = if (playing) T.ground else T.text, modifier = Modifier.size(24.dp))
+        Box(Modifier.padding(end = 8.dp)) {
+            when {
+                job != null -> Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(T.sunken).padding(start = 12.dp, top = 10.dp, bottom = 4.dp, end = 4.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(if (job.stage == "converting") "Getting it ready on the PC…" else "Copying to this phone…", style = Type.body.copy(fontSize = 14.sp), modifier = Modifier.weight(1f))
+                        Text("${job.percent}%", style = Type.mono.copy(fontSize = 14.sp), modifier = Modifier.padding(end = 8.dp))
                     }
-                    Column(Modifier.weight(1f).heightIn(min = 52.dp).clip(RoundedCornerShape(10.dp)).clickable(role = Role.Button, onClickLabel = "Open") { onOpenClip(c) }
-                        .padding(vertical = 4.dp), verticalArrangement = Arrangement.Center) {
-                        // its note as the title; a clip without one is named by its time, "No note" under it
-                        Text(clipName(r, c), style = Type.body.copy(fontSize = 15.sp, fontWeight = FontWeight.Medium), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(if (c.note.isBlank()) "No note · ${clipLength(c.lengthMs)} long" else clipMeta(r, c), style = Type.small.copy(fontSize = 13.sp))
+                    // one bar for both steps: converting fills the first fifth, copying the rest
+                    val total = if (job.stage == "converting") job.percent * 0.2f else 20f + job.percent * 0.8f
+                    Box(Modifier.padding(end = 8.dp).fillMaxWidth().height(8.dp).clip(CircleShape).background(T.raised)
+                        .semantics { contentDescription = "Saving as AAC, ${total.toInt()} percent" }) {
+                        Box(Modifier.fillMaxWidth(total / 100f).height(8.dp).clip(CircleShape).background(T.accent))
                     }
-                    Box(Modifier.size(48.dp).clip(CircleShape).clickable(role = Role.Button) { onOpenClip(c) }
-                        .semantics { contentDescription = "More for ${clipName(r, c)}" }, contentAlignment = Alignment.Center) {
-                        Icon(Icons.Outlined.MoreHoriz, null, tint = T.text2)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Keeps going if you leave this screen", style = Type.small.copy(fontSize = 12.sp), modifier = Modifier.weight(1f))
+                        Text("Cancel", style = Type.body.copy(color = T.accent, fontWeight = FontWeight.Medium),
+                            modifier = Modifier.heightIn(min = 44.dp).clip(RoundedCornerShape(10.dp)).clickable(role = Role.Button, onClick = onCancel)
+                                .padding(horizontal = 12.dp).wrapContentHeight())
                     }
                 }
-            }
-            savedOnPc?.let { pc ->
-                Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 14.dp), horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Outlined.DesktopWindows, null, tint = Tints.ok.ink, modifier = Modifier.size(16.dp))
-                    Text("The clip list is saved on $pc too, next to the recording.", style = Type.small.copy(fontSize = 12.sp, color = Tints.ok.ink))
+                hasAac -> Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(if (playing) Tints.blue.bg else T.sunken).padding(8.dp),
+                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Box(Modifier.size(48.dp).clip(CircleShape).background(if (playing) T.accent else T.raised).clickable(role = Role.Button, onClick = onPlay)
+                        .semantics { contentDescription = (if (playing) "Stop " else "Play ") + o.baseName }, contentAlignment = Alignment.Center) {
+                        Icon(if (playing) Icons.Outlined.Stop else Icons.Outlined.PlayArrow, null, tint = if (playing) T.ground else T.text)
+                    }
+                    Column(Modifier.weight(1f)) {
+                        Text("AAC on this phone", style = Type.body.copy(fontSize = 14.sp, fontWeight = FontWeight.Medium))
+                        Text(mb(Director.aacFile(o.file).length()) + " · share or delete from ⋯", style = Type.small.copy(fontSize = 12.sp))
+                    }
+                }
+                o.live -> Text("Save it as AAC once OBS stops recording.", style = Type.small.copy(fontSize = 13.sp))
+                else -> Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    PrimaryButton("Save as AAC on this phone", Icons.Outlined.FileDownload, Modifier.fillMaxWidth(), enabled = connected, onClick = onSave)
+                    Text(if (connected) "The PC takes its sound out as AAC (.m4a) and sends it over Wi-Fi." else "Connect to the PC to save it.", style = Type.small.copy(fontSize = 12.sp))
                 }
             }
         }
     }
 }
 
-/** The player above the tabs while a clip plays: which clip, how far, and Stop. */
+/** The player above the tabs while a clip or an AAC file plays: which, how far, and Stop. */
 @Composable
 private fun MiniPlayer(all: List<Recording>, p: ClipPlayer.State) {
-    val r = all.firstOrNull { p.key.startsWith(it.file + ":") }
-    val c = r?.clips?.firstOrNull { clipKey(r, it) == p.key }
+    val title = if (p.key.startsWith("aac:")) p.key.removePrefix("aac:").substringBeforeLast('.') + ".m4a" else {
+        val r = all.firstOrNull { p.key.startsWith(it.file + ":") }
+        val c = r?.clips?.firstOrNull { clipKey(r, it) == p.key }
+        if (r != null && c != null) clipTitle(r, c) else "Playing"
+    }
     val span = (p.toMs - p.fromMs).coerceAtLeast(1)
     val done = (p.posMs - p.fromMs).coerceIn(0, span)
+    val duck = Prefs.settings.value.duckPct
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(T.raised)) {
         Row(Modifier.fillMaxWidth().padding(start = 14.dp, end = 8.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Column(Modifier.weight(1f)) {
-                Text(c?.let { clipName(r, it) } ?: "Playing", style = Type.body.copy(fontSize = 14.sp, fontWeight = FontWeight.Medium), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text("${Director.len(done)} of ${Director.len(span)}" + (r?.let { " · " + recordingTitle(it) } ?: ""), style = Type.small.copy(fontSize = 12.sp, color = T.text2))
+                Text(title, style = Type.body.copy(fontSize = 14.sp, fontWeight = FontWeight.Medium), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text("${Director.len(done)} of ${Director.len(span)}" + if (duck > 0) " · live mix lowered $duck%" else "", style = Type.small.copy(fontSize = 12.sp, color = T.text2))
             }
             Box(Modifier.size(48.dp).clip(CircleShape).background(T.text).clickable(role = Role.Button) { ClipPlayer.stop() }
                 .semantics { contentDescription = "Stop" }, contentAlignment = Alignment.Center) {
@@ -398,9 +413,9 @@ private fun ClipSheet(r: Recording, c: Clip, playing: Boolean, onPlay: () -> Uni
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = T.surface) {
         Column(Modifier.padding(start = 16.dp, end = 16.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Column {
-                Text(when (mode) { "trim" -> "Trim clip"; "note" -> "Note"; else -> clipName(r, c) },
+                Text(when (mode) { "trim" -> "Trim clip"; "note" -> "Note"; else -> clipTitle(r, c) },
                     style = Type.cardTitle.copy(fontSize = 18.sp, fontWeight = FontWeight.Medium), modifier = Modifier.semantics { heading() })
-                Text(clipMeta(r, c) + " · " + recordingTitle(r), style = Type.small.copy(fontSize = 13.sp))
+                Text((if (mode == "clip") "" else clipTitle(r, c) + " · ") + clipMeta(r, c) + " · " + dayLabel(c.createdAt), style = Type.small.copy(fontSize = 13.sp))
             }
             when (mode) {
                 "trim" -> TrimPanel(r, c, onDone = { mode = "clip" })
@@ -469,7 +484,7 @@ private fun TrimPanel(r: Recording, c: Clip, onDone: () -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Canvas(
             Modifier.fillMaxWidth().height(84.dp).clip(RoundedCornerShape(12.dp)).background(T.sunken)
-                .semantics { contentDescription = "Trimmer. Keeps ${Director.tc(start)} to ${Director.tc(end)}, ${clipLength(end - start)}. Use the buttons below to move each end." }
+                .semantics { contentDescription = "Trimmer. Keeps ${clockAt(r, start)} to ${clockAt(r, end)}, ${clipLength(end - start)}. Use the buttons below to move each end." }
                 .pointerInput(c.id) {
                     awaitEachGesture {
                         val down = awaitFirstDown()
@@ -541,10 +556,10 @@ private fun TrimPanel(r: Recording, c: Clip, onDone: () -> Unit) {
         }
         // the two ends and the length; tapping a time picks that end for ±1 s
         Row(verticalAlignment = Alignment.CenterVertically) {
-            EdgeTime("Start", start, active == "start", Modifier.weight(1f)) { active = "start" }
+            EdgeTime("Start", clockAt(r, start), active == "start", Modifier.weight(1f)) { active = "start" }
             Text(clipLength(end - start), style = Type.body.copy(fontSize = 15.sp, fontWeight = FontWeight.Medium), textAlign = TextAlign.Center,
                 modifier = Modifier.weight(1f).semantics { contentDescription = "Length ${clipLength(end - start)}" })
-            EdgeTime("End", end, active == "end", Modifier.weight(1f), alignEnd = true) { active = "end" }
+            EdgeTime("End", clockAt(r, end), active == "end", Modifier.weight(1f), alignEnd = true) { active = "end" }
         }
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             val which = if (active == "start") "start" else "end"
@@ -581,48 +596,42 @@ private fun TrimPanel(r: Recording, c: Clip, onDone: () -> Unit) {
 
 /** One end's time under the trimmer; the one ±1 s moves is underlined in blue. */
 @Composable
-private fun EdgeTime(label: String, ms: Long, active: Boolean, modifier: Modifier, alignEnd: Boolean = false, onPick: () -> Unit) {
+private fun EdgeTime(label: String, time: String, active: Boolean, modifier: Modifier, alignEnd: Boolean = false, onPick: () -> Unit) {
     Column(
         modifier.heightIn(min = 48.dp).clip(RoundedCornerShape(10.dp)).clickable(role = Role.Button, onClickLabel = "Fine-tune the ${label.lowercase()}", onClick = onPick)
             .semantics { stateDescription = if (active) "Selected" else "" }.padding(horizontal = 6.dp, vertical = 4.dp),
         horizontalAlignment = if (alignEnd) Alignment.End else Alignment.Start, verticalArrangement = Arrangement.Center,
     ) {
         Text(label, style = Type.small.copy(fontSize = 12.sp, color = if (active) T.accent else T.muted))
-        Text(Director.tc(ms), style = Type.body.copy(fontSize = 16.sp, fontWeight = FontWeight.Medium, color = if (active) T.text else T.text2))
+        Text(time, style = Type.body.copy(fontSize = 16.sp, fontWeight = FontWeight.Medium, color = if (active) T.text else T.text2))
         Box(Modifier.width(24.dp).height(2.dp).background(if (active) T.accent else Color.Transparent))
     }
 }
 
-/** A recording's ⋯: export its clip list (share it, or save it to the phone) and delete it. */
+/** An OBS recording's ⋯: its clip list for the editor (in its own times), and its AAC. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun RecordingSheet(r: Recording, onDelete: () -> Unit, onDismiss: () -> Unit) {
+private fun ObsSheet(o: ObsRecording, all: List<Recording>, onDismiss: () -> Unit) {
     val context = LocalContext.current
     var saving by remember { mutableStateOf("") }
-    var savingView by remember { mutableStateOf(r) }
+    // the clips (or their parts) inside this recording, from every session that overlaps it
+    val view = Recording(file = o.file, startedAt = o.startedAt, clips = all.flatMap { it.forObsFile(o.file).clips }.sortedBy { it.startMs })
     val save = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
-        val text = Exporter.export(savingView, saving)
+        val text = Exporter.export(view, saving)
         if (uri != null) runCatching { context.contentResolver.openOutputStream(uri)?.use { it.write(text.toByteArray()) } }
             .onSuccess { Director.toast("Saved"); onDismiss() }.onFailure { Director.toast("Couldn't save the file") }
     }
+    val aac = Director.aacFile(o.file)
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = T.surface) {
         Column(Modifier.padding(start = 16.dp, end = 16.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Column {
-                Text(recordingTitle(r), style = Type.cardTitle.copy(fontSize = 18.sp, fontWeight = FontWeight.Medium), modifier = Modifier.semantics { heading() })
-                Text(recordingMeta(r) + (if (r.session) "" else " · " + r.file), style = Type.small.copy(fontSize = 13.sp), maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text(o.file, style = Type.cardTitle.copy(fontSize = 18.sp, fontWeight = FontWeight.Medium), modifier = Modifier.semantics { heading() })
+                Text(whenText(o.startedAt) + " · " + Director.len(o.durationMs) + " · " + clipsText(view.clips.size), style = Type.small.copy(fontSize = 13.sp))
             }
-            // a clip list for each OBS recording the session overlaps (for the editor), and one for the
-            // whole session with times from its start (to read or paste)
-            val targets = buildList {
-                for (file in r.obsFiles()) r.forObsFile(file).takeIf { it.clips.isNotEmpty() }?.let { add(Triple("For $file", it, exportFormats)) }
-                if (r.session && r.clips.isNotEmpty())
-                    add(Triple(if (r.obs.isEmpty()) "Times from the start of the session" else "The whole session, times from its start", r, exportFormats.filter { it.id != "Resolve EDL" }))
-            }
-            if (targets.isNotEmpty()) Text("Export the clip list. Tap a format to share it, or the arrow to save it to the phone.", style = Type.small.copy(fontSize = 13.sp))
-            targets.forEach { (title, view, formats) ->
-                Text(title, style = Type.small.copy(fontSize = 12.sp, color = T.text2), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (view.clips.isNotEmpty()) {
+                Text("Export its clip list, in the recording's own times. Tap a format to share it, or the arrow to save it to the phone.", style = Type.small.copy(fontSize = 13.sp))
                 Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(T.sunken)) {
-                    formats.forEachIndexed { i, f ->
+                    exportFormats.forEachIndexed { i, f ->
                         if (i > 0) HorizontalDivider(color = T.rule)
                         Row(Modifier.fillMaxWidth().heightIn(min = 60.dp), verticalAlignment = Alignment.CenterVertically) {
                             Row(Modifier.weight(1f).heightIn(min = 60.dp).clickable(role = Role.Button, onClickLabel = "Share") {
@@ -639,20 +648,25 @@ private fun RecordingSheet(r: Recording, onDelete: () -> Unit, onDismiss: () -> 
                                 }
                             }
                             Box(Modifier.padding(end = 6.dp).size(48.dp).clip(CircleShape).clickable(role = Role.Button) {
-                                saving = f.id; savingView = view
-                                save.launch("${view.file.substringBeforeLast('.')}.${Exporter.extension(f.id)}")
+                                saving = f.id
+                                save.launch("${o.baseName}.${Exporter.extension(f.id)}")
                             }.semantics { contentDescription = "Save the ${f.label} file to the phone" }, contentAlignment = Alignment.Center) {
                                 Icon(Icons.Outlined.FileDownload, null, tint = T.text2)
                             }
                         }
                     }
                 }
+            } else Text("No clips in this recording.", style = Type.small.copy(fontSize = 13.sp))
+            if (aac.exists()) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    SheetTile("Share AAC", Icons.Outlined.Share, Tints.purple, Modifier.weight(1f)) { shareAac(context, o.file); onDismiss() }
+                    SheetTile("Delete AAC", Icons.Outlined.DeleteOutline, Tints.rec, Modifier.weight(1f)) {
+                        if (ClipPlayer.playback.value.key == "aac:${o.file}") ClipPlayer.stop()
+                        Director.deleteAac(o.file); Director.toast("AAC deleted from this phone"); onDismiss()
+                    }
+                }
             }
-            if (!r.live) {
-                DangerLink(if (r.session) "Delete this session" else "Delete this recording", onDelete)
-                Text("Only from this phone. The recordings on the PC aren't touched.", style = Type.small.copy(fontSize = 12.sp),
-                    textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
-            }
+            Text("The recording itself stays on the PC.", style = Type.small.copy(fontSize = 12.sp), textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
         }
     }
 }

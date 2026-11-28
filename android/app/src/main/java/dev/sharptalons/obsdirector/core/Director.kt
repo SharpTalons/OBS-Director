@@ -312,6 +312,8 @@ object Director {
             }
         }
         if (prev.recActive && !s.recActive) onRecordingEnded(prev.file, prev.fileTimeMs)
+        // clips made while OBS isn't recording take the name OBS would give next; it moves on once OBS has recorded
+        if (prev.recActive != s.recActive) idleName = null
         dropHistory.addLast(SystemClock.elapsedRealtime() to s.dropped)
         while (dropHistory.size > 300) dropHistory.removeFirst()
     }
@@ -329,6 +331,19 @@ object Director {
                 }
             }
             "record.started" -> clearAlert("rec")
+            "aac.progress" -> {
+                val file = d["file"]?.jsonPrimitive?.content ?: return
+                val job = aacState.value[file] ?: return
+                if (job.stage == "converting") setAac(file, job.copy(percent = d["percent"]?.jsonPrimitive?.content?.toIntOrNull() ?: job.percent))
+            }
+            "aac.ready" -> {
+                val file = d["file"]?.jsonPrimitive?.content ?: return
+                if (aacState.value[file]?.stage == "converting") downloadAac(file, d)
+            }
+            "aac.failed" -> {
+                val file = d["file"]?.jsonPrimitive?.content ?: return
+                if (aacState.value[file]?.stage == "converting") failAac(file, d["error"]?.jsonPrimitive?.content ?: "")
+            }
             "desk.message" -> {
                 val m = chatMessage(d) ?: return
                 val list = deskState.value
@@ -522,16 +537,43 @@ object Director {
     fun startClip() {
         val s = statusState.value
         if (runningClip.value != null || linkState.value != LinkState.CONNECTED || capture == null) return
-        val lead = Prefs.settings.value.leadMinutes * 60_000L
-        runningClip.value = (heardSessionMs() - lead).coerceAtLeast(0)
-        pendingNote.value = null
+        // a note still waiting from the clip before: that clip's end marker goes in now
+        if (pendingNote.value != null) skipNote()
+        // it starts at your tap; trim it afterwards to take in more (the sound around it is kept)
+        runningClip.value = heardSessionMs().coerceAtLeast(0)
+        val (name, number) = nextClip()
+        runningName = name to number
         lastSaved.value = null
         vibrate(FeedbackTokens.CLIP_START)
         if (Prefs.settings.value.chapters && s.recActive) scope.launch {
-            val n = (ClipStore.recordings.value.firstOrNull { it.file == capture?.id }?.clips?.size ?: 0) + 1
-            connection?.command("chapter.add", mapOf("name" to JsonPrimitive("Clip $n")))
+            connection?.command("chapter.add", mapOf("name" to JsonPrimitive("Clip $number")))
         }
     }
+
+    /** The name and number the clip started now gets ("2026-11-28 19-02-11", 3). */
+    fun nextClip(): Pair<String, Int> {
+        val s = statusState.value
+        val name = when {
+            s.recActive && s.file.isNotBlank() -> s.file.substringBeforeLast('.')
+            s.nextName.isNotBlank() -> s.nextName
+            else -> java.text.SimpleDateFormat("yyyy-MM-dd HH-mm-ss", java.util.Locale.US).format(java.util.Date())
+        }
+        // the name OBS would give changes every second: clips made before OBS records keep the first one
+        val base = if (s.recActive) name else (idleName?.takeIf { it.second == capture?.id }?.first ?: name.also { idleName = it to capture?.id })
+        val n = ClipStore.recordings.value.sumOf { r -> r.clips.count { it.name == base } }
+        val max = ClipStore.recordings.value.flatMap { it.clips }.filter { it.name == base }.maxOfOrNull { it.number } ?: 0
+        return base to maxOf(n, max) + 1
+    }
+
+    /** What the next clip will be called, for Monitor. */
+    fun nextClipName(): String = runningName?.let { "${it.first} clip ${it.second}" } ?: nextClip().let { "${it.first} clip ${it.second}" }
+
+    private var runningName: Pair<String, Int>? = null
+    /** the name OBS would have given, kept for the clips of this session made while OBS isn't recording */
+    private var idleName: Pair<String, String?>? = null
+    /** a clip's end marker waits for its note: (number, whether OBS was recording when the clip ended) */
+    private var endMarker: Pair<Int, Boolean>? = null
+    private var endMarkerJob: kotlinx.coroutines.Job? = null
 
     /** How long the running clip is so far. */
     fun runningClipMs(): Long = runningClip.value?.let { (heardSessionMs() - it).coerceAtLeast(0) } ?: 0
@@ -551,23 +593,45 @@ object Director {
         val start = runningClip.value ?: return
         val cap = capture ?: run { runningClip.value = null; return }
         val file = cap.id
-        val pad = if (auto == null) Prefs.settings.value.padSeconds * 1000L else 0
-        val end = maxOf(start + 1000, heardSessionMs() + pad)
+        val end = maxOf(start + 1000, heardSessionMs())
         runningClip.value = null
-        val clip = Clip(ClipStore.newId(), start, end, chapterWritten = Prefs.settings.value.chapters && statusState.value.container == "mp4" && statusState.value.recActive)
+        val (name, number) = runningName ?: nextClip()
+        runningName = null
+        val recording = statusState.value.recActive
+        val clip = Clip(ClipStore.newId(), start, end, chapterWritten = Prefs.settings.value.chapters && statusState.value.container == "mp4" && recording,
+            name = name, number = number)
         saveSession()
         ClipStore.addClip(file, clip)
         // close the audio piece being written, so the new clip can be played straight away
         scope.launch(Dispatchers.IO) { cap.flush(end); saveSession() }
         vibrate(FeedbackTokens.CLIP_SAVED)
-        val n = ClipStore.recordings.value.firstOrNull { it.file == file }?.clips?.indexOfFirst { it.id == clip.id }?.plus(1) ?: 0
         val why = when (auto) {
             "net" -> ", ended when the connection dropped"
             "disconnect" -> ", ended when you disconnected"
             else -> ""
         }
-        lastSaved.value = "Clip $n saved, ${len(end - start)} long$why"
-        if (Prefs.settings.value.askNote && auto == null) pendingNote.value = file to clip
+        lastSaved.value = "${clip.fullName()} saved, ${len(end - start)} long$why"
+        // The end marker ("Clip 2 – Choir intro") waits for the note, a minute at most: OBS can
+        // only mark the moment it's told, and can't rename a marker afterwards.
+        endMarker = if (Prefs.settings.value.chapters && recording) number to true else null
+        endMarkerJob?.cancel()
+        if (Prefs.settings.value.askNote && auto == null) {
+            pendingNote.value = file to clip
+            endMarkerJob = scope.launch { delay(60_000); if (pendingNote.value?.second?.id == clip.id) skipNote() }
+        } else {
+            pendingNote.value = null
+            writeEndMarker("")
+        }
+    }
+
+    /** Adds the clip's end marker to the OBS recording, with its note, if OBS is still recording. */
+    private fun writeEndMarker(note: String) {
+        val (n, _) = endMarker ?: return
+        endMarker = null
+        endMarkerJob?.cancel()
+        if (!statusState.value.recActive) return
+        val name = if (note.isBlank()) "Clip $n end" else "Clip $n – ${note.trim()}"
+        scope.launch { connection?.command("chapter.add", mapOf("name" to JsonPrimitive(name.take(120)))) }
     }
 
     fun saveNote(note: String, tags: List<String>) {
@@ -575,10 +639,137 @@ object Director {
         val c = clip.copy(note = note.trim(), tags = tags)
         ClipStore.updateClip(file, c)
         pendingNote.value = null
-        lastSaved.value = "Saved ${tc(c.startMs)} → ${tc(c.endMs)}" + (if (c.note.isNotEmpty()) " · ${c.note}" else "")
+        writeEndMarker(c.note)
+        lastSaved.value = (c.fullName() ?: "Clip") + " saved"
     }
 
-    fun skipNote() { pendingNote.value = null }
+    fun skipNote() {
+        pendingNote.value = null
+        writeEndMarker("")
+    }
+
+    // =============================================================== OBS recordings and their AACs
+
+    /**
+     * The OBS recordings the phone was connected for, newest first, from the sessions' OBS spans
+     * (and entries from before 0.9.0, which were one recording each).
+     */
+    fun obsRecordings(recs: List<Recording>, s: Status): List<ObsRecording> {
+        val found = LinkedHashMap<String, ObsRecording>()
+        fun add(o: ObsRecording) {
+            val had = found[o.file]
+            found[o.file] = if (had == null) o else had.copy(startedAt = minOf(had.startedAt, o.startedAt), durationMs = maxOf(had.durationMs, o.durationMs))
+        }
+        for (r in recs) {
+            if (!r.session) { add(ObsRecording(r.file, r.startedAt, r.durationMs, false)); continue }
+            for (span in r.obs) add(ObsRecording(span.file, r.startedAt + span.fromMs - span.fileStartMs, span.fileStartMs + span.toMs - span.fromMs, false))
+        }
+        if (s.recActive && s.file.isNotBlank()) add(ObsRecording(s.file, System.currentTimeMillis() - s.fileTimeMs, s.fileTimeMs, true))
+        return found.values.map { it.copy(live = s.recActive && it.file == s.file && linkState.value == LinkState.CONNECTED) }.sortedByDescending { it.startedAt }
+    }
+
+    /** Saving an OBS recording as AAC: converting on the PC, then copying to the phone. */
+    data class AacJob(val stage: String, val percent: Int)
+
+    private val aacState = MutableStateFlow<Map<String, AacJob>>(emptyMap())
+    val aacJobs: StateFlow<Map<String, AacJob>> get() = aacState
+    private val aacCopies = HashMap<String, kotlinx.coroutines.Job>()
+    private fun setAac(file: String, job: AacJob?) { aacState.value = if (job == null) aacState.value - file else aacState.value + (file to job) }
+
+    /** Where an OBS recording's AAC is kept on the phone. */
+    fun aacFile(file: String): File = File(File(app.filesDir, "aac").apply { mkdirs() }, file.substringBeforeLast('.') + ".m4a")
+
+    /** Asks the PC to turn a finished recording's sound into AAC (with OBS's own FFmpeg), then copies it here. */
+    fun saveAac(file: String) {
+        if (aacState.value[file] != null) return
+        setAac(file, AacJob("converting", 0))
+        scope.launch {
+            val r = connection?.command("recording.aac", mapOf("file" to JsonPrimitive(file)))
+            if (r == null || !r.ok()) return@launch failAac(file, r?.get("error")?.jsonPrimitive?.content ?: "not_connected")
+            val d = r.data()
+            if (d?.get("state")?.jsonPrimitive?.content == "ready") downloadAac(file, d)
+        }
+    }
+
+    fun cancelAac(file: String) {
+        val job = aacState.value[file] ?: return
+        aacCopies.remove(file)?.cancel()
+        if (job.stage == "converting") scope.launch { connection?.command("recording.aac.cancel", mapOf("file" to JsonPrimitive(file))) }
+        setAac(file, null)
+    }
+
+    fun deleteAac(file: String) { aacFile(file).delete() }
+
+    private fun failAac(file: String, error: String) {
+        setAac(file, null)
+        if (error == "cancelled") return
+        toast(when (error) {
+            "still_recording" -> "OBS is still making that recording. Save it once it stops."
+            "aac_unavailable" -> "The PC can't make AAC files: OBS's FFmpeg isn't the version the plugin expects. Update OBS and the plugin."
+            "unknown_recording" -> "The PC no longer knows that recording (OBS was restarted since)."
+            "recording_missing" -> "That recording isn't on the PC any more."
+            "no_audio" -> "That recording has no sound to save."
+            "busy" -> "The PC is making another AAC file. Try again once it's done."
+            "unknown_command" -> "Update the OBS Director plugin on the PC to save AAC files."
+            "not_connected", "timeout" -> "Not connected to the PC."
+            else -> "The PC couldn't make the AAC file ($error)."
+        })
+    }
+
+    /** Copies the finished AAC from the PC's web port, a piece at a time, with progress. */
+    private fun downloadAac(file: String, d: JsonObject) {
+        val token = d["token"]?.jsonPrimitive?.content ?: return failAac(file, "bad_reply")
+        val port = d["port"]?.jsonPrimitive?.content?.toIntOrNull() ?: 4470
+        val ip = pcState.value?.ip ?: return failAac(file, "not_connected")
+        setAac(file, AacJob("copying", 0))
+        aacCopies[file] = scope.launch(Dispatchers.IO) {
+            val out = aacFile(file)
+            val part = File(out.path + ".part")
+            val ok = runCatching {
+                java.net.Socket().use { sock ->
+                    sock.connect(java.net.InetSocketAddress(ip, port), 5000)
+                    sock.soTimeout = 20_000
+                    sock.getOutputStream().apply {
+                        write("GET /aac/$token HTTP/1.1\r\nHost: $ip:$port\r\nConnection: close\r\n\r\n".toByteArray())
+                        flush()
+                    }
+                    val input = java.io.BufferedInputStream(sock.getInputStream(), 1 shl 16)
+                    fun line(): String {
+                        val sb = StringBuilder()
+                        while (true) { val b = input.read(); if (b < 0 || b == '\n'.code) break; if (b != '\r'.code) sb.append(b.toChar()) }
+                        return sb.toString()
+                    }
+                    check(line().split(' ').getOrNull(1) == "200") { "not found" }
+                    var length = -1L
+                    while (true) {
+                        val h = line()
+                        if (h.isEmpty()) break
+                        if (h.lowercase().startsWith("content-length:")) length = h.substringAfter(':').trim().toLongOrNull() ?: -1
+                    }
+                    var got = 0L
+                    var shown = -1
+                    part.outputStream().use { o ->
+                        val buf = ByteArray(1 shl 16)
+                        while (isActive) {
+                            val n = input.read(buf)
+                            if (n < 0) break
+                            o.write(buf, 0, n)
+                            got += n
+                            val pct = if (length > 0) (got * 100 / length).toInt() else 0
+                            if (pct != shown) { shown = pct; setAac(file, AacJob("copying", pct)) }
+                        }
+                    }
+                    check(isActive && (length < 0 || got == length)) { "incomplete" }
+                }
+                check(part.renameTo(out))
+            }.isSuccess
+            aacCopies.remove(file)
+            if (!ok) part.delete()
+            if (aacState.value[file]?.stage != "copying") return@launch // cancelled
+            setAac(file, null)
+            if (ok) toast("${file.substringBeforeLast('.')}.m4a saved on this phone") else toast("Copying the AAC file from the PC stopped. Try again.")
+        }
+    }
 
     // =============================================================== OBS control
 

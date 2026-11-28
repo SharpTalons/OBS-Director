@@ -56,6 +56,13 @@ import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import kotlin.math.roundToInt
 import dev.sharptalons.obsdirector.audio.Loudness
 import androidx.compose.runtime.LaunchedEffect
@@ -102,85 +109,16 @@ fun MonitorScreen(onOpenRecording: (String) -> Unit, onOpenStream: () -> Unit) {
     val status by Director.status.collectAsState()
     val link by Director.link.collectAsState()
     val settings by Prefs.settings.collectAsState()
-    val recordings by ClipStore.recordings.collectAsState()
-    val clipStart by Director.clipStart.collectAsState()
-    val note by Director.noteFor.collectAsState()
-    val saved by Director.savedMessage.collectAsState()
     @Suppress("UNUSED_VARIABLE") val tick = rememberTicker()
     val lost = link == LinkState.LOST
     val fileTime = if (status.recActive && !lost) Director.nowFileTimeMs() else status.fileTimeMs
-    // clips belong to the session (this connection), not to the OBS recording
-    val sessionId = Director.sessionId
-    val session = recordings.firstOrNull { it.file == sessionId }
-    val clips = session?.clips?.size ?: 0
 
     Column(Modifier.semantics { paneTitle = "Monitor" }, verticalArrangement = Arrangement.spacedBy(12.dp)) {
 
-        // ---------------- Recording ----------------
-        Section {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                val (label, tint) = when {
-                    !status.recActive -> "STOPPED" to Tints.neutral
-                    status.recPaused -> "PAUSED" to Tints.amber
-                    else -> "REC" to Tints.rec
-                }
-                Row(Modifier.clip(RoundedCornerShape(12.dp)).background(tint.bg).padding(horizontal = 10.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                    if (status.recActive) { Box(Modifier.size(8.dp).clip(CircleShape).background(if (status.recPaused) T.warning else T.negative)); Spacer(Modifier.width(6.dp)) }
-                    Text(label, style = Type.label.copy(color = tint.ink, fontWeight = FontWeight.Bold, letterSpacing = 0.6.sp))
-                }
-                Text(status.file.ifBlank { "No recording yet" }, style = Type.small.copy(fontSize = 13.sp), maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
-            Text(Director.tc(fileTime), style = Type.timecode.copy(fontSize = 46.sp, letterSpacing = (-1).sp, color = if (status.recActive && !lost) T.text else T.muted))
+        // ---------------- OBS recording: a compact row; the recording itself stays on the PC ----------------
+        ObsRecordingRow(status, lost, fileTime, settings.holdMs)
 
-            val running = clipStart != null
-            ClipButton(
-                running = running,
-                lengthText = clipLength(Director.runningClipMs()),
-                // clips don't need OBS to be recording: the phone keeps its own copy of the mix
-                enabled = !lost && sessionId != null,
-                hint = when {
-                    lost -> "Reconnecting…"
-                    sessionId == null -> "Waiting for sound from OBS"
-                    else -> "starts ${settings.leadMinutes} min before your tap"
-                },
-            ) { if (running) Director.endClip() else Director.startClip() }
-
-            // One line under the Clip button, always the same height: what just happened and the
-            // one thing to do about it. Nothing appears or disappears, so nothing below moves.
-            var noteOpen by remember { mutableStateOf(false) }
-            LaunchedEffect(note) { noteOpen = note != null }
-            val clipsText = if (clips == 1) "1 clip this session" else if (clips == 0) "No clips yet" else "$clips clips this session"
-            val openSession: (() -> Unit)? = sessionId?.takeIf { clips > 0 }?.let { id -> { onOpenRecording(id) } }
-            val (lineText, action) = when {
-                running -> "Clip running from ${session?.let { clockAt(it, clipStart ?: 0) } ?: ""}" to ("Cancel" to { Director.cancelClip() })
-                note != null -> (saved ?: "Clip saved") to ("Add note" to { noteOpen = true })
-                saved != null -> saved!! to openSession?.let { "See all" to it }
-                else -> clipsText to openSession?.let { "See all" to it }
-            }
-            Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(lineText, style = Type.body.copy(fontSize = 14.sp, color = T.text2), maxLines = 1, overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f).semantics { liveRegion = LiveRegionMode.Polite })
-                action?.let { (label, onClick) ->
-                    Text(label, style = Type.body.copy(color = T.accent, fontWeight = FontWeight.Medium),
-                        modifier = Modifier.height(48.dp).clip(RoundedCornerShape(10.dp)).clickable(role = Role.Button, onClick = onClick)
-                            .padding(horizontal = 12.dp).wrapContentHeight())
-                }
-            }
-            if (noteOpen && note != null) NoteSheet(note!!.second.id) { noteOpen = false }
-
-            // Recording controls: two equal buttons, or one full-width one, always 48 dp tall.
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                if (status.recActive) {
-                    OutlineButton(if (status.recPaused) "Resume" else "Pause", if (status.recPaused) Icons.Outlined.PlayArrow else Icons.Outlined.Pause,
-                        Modifier.weight(1f), enabled = !lost) { Director.recordPause(!status.recPaused) }
-                    HoldButton("Hold to stop", Icons.Outlined.Stop, settings.holdMs, Modifier.weight(1f), enabled = !lost) { Director.recordStop() }
-                } else {
-                    PrimaryButton("Start recording", Icons.Outlined.FiberManualRecord, Modifier.weight(1f), enabled = !lost) { Director.recordStart() }
-                }
-            }
-        }
-
-        ListenSection(lost)
+        ListenSection(lost, onOpenRecording)
 
         // ---------------- Status line: three equal chips, always the same three ----------------
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -224,8 +162,43 @@ private fun BatteryBanner() {
     }
 }
 
+/**
+ * The OBS recording, small: its state, time and name (or the name OBS will give the next one),
+ * and icon buttons. Pause and Stop act only when held, so a stray tap can't touch the take.
+ */
 @Composable
-private fun ListenSection(lost: Boolean) {
+private fun ObsRecordingRow(status: dev.sharptalons.obsdirector.core.Status, lost: Boolean, fileTime: Long, holdMs: Int) {
+    Section(padding = 14.dp, gap = 6.dp) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            val (label, tint) = when {
+                !status.recActive -> "STOPPED" to Tints.neutral
+                status.recPaused -> "PAUSED" to Tints.amber
+                else -> "REC" to Tints.rec
+            }
+            Column(Modifier.weight(1f).semantics(mergeDescendants = true) { heading() }) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(Modifier.clip(RoundedCornerShape(12.dp)).background(tint.bg).padding(horizontal = 8.dp, vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
+                        if (status.recActive) { Box(Modifier.size(7.dp).clip(CircleShape).background(if (status.recPaused) T.warning else T.negative)); Spacer(Modifier.width(5.dp)) }
+                        Text(label, style = Type.label.copy(color = tint.ink, fontWeight = FontWeight.Bold, letterSpacing = 0.6.sp))
+                    }
+                    Text(Director.tc(fileTime), style = Type.timecode.copy(fontSize = 22.sp, color = if (status.recActive && !lost) T.text else T.muted))
+                }
+                Text(if (status.recActive) "${status.file} · hold ${if (status.recPaused) "■ to stop" else "Ⅱ or ■"}" else "OBS recording · next: " + status.nextName.ifBlank { "–" },
+                    style = Type.small.copy(fontSize = 12.sp), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp))
+            }
+            if (status.recActive) {
+                if (status.recPaused) TapIconButton(Icons.Outlined.PlayArrow, "Resume recording", Tints.amber.ink, enabled = !lost) { Director.recordPause(false) }
+                else HoldIconButton(Icons.Outlined.Pause, "Hold to pause recording", holdMs, T.warning, enabled = !lost) { Director.recordPause(true) }
+                HoldIconButton(Icons.Outlined.Stop, "Hold to stop recording", holdMs, T.negative, enabled = !lost) { Director.recordStop() }
+            } else {
+                TapIconButton(Icons.Outlined.FiberManualRecord, "Start recording", T.negative, filled = true, enabled = !lost) { Director.recordStart() }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ListenSection(lost: Boolean, onOpenRecording: (String) -> Unit) {
     val levels by Director.levels.collectAsState()
     val listening by Director.listening.collectAsState()
     val settings by Prefs.settings.collectAsState()
@@ -255,12 +228,31 @@ private fun ListenSection(lost: Boolean) {
         val boosting = vol > Loudness.AS_SENT
         Column {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Volume", style = Type.body.copy(color = T.muted), modifier = Modifier.weight(1f))
+                Text("Volume", style = Type.body.copy(color = T.muted))
+                Text(" · double-tap for as set in OBS", style = Type.small.copy(fontSize = 12.sp), modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text("$vol%", style = Type.mono.copy(fontSize = 14.sp, color = if (boosting) T.warning else T.text))
             }
             Slider(
                 vol.toFloat(), { vol = it.roundToInt(); Director.setVolume(vol, save = false) },
-                Modifier.fillMaxWidth().semantics { stateDescription = "$vol percent. " + Loudness.describe(vol) },
+                Modifier.fillMaxWidth()
+                    // a double tap puts it back to the mix as OBS sends it
+                    .pointerInput(Unit) {
+                        var lastUp = 0L
+                        awaitEachGesture {
+                            awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                            val up = waitForUpOrCancellation(PointerEventPass.Initial) ?: return@awaitEachGesture
+                            if (up.uptimeMillis - lastUp < 320) {
+                                lastUp = 0
+                                vol = Loudness.AS_SENT
+                                Director.setVolume(vol)
+                                dev.sharptalons.obsdirector.core.Feedback.tap()
+                            } else lastUp = up.uptimeMillis
+                        }
+                    }
+                    .semantics {
+                        stateDescription = "$vol percent. " + Loudness.describe(vol)
+                        customActions = listOf(CustomAccessibilityAction("As set in OBS") { vol = Loudness.AS_SENT; Director.setVolume(vol); true })
+                    },
                 valueRange = 1f..100f, onValueChangeFinished = { Director.setVolume(vol) },
                 colors = SliderDefaults.colors(thumbColor = T.text, activeTrackColor = if (boosting) T.warning else T.accent, inactiveTrackColor = T.control),
             )
@@ -292,6 +284,85 @@ private fun ListenSection(lost: Boolean) {
                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Icon(Icons.Outlined.Wifi, null, tint = tint.ink, modifier = Modifier.size(18.dp))
                 Text(text, style = Type.body.copy(fontSize = 13.sp, color = tint.ink), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+        HorizontalDivider(color = T.rule)
+        Clipping(lost, onOpenRecording)
+    }
+}
+
+/**
+ * Clips: recordings of the mix on this phone, started and ended here, whatever OBS is doing.
+ * The Clip button, one line under it, and the latest clips with their Play buttons.
+ */
+@Composable
+private fun Clipping(lost: Boolean, onOpenRecording: (String) -> Unit) {
+    val recordings by ClipStore.recordings.collectAsState()
+    val clipStart by Director.clipStart.collectAsState()
+    val note by Director.noteFor.collectAsState()
+    val saved by Director.savedMessage.collectAsState()
+    val playback by dev.sharptalons.obsdirector.audio.ClipPlayer.playback.collectAsState()
+    @Suppress("UNUSED_VARIABLE") val tick = rememberTicker()
+    val sessionId = Director.sessionId
+    val running = clipStart != null
+    val nextName = if (sessionId != null) Director.nextClipName() else ""
+    ClipButton(
+        running = running,
+        lengthText = clipLength(Director.runningClipMs()),
+        // clips don't need OBS to be recording: the phone records the mix itself
+        enabled = !lost && sessionId != null,
+        hint = when {
+            lost -> "Reconnecting…"
+            sessionId == null -> "Waiting for sound from OBS"
+            else -> nextName
+        },
+    ) { if (running) Director.endClip() else Director.startClip() }
+
+    // One line under the Clip button, always the same height: what just happened and the one
+    // thing to do about it. Nothing appears or disappears, so nothing below moves.
+    var noteOpen by remember { mutableStateOf(false) }
+    LaunchedEffect(note) { noteOpen = note != null }
+    val session = recordings.firstOrNull { it.file == sessionId }
+    val (lineText, action) = when {
+        running -> "Recording $nextName from ${session?.let { clockAt(it, clipStart ?: 0) } ?: ""}" to ("Cancel" to { Director.cancelClip() })
+        note != null -> (saved ?: "Clip saved") to ("Add note" to { noteOpen = true })
+        saved != null -> saved!! to null
+        else -> "Starts at your tap. Trim it later to take in more." to null
+    }
+    Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(lineText, style = Type.body.copy(fontSize = 14.sp, color = T.text2), maxLines = 1, overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f).semantics { liveRegion = LiveRegionMode.Polite })
+        action?.let { (label, onClick) ->
+            Text(label, style = Type.body.copy(color = T.accent, fontWeight = FontWeight.Medium),
+                modifier = Modifier.height(48.dp).clip(RoundedCornerShape(10.dp)).clickable(role = Role.Button, onClick = onClick)
+                    .padding(horizontal = 12.dp).wrapContentHeight())
+        }
+    }
+    if (noteOpen && note != null) NoteSheet(note!!.second.id) { noteOpen = false }
+
+    // the latest clips, to play straight away (the mix is lowered while one plays)
+    val latest = recordings.flatMap { r -> r.clips.map { r to it } }.sortedByDescending { it.second.createdAt }.take(2)
+    if (latest.isNotEmpty()) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Latest clips", style = Type.body.copy(fontSize = 15.sp, fontWeight = FontWeight.Medium), modifier = Modifier.weight(1f).semantics { heading() })
+            Text("See all", style = Type.body.copy(color = T.accent, fontWeight = FontWeight.Medium),
+                modifier = Modifier.height(48.dp).clip(RoundedCornerShape(10.dp)).clickable(role = Role.Button) { onOpenRecording("") }
+                    .padding(horizontal = 12.dp).wrapContentHeight())
+        }
+        latest.forEach { (r, c) ->
+            val key = "${r.file}:${c.id}"
+            val playing = playback.playing && playback.key == key
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Box(Modifier.size(48.dp).clip(CircleShape).background(if (playing) T.accent else T.raised)
+                    .clickable(role = Role.Button) { if (playing) dev.sharptalons.obsdirector.audio.ClipPlayer.stop() else playClip(r, c, key) }
+                    .semantics { contentDescription = (if (playing) "Stop " else "Play ") + clipTitle(r, c) }, contentAlignment = Alignment.Center) {
+                    Icon(if (playing) Icons.Outlined.Stop else Icons.Outlined.PlayArrow, null, tint = if (playing) T.ground else T.text, modifier = Modifier.size(22.dp))
+                }
+                Column(Modifier.weight(1f)) {
+                    Text(clipTitle(r, c), style = Type.body.copy(fontSize = 14.sp, fontWeight = FontWeight.Medium), maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Text(if (playing) "Playing · the mix is lowered ${Prefs.settings.value.duckPct}%" else "${clipLength(c.lengthMs)} · ${clockAt(r, c.startMs)}",
+                        style = Type.small.copy(fontSize = 12.sp, color = if (playing) T.accent else T.muted))
+                }
             }
         }
     }

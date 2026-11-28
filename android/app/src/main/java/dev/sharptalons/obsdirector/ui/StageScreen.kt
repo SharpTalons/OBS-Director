@@ -111,7 +111,7 @@ fun StageScreen(onExit: () -> Unit) {
                 Text("End clip", style = Type.body.copy(fontSize = 18.sp, color = Stage.clipLabel))
             } else {
                 Text("Clip", style = Type.body.copy(fontSize = 26.sp, fontWeight = FontWeight.Medium, color = if (enabled) Stage.text else Stage.muted))
-                Text(if (enabled) "starts ${settings.leadMinutes} min before your tap" else "Start recording to clip",
+                Text(if (enabled) Director.nextClipName() else "Waiting for sound from OBS",
                     style = Type.body.copy(fontSize = 15.sp, color = Stage.hint), modifier = Modifier.padding(top = 6.dp))
             }
         } }

@@ -12,8 +12,24 @@ data class Clip(
     val tags: List<String> = emptyList(),
     val createdAt: Long = System.currentTimeMillis(),
     val chapterWritten: Boolean = false,
+    /** the OBS recording's name when the clip started, or the name OBS would have given one */
+    val name: String = "",
+    /** its number among the clips with that [name]: 1, 2, 3… */
+    val number: Int = 0,
 ) {
     val lengthMs: Long get() = endMs - startMs
+
+    /** "2026-11-28 19-02-11 clip 2 – Choir intro"; null for a clip from before names. */
+    fun fullName(): String? = if (name.isBlank() || number <= 0) null
+        else "$name clip $number" + (if (note.isNotBlank()) " – ${note.trim()}" else "")
+}
+
+/**
+ * One OBS recording the phone was connected for: [file] is its name on the PC, [startedAt] when it
+ * began (wall clock), [live] while OBS is still making it. Worked out from the sessions' OBS spans.
+ */
+data class ObsRecording(val file: String, val startedAt: Long, val durationMs: Long, val live: Boolean) {
+    val baseName: String get() = file.substringBeforeLast('.')
 }
 
 /** A gap in the audio saved on the phone (Wi-Fi drop), in file time. */
@@ -156,6 +172,8 @@ data class Status(
     val renderLag: Long = 0,
     val encodeLag: Long = 0,
     val scene: String = "",
+    /** the name OBS would give a recording started now (Settings, Output, Filename Formatting) */
+    val nextName: String = "",
     /** SystemClock.elapsedRealtime() when this arrived */
     val receivedAt: Long = 0,
 )

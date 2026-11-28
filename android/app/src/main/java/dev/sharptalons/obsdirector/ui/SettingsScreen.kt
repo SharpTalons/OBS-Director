@@ -47,6 +47,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import kotlin.math.roundToInt
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -64,6 +69,7 @@ private sealed class Row(val icon: ImageVector, val label: String) {
     class Choice(icon: ImageVector, label: String, val value: String, val options: List<String>, val pick: (Settings, String) -> Settings) : Row(icon, label)
     class Action(icon: ImageVector, label: String, val value: String, val onClick: () -> Unit) : Row(icon, label)
     class Info(icon: ImageVector, label: String, val value: String) : Row(icon, label)
+    class Slider(icon: ImageVector, label: String, val percent: Int, val set: (Settings, Int) -> Settings) : Row(icon, label)
 }
 
 private class Group(val title: String, val tint: Tint, val rows: List<Row>)
@@ -109,9 +115,8 @@ fun SettingsScreen(onConnect: () -> Unit) {
             Row.Action(Icons.Outlined.Headphones, "Play through", playThrough) { choosingOutput = true },
             Row.Action(Icons.AutoMirrored.Outlined.VolumeUp, "Play a test sound", "Play") { dev.sharptalons.obsdirector.audio.TestSound.play(Director.router) },
             Row.Switch(Icons.Outlined.PlayArrow, "Start listening when connected", s.autoListen) { x, v -> x.copy(autoListen = v) },
-            // turns the mix down while a clip plays, so the clip can be heard over it
-            Row.Choice(Icons.Outlined.VolumeDown, "Lower the mix while a clip plays", if (s.duckPct == 0) "Off" else "${s.duckPct}%",
-                listOf("Off", "20%", "40%", "60%", "80%", "100%")) { x, v -> x.copy(duckPct = if (v == "Off") 0 else v.removeSuffix("%").toInt()) },
+            // turns the live mix down while a clip or an OBS recording's AAC plays, so it can be heard over it
+            Row.Slider(Icons.Outlined.VolumeDown, "Lower the mix while playing", s.duckPct) { x, v -> x.copy(duckPct = v) },
             // Bluetooth always keeps at least 160 ms queued to play smoothly; say so beside the choice
             Row.Choice(Icons.Outlined.Schedule, "Delay",
                 (if (s.bufferMs == 0) "Auto" else "${s.bufferMs} ms") + (if (onBluetooth && s.bufferMs < dev.sharptalons.obsdirector.audio.AudioEngine.BT_CUSHION_MS) " · 160 ms on Bluetooth" else ""),
@@ -144,11 +149,8 @@ fun SettingsScreen(onConnect: () -> Unit) {
             },
         ) else emptyList())),
         Group("Clips", Tints.rec, listOf(
-            Row.Choice(Icons.Outlined.FastRewind, "Start before your tap", "${s.leadMinutes} min", listOf("1 min", "2 min", "3 min", "5 min")) { x, v ->
-                x.copy(leadMinutes = v.removeSuffix(" min").toInt())
-            },
-            Row.Choice(Icons.Outlined.FastForward, "Keep going after End", "${s.padSeconds} s", listOf("0 s", "2 s", "5 s")) { x, v -> x.copy(padSeconds = secs(v).toInt()) },
-            Row.Switch(Icons.Outlined.Bookmark, "Chapter marker in the recording", s.chapters) { x, v -> x.copy(chapters = v) },
+            // "Clip 2" where it starts, "Clip 2 – Choir intro" where it ends (once the note is in)
+            Row.Switch(Icons.Outlined.Bookmark, "Chapter markers in the OBS recording", s.chapters) { x, v -> x.copy(chapters = v) },
             Row.Switch(Icons.Outlined.TaskAlt, "Save the clip list on the PC", s.pcClipLists) { x, v -> x.copy(pcClipLists = v) },
             Row.Choice(Icons.Outlined.IosShare, "Export as", formatLabels[s.exportFormat] ?: s.exportFormat, formatLabels.values.toList()) { x, v ->
                 x.copy(exportFormat = formatLabels.entries.first { it.value == v }.key)
@@ -189,6 +191,7 @@ fun SettingsScreen(onConnect: () -> Unit) {
                         is Row.Choice -> SettingItem(r.icon, g.tint, r.label, divider, value = r.value, onClick = { sheet = r.label })
                         is Row.Action -> SettingItem(r.icon, g.tint, r.label, divider, value = r.value, onClick = r.onClick)
                         is Row.Info -> SettingItem(r.icon, g.tint, r.label, divider, value = r.value)
+                        is Row.Slider -> SliderItem(r, g.tint, divider)
                     }
                 }
             }
@@ -297,4 +300,25 @@ private fun HelpDialog(onDone: () -> Unit) {
         },
         confirmButton = { TextButton(onClick = onDone) { Text("Done", color = T.accent) } },
     )
+}
+
+/** A setting with a 0–100% slider under its name: the value shows as you drag, and saves on release. */
+@Composable
+private fun SliderItem(r: Row.Slider, tint: Tint, divider: Boolean) {
+    var v by remember(r.percent) { mutableStateOf(r.percent.toFloat()) }
+    Column {
+        if (divider) HorizontalDivider(color = T.raised)
+        Column(Modifier.fillMaxWidth().padding(start = 14.dp, end = 14.dp, top = 10.dp, bottom = 4.dp)) {
+            androidx.compose.foundation.layout.Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                TintTile(r.icon, tint)
+                Text(r.label, style = Type.body.copy(fontSize = 15.sp), modifier = Modifier.weight(1f))
+                Text(if (v.roundToInt() == 0) "Off" else "${v.roundToInt()}%", style = Type.body.copy(color = tint.ink))
+            }
+            androidx.compose.material3.Slider(v, { v = (it / 5).roundToInt() * 5f }, Modifier.fillMaxWidth().semantics { contentDescription = r.label },
+                valueRange = 0f..100f, onValueChangeFinished = { Prefs.update { x -> r.set(x, v.roundToInt()) } },
+                colors = androidx.compose.material3.SliderDefaults.colors(thumbColor = T.text, activeTrackColor = tint.ink, inactiveTrackColor = T.control))
+            Text("A clip or an OBS recording's AAC plays over the live mix lowered this much. 100% silences it. Clipping and OBS carry on either way.",
+                style = Type.small.copy(fontSize = 12.sp), modifier = Modifier.padding(bottom = 8.dp))
+        }
+    }
 }
